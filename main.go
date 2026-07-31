@@ -22,17 +22,14 @@ THE SOFTWARE.
 package main
 
 import (
+	"fmt"
 	"github.com/dsub-io/go-open-discogs-batch/cmd"
+	"os"
 )
-
-var (
-	version string
-)
-
-func GetVersion() string {
-	return version
-}
 
 func main() {
-	cmd.Execute()
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "critical error:", err)
+		os.Exit(1)
+	}
 }

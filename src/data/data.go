@@ -3,6 +3,7 @@ package data
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"github.com/dsub-io/go-open-discogs-batch/src/client"
 	"github.com/dsub-io/go-open-discogs-batch/src/file"
 	"github.com/dsub-io/go-open-discogs-batch/src/helper"
@@ -12,7 +13,8 @@ import (
 	"github.com/reactivex/rxgo/v2"
 	"io"
 	"net/url"
-	"path"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -210,6 +212,114 @@ func BatchInsertItems(repo Repository) func(ctx context.Context, i interface{}) 
 	}
 }
 
+// UpdateSelectedData refreshes only the catalog rows needed by this invocation. It performs one
+// bucket listing request and at most one checksum request per selected dump date, preventing the
+// unbounded historical checksum fan-out of the legacy full-catalog refresh.
+func UpdateSelectedData(
+	ctx context.Context,
+	repo Repository,
+	entities []string,
+	dumpMonth string,
+) (int, error) {
+	items, err := client.NewClient().Get(ctx, DiscogsS3BaseUrl).
+		FlatMap(ParseDumpModel(ctx)).
+		Filter(NotNilFilter()).
+		Filter(ValidUriFilter()).
+		Map(PopulateFromUri()).
+		ToSlice(400, rxgo.WithContext(ctx))
+	if err != nil {
+		return -1, err
+	}
+
+	all := make([]*Data, 0, len(items))
+	for _, item := range items {
+		all = append(all, item.(*Data))
+	}
+	candidates := selectRefreshCandidates(all, entities, dumpMonth)
+	checksumDocuments := make(map[time.Time]map[string]string)
+	for _, candidate := range candidates {
+		if _, exists := checksumDocuments[candidate.GeneratedAt]; exists {
+			continue
+		}
+		var checksumURI string
+		for _, item := range all {
+			if item.TargetType == "checksum" && item.GeneratedAt.Equal(candidate.GeneratedAt) {
+				checksumURI = item.Uri
+				break
+			}
+		}
+		if checksumURI == "" {
+			return -1, fmt.Errorf("checksum manifest not found for %s", candidate.GeneratedAt.Format("2006-01-02"))
+		}
+		body, fetchErr := fetchBytes(ctx, checksumDownloadURL(checksumURI))
+		if fetchErr != nil {
+			return -1, fetchErr
+		}
+		checksums := make(map[string]string)
+		for _, line := range strings.Split(string(body), "\n") {
+			if checksum, ok := parseChecksumTextLine(line); ok && checksum.gen.Equal(candidate.GeneratedAt) {
+				checksums[checksum.typ] = checksum.chk
+			}
+		}
+		checksumDocuments[candidate.GeneratedAt] = checksums
+	}
+
+	for _, candidate := range candidates {
+		checksum := checksumDocuments[candidate.GeneratedAt][candidate.TargetType]
+		if checksum == "" {
+			return -1, fmt.Errorf(
+				"checksum not found for %s %s",
+				candidate.GeneratedAt.Format("2006-01-02"),
+				candidate.TargetType,
+			)
+		}
+		candidate.Checksum = checksum
+	}
+	return repo.BatchInsert(candidates)
+}
+
+func selectRefreshCandidates(items []*Data, entities []string, dumpMonth string) []*Data {
+	latest := make(map[string]*Data)
+	selected := make(map[string]bool)
+	for _, entity := range entities {
+		selected[strings.TrimSuffix(strings.ToLower(entity), "s")+"s"] = true
+	}
+	for _, item := range items {
+		if !selected[item.TargetType] {
+			continue
+		}
+		if dumpMonth != "" && item.GeneratedAt.Format("2006-01") != dumpMonth {
+			continue
+		}
+		current := latest[item.TargetType]
+		if current == nil || item.GeneratedAt.After(current.GeneratedAt) {
+			latest[item.TargetType] = item
+		}
+	}
+	candidates := make([]*Data, 0, len(latest))
+	for _, entity := range entities {
+		plural := strings.TrimSuffix(strings.ToLower(entity), "s") + "s"
+		if candidate := latest[plural]; candidate != nil {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return candidates
+}
+
+func fetchBytes(ctx context.Context, uri string) ([]byte, error) {
+	for item := range getClient().Get(ctx, uri).Observe() {
+		if item.Error() {
+			return nil, item.E
+		}
+		body, ok := item.V.([]byte)
+		if !ok {
+			return nil, fmt.Errorf("unexpected response body for %s", uri)
+		}
+		return body, nil
+	}
+	return nil, fmt.Errorf("empty response from %s", uri)
+}
+
 type ImportPlan struct {
 	Resources map[string]string
 	Dumps     []*opendiscogsmodel.DiscogsDump
@@ -218,25 +328,38 @@ type ImportPlan struct {
 func FetchImportPlan(k *koanf.Koanf, dataRepo Repository) (*ImportPlan, error) {
 	plan := &ImportPlan{
 		Resources: make(map[string]string),
-		Dumps:     make([]*opendiscogsmodel.DiscogsDump, 0, len(k.Strings("types"))),
+		Dumps:     make([]*opendiscogsmodel.DiscogsDump, 0, len(k.Strings("entities"))),
 	}
-	year, month := k.String("year"), k.String("month")
-	dataRootDir := k.String("data")
+	dumpMonth := k.String("dump-month")
+	dataRootDir := k.String("data-dir")
+	if err := os.MkdirAll(dataRootDir, 0755); err != nil {
+		return nil, err
+	}
 	handler := file.NewHandler()
-	for _, typ := range k.Strings("types") {
-		d, err := dataRepo.FindByYearMonthType(year, month, typ)
+	for _, entity := range k.Strings("entities") {
+		var (
+			d   *opendiscogsmodel.DiscogsDump
+			err error
+		)
+		if dumpMonth == "" {
+			d, err = dataRepo.FindLatestByType(entity)
+		} else {
+			parts := strings.SplitN(dumpMonth, "-", 2)
+			d, err = dataRepo.FindByYearMonthType(parts[0], parts[1], entity)
+		}
 		if err != nil {
 			return nil, err
 		}
 		var (
 			resourceURI = DiscogsS3BaseUrl + d.URI
-			targetPath  = path.Join(dataRootDir, helper.GetLastUriSegment(d.URI))
+			targetPath  = filepath.Join(dataRootDir, helper.GetLastUriSegment(d.URI))
+			resourceKey = strings.TrimSuffix(entity, "s") + "s"
 		)
 		err = handler.FetchAndCheck(resourceURI, targetPath, d.ChecksumSHA256)
 		if err != nil {
 			return nil, err
 		}
-		plan.Resources[typ] = targetPath
+		plan.Resources[resourceKey] = targetPath
 		plan.Dumps = append(plan.Dumps, d)
 	}
 	return plan, nil

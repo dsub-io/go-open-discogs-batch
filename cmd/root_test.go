@@ -2,148 +2,86 @@ package cmd
 
 import (
 	"errors"
-	"github.com/knadh/koanf"
-	"github.com/knadh/koanf/parsers/json"
-	"github.com/knadh/koanf/parsers/toml"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/spf13/cobra"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"path/filepath"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 )
 
-func Test_FlagMustOverrideEnv(t *testing.T) {
-	t.Setenv("OPEN_DISCOGS_BATCH_DSN", "env_dsn")
+func executeWithoutBatch(t *testing.T, args ...string) {
+	t.Helper()
 	cmd := NewRootCommand()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-	cmd.SetArgs([]string{"--config", "testdata/config.yaml"})
-	assert.NoError(t, cmd.Execute())
-	s, err := cmd.Flags().GetString("config")
-	assert.NoError(t, err)
-	assert.Equal(t, "testdata/config.yaml", s)
-	cmd.SetArgs([]string{"--config", "testdata/config.yaml", "--dsn", "postgres://user:pass@host:5432/data"})
-	assert.NoError(t, cmd.Execute())
-	s, err = cmd.Flags().GetString("config")
-	assert.NoError(t, err)
-	assert.Equal(t, "testdata/config.yaml", s)
+	cmd.SetArgs(args)
+	require.NoError(t, cmd.Execute())
 }
 
-func Test_getMainFunc(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{
-			name: "getMainFunc returns non nil value",
-		},
+func TestPublicDefaults(t *testing.T) {
+	executeWithoutBatch(t)
+
+	require.Equal(t, []string{"artist", "label", "master", "release"}, conf.Strings("entities"))
+	require.Equal(t, 5000, conf.Int("chunk-size"))
+	require.Equal(t, filepath.Join(getHomeDir(new(homeDirSupplier)), ".cache", "open-discogs-batch"), conf.String("data-dir"))
+	require.False(t, conf.Bool("cleanup"))
+}
+
+func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
+	t.Setenv("OPEN_DISCOGS_BATCH_DATABASE_URL", "postgresql://env:pass@db:5432/discogs")
+	t.Setenv("OPEN_DISCOGS_BATCH_ENTITIES", "artist, release")
+	t.Setenv("OPEN_DISCOGS_BATCH_DUMP_MONTH", "2026-07")
+	t.Setenv("OPEN_DISCOGS_BATCH_DATA_DIR", "/env-data")
+	t.Setenv("OPEN_DISCOGS_BATCH_CHUNK_SIZE", "3500")
+	t.Setenv("OPEN_DISCOGS_BATCH_CLEANUP", "true")
+	t.Setenv("OPEN_DISCOGS_BATCH_FORCE", "true")
+	t.Setenv("OPEN_DISCOGS_BATCH_ALLOW_DOWNGRADE", "true")
+
+	executeWithoutBatch(
+		t,
+		"--database-url", "postgresql://cli:pass@db:5432/discogs",
+		"--entities", "label,master",
+		"--chunk-size", "5500",
+		"--data-dir", "/cli-data",
+	)
+
+	require.Equal(t, "postgresql://cli:pass@db:5432/discogs", conf.String("database-url"))
+	require.Equal(t, []string{"label", "master"}, conf.Strings("entities"))
+	require.Equal(t, "2026-07", conf.String("dump-month"))
+	require.Equal(t, "/cli-data", conf.String("data-dir"))
+	require.Equal(t, 5500, conf.Int("chunk-size"))
+	require.True(t, conf.Bool("cleanup"))
+	require.True(t, conf.Bool("force"))
+	require.True(t, conf.Bool("allow-downgrade"))
+	require.False(t, conf.Bool("artists"))
+	require.True(t, conf.Bool("labels"))
+	require.True(t, conf.Bool("masters"))
+	require.False(t, conf.Bool("releases"))
+}
+
+func TestLegacyFlagsAreRejected(t *testing.T) {
+	for _, legacy := range []string{"--config", "--dsn", "--types", "--year", "--month", "--purge", "--new", "--update"} {
+		cmd := NewRootCommand()
+		cmd.SetArgs([]string{legacy})
+		require.Error(t, cmd.Execute(), legacy)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.NotNil(t, getMainFunc())
-		})
-	}
 }
 
-func TestChunkSizePassed(t *testing.T) {
-	t.Run("chunk set via environment", func(t *testing.T) {
-		cmd := NewRootCommand()
-		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		t.Setenv("OPEN_DISCOGS_BATCH_CHUNK", "3500")
-		require.NoError(t, cmd.Execute())
-		require.Equal(t, 3500, conf.Int("chunk"))
-	})
-	t.Run("chunk set via flag", func(t *testing.T) {
-		cmd := NewRootCommand()
-		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		cmd.SetArgs([]string{"--chunk", "5500"})
-		require.NoError(t, cmd.Execute())
-		require.Equal(t, 5500, conf.Int("chunk"))
-	})
+func TestVersionDoesNotRequireDatabaseURL(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"--version"})
+	require.NoError(t, cmd.Execute())
 }
 
-func Test_getParser(t *testing.T) {
-	t.Run(".yaml file gets YamlParser", func(t *testing.T) {
-		_, ok := getParser("test.yaml").(*yaml.YAML)
-		require.True(t, ok)
-		_, ok = getParser("test.yml").(*yaml.YAML)
-		require.True(t, ok)
-	})
-	t.Run(".toml file gets TomlParser", func(t *testing.T) {
-		_, ok := getParser("test.toml").(*toml.TOML)
-		require.True(t, ok)
-		_, ok = getParser("test.tml").(*toml.TOML)
-		require.True(t, ok)
-	})
-	t.Run(".json file gets JsonParser", func(t *testing.T) {
-		_, ok := getParser("test.json").(*json.JSON)
-		require.True(t, ok)
-	})
+func TestGetHomeDir(t *testing.T) {
+	require.NotEmpty(t, getHomeDir(new(homeDirSupplier)))
 }
 
-func Test_load(t *testing.T) {
-	t.Run("must pluralize types", func(t *testing.T) {
-		cmd := NewRootCommand()
-		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		conf = koanf.New(".")
-		cmd.SetArgs([]string{"-t artist,label,master,release"})
-		assert.NoError(t, cmd.Execute())
-		for _, typ := range conf.Strings("types") {
-			require.Equal(t, "s", typ[len(typ)-1:])
-		}
-	})
-	t.Run("must set default types", func(t *testing.T) {
-		cmd := NewRootCommand()
-		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		conf = koanf.New(".")
-		assert.NoError(t, cmd.Execute())
-		types := conf.Strings("types")
-		require.Len(t, types, 4)
-	})
-	t.Run("default type values must be plurals", func(t *testing.T) {
-		cmd := NewRootCommand()
-		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		conf = koanf.New(".")
-		assert.NoError(t, cmd.Execute())
-		for _, typ := range conf.Strings("types") {
-			require.Equal(t, "s", typ[len(typ)-1:])
-		}
-	})
-	t.Run("types must be set as bool", func(t *testing.T) {
-		cmd := NewRootCommand()
-		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		conf = koanf.New(".")
-		cmd.SetArgs([]string{"-t artists,label"})
-		assert.NoError(t, cmd.Execute())
-		require.Len(t, conf.Strings("types"), 2)
-		require.True(t, conf.Bool("artists"))
-		require.True(t, conf.Bool("labels"))
-		require.False(t, conf.Bool("masters"))
-		require.False(t, conf.Bool("releases"))
-	})
-}
+type failingHomeDirSupplier struct{}
 
-func TestExecute(t *testing.T) {
-	origin := getMainFunc
-	defer func() { getMainFunc = origin }()
-	getMainFunc = func() func(cmd *cobra.Command, args []string) error {
-		return func(cmd *cobra.Command, args []string) error {
-			return nil
-		}
-	}
-	assert.NotPanics(t, Execute)
-}
-
-func Test_getHomeDir(t *testing.T) {
-	assert.NotEmpty(t, getHomeDir(new(homeDirSupplier)))
-}
-
-type t1 struct{}
-
-func (t *t1) HomeUserDir() (string, error) {
+func (failingHomeDirSupplier) HomeUserDir() (string, error) {
 	return "", errors.New("test error")
 }
 
-func Test_getHomeDirPanics(t *testing.T) {
-	assert.Panics(t, func() {
-		getHomeDir(new(t1))
-	})
+func TestGetHomeDirPanics(t *testing.T) {
+	require.Panics(t, func() { getHomeDir(failingHomeDirSupplier{}) })
 }

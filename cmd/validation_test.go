@@ -1,204 +1,63 @@
 package cmd
 
 import (
-	"fmt"
-	"github.com/knadh/koanf"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"testing"
+	"time"
+
+	"github.com/knadh/koanf"
+	"github.com/stretchr/testify/require"
 )
 
-func TestValidDsnFormat(t *testing.T) {
-	t.Run("no error when valid postgres dsn format", func(t *testing.T) {
-		assert.NoError(t, ValidDsnFormat("postgres://user:pass@host:5432/db_name?options"))
-		assert.NoError(t, ValidDsnFormat("postgres://user:pass@host:35432/db_name"))
-	})
-	t.Run("rejects mysql dsn format", func(t *testing.T) {
-		assert.Error(t, ValidDsnFormat("mysql://user:pass@host:3306/db_name?options&other=option"))
-		assert.Error(t, ValidDsnFormat("mysql://user:pass@host:33060/db_name"))
-	})
-	t.Run("error when invalid dsn format", func(t *testing.T) {
-		assert.Error(t, ValidDsnFormat("mysql://user:pass@host:port/db_name?options"))
-	})
-	t.Run("error when missing dsn", func(t *testing.T) {
-		assert.Error(t, ValidDsnFormat(""))
-	})
+func TestValidDatabaseURL(t *testing.T) {
+	for _, value := range []string{
+		"postgresql://user:pass@host:5432/db_name?sslmode=require",
+		"postgres://user:p%40ss@host/db_name",
+	} {
+		require.NoError(t, ValidDatabaseURL(value))
+	}
+	for _, value := range []string{
+		"",
+		"mysql://user:pass@host:3306/db",
+		"postgresql://host:5432/db",
+		"postgresql://user:pass@host:5432",
+	} {
+		require.Error(t, ValidDatabaseURL(value))
+	}
 }
 
-func TestValidTypes(t *testing.T) {
-	type args struct {
-		types []string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		{
-			name: "handles missing plural",
-			args: args{[]string{"artist", "label", "master", "release"}},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.NoError(t, err)
-			},
-		},
-		{
-			name: "no error when empty slice",
-			args: args{[]string{}},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.NoError(t, err)
-			},
-		},
-		{
-			name: "error contains all unknown types",
-			args: args{[]string{"first", "second", "third", "fourth"}},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, fmt.Sprintf("unknown types: [%+v]", "first,second,third,fourth"))
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.wantErr(t, ValidTypes(tt.args.types), fmt.Sprintf("ValidTypes(%v)", tt.args.types))
-		})
-	}
+func TestValidEntities(t *testing.T) {
+	require.NoError(t, ValidEntities([]string{"artist", "labels", "master", "release"}))
+	require.ErrorContains(t, ValidEntities(nil), "must not be empty")
+	require.ErrorContains(t, ValidEntities([]string{"artist", "unknown"}), "unknown")
 }
 
 func TestValidChunkSize(t *testing.T) {
-	require.Error(t, ValidChunkSize("-1"))
-	require.Error(t, ValidChunkSize("0"))
-	require.Error(t, ValidChunkSize("x"))
-	require.Error(t, ValidChunkSize(""))
+	for _, value := range []string{"-1", "0", "x", ""} {
+		require.Error(t, ValidChunkSize(value))
+	}
 	require.NoError(t, ValidChunkSize("1"))
 	require.NoError(t, ValidChunkSize("327564344"))
+	require.Error(t, ValidChunkSize("2147483648"))
 }
 
-func TestValidYMD(t *testing.T) {
-	type args struct {
-		y string
-		m string
+func TestValidDumpMonth(t *testing.T) {
+	require.NoError(t, ValidDumpMonth(""))
+	require.NoError(t, ValidDumpMonth("2008-03"))
+	for _, value := range []string{"2008-02", "2026-7", "2026-00", "2026-13", "invalid"} {
+		require.Error(t, ValidDumpMonth(value))
 	}
-	tests := []struct {
-		name    string
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		{
-			name: "invalid year must be reported",
-			args: args{y: "999"},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, "invalid year")
-			},
-		},
-		{
-			name: "invalid month must be reported",
-			args: args{m: "13"},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, "invalid month")
-			},
-		},
-		{
-			name: "invalid year month prints year only",
-			args: args{y: "199x"},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, "invalid year")
-			},
-		},
-		{
-			name: "valid year month does not get error",
-			args: args{y: "1993", m: "08"},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.NoError(t, err)
-			},
-		},
-		{
-			name: "empty args must not get error",
-			args: args{},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.NoError(t, err)
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.wantErr(t, ValidYearMonth(tt.args.y, tt.args.m), fmt.Sprintf("ValidYearMonth(%v, %v)", tt.args.y, tt.args.m))
-		})
-	}
+	require.Error(t, ValidDumpMonth(time.Now().UTC().AddDate(0, 1, 0).Format("2006-01")))
 }
 
-func Test_validator_Validate(t *testing.T) {
-	invalidDsnConfig := koanf.New(".")
-	_ = invalidDsnConfig.Load(rawbytes.Provider([]byte(`dsn: test`)), yaml.Parser())
-	invalidYearMonthConfig := invalidDsnConfig.Copy()
-	_ = invalidYearMonthConfig.Load(rawbytes.Provider([]byte(`
-month: 15
-year: 2020`)), yaml.Parser())
-	invalidTypesConfig := invalidDsnConfig.Copy()
-	_ = invalidTypesConfig.Load(rawbytes.Provider([]byte(`
-types:
-  - what
-  - the
-  - hell`)), yaml.Parser())
-	validConfig := invalidDsnConfig.Copy()
-	_ = validConfig.Load(rawbytes.Provider([]byte(`
-dsn: postgres://user:pass@localhost:8802/hello
-chunk: 3200
-types:
-  - artist
-year: 2021
-month: 12`)), yaml.Parser())
+func TestValidator(t *testing.T) {
+	config := koanf.New(".")
+	require.NoError(t, config.Set("database-url", "postgresql://user:pass@db:5432/discogs"))
+	require.NoError(t, config.Set("entities", []string{"artist"}))
+	require.NoError(t, config.Set("chunk-size", 5000))
+	require.NoError(t, config.Set("dump-month", "2026-07"))
 
-	type args struct {
-		koanf *koanf.Koanf
-	}
-	tests := []struct {
-		name    string
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		{
-			name: "must not pass if dsn is missing",
-			args: args{
-				koanf: koanf.New("."),
-			},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, "missing dsn")
-			},
-		},
-		{
-			name: "must not pass if invalid dsn provided",
-			args: args{invalidDsnConfig},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, "invalid")
-			},
-		},
-		{
-			name: "must not pass if invalid year or month",
-			args: args{invalidYearMonthConfig},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, "15")
-			},
-		},
-		{
-			name: "must not pass if invalid types has been found",
-			args: args{invalidTypesConfig},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorContains(t, err, "what,the,hell")
-			},
-		},
-		{
-			name: "must pass if everything looks normal",
-			args: args{validConfig},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.NoError(t, err)
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := &validator{}
-			tt.wantErr(t, v.Validate(tt.args.koanf), fmt.Sprintf("Validate(%v)", tt.args.koanf))
-		})
-	}
+	require.NoError(t, new(validator).Validate(config))
+
+	require.NoError(t, config.Set("entities", []string{"unknown"}))
+	require.ErrorContains(t, new(validator).Validate(config), "unknown entities")
 }

@@ -48,6 +48,37 @@ func (s *DataRepoSuite) TestFindByYearInvalidFormat() {
 	require.ErrorContains(s.T(), err, "xxxx.xx")
 }
 
+func (s *DataRepoSuite) TestFindLatestByTypeUsesIndependentEntityDate() {
+	s.Prepare()
+	items := []*Data{
+		{
+			ETag:        "latest-label-old",
+			GeneratedAt: time.Date(2098, 1, 1, 0, 0, 0, 0, time.UTC),
+			Checksum:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			TargetType:  "labels",
+			Uri:         "data/2098/discogs_20980101_labels.xml.gz",
+		},
+		{
+			ETag:        "latest-label-new",
+			GeneratedAt: time.Date(2099, 2, 1, 0, 0, 0, 0, time.UTC),
+			Checksum:    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			TargetType:  "label",
+			Uri:         "data/2099/discogs_20990201_labels.xml.gz",
+		},
+	}
+	_, err := s.repo.BatchInsert(items)
+	require.NoError(s.T(), err)
+	s.T().Cleanup(func() {
+		s.DB.Where("etag IN ?", []string{"latest-label-old", "latest-label-new"}).
+			Delete(&opendiscogsmodel.DiscogsDump{})
+	})
+
+	latest, err := s.repo.FindLatestByType("labels")
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "latest-label-new", latest.ETag)
+	require.Equal(s.T(), "label", latest.EntityType)
+}
+
 func (s *DataRepoSuite) TestBatchInsert() {
 	s.Prepare()
 	var (
