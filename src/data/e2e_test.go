@@ -11,7 +11,8 @@ import (
 	"time"
 )
 
-var e2eChecksumManifestURL = DiscogsS3BaseUrl + "data/2026/discogs_20260701_CHECKSUM.txt"
+const e2eChecksumManifestURL = "https://data.discogs.com/?download=" +
+	"data%2F2026%2Fdiscogs_20260701_CHECKSUM.txt"
 
 func TestDiscogsChecksumManifestIsReachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
