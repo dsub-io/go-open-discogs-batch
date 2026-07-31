@@ -2,7 +2,7 @@ package database
 
 import (
 	"fmt"
-	"github.com/state303/go-discogs/internal/testutils"
+	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

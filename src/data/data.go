@@ -3,12 +3,13 @@ package data
 import (
 	"bytes"
 	"context"
+	"github.com/dsub-io/go-open-discogs-batch/src/client"
+	"github.com/dsub-io/go-open-discogs-batch/src/file"
+	"github.com/dsub-io/go-open-discogs-batch/src/helper"
+	"github.com/dsub-io/go-open-discogs-batch/src/xmlparser"
+	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
 	"github.com/knadh/koanf"
 	"github.com/reactivex/rxgo/v2"
-	"github.com/state303/go-discogs/src/client"
-	"github.com/state303/go-discogs/src/file"
-	"github.com/state303/go-discogs/src/helper"
-	"github.com/state303/go-discogs/src/xmlparser"
 	"io"
 	"path"
 	"regexp"
@@ -203,8 +204,16 @@ func BatchInsertItems(repo Repository) func(ctx context.Context, i interface{}) 
 	}
 }
 
-func FetchFiles(k *koanf.Koanf, dataRepo Repository) (map[string]string, error) {
-	typeResourceMap := make(map[string]string)
+type ImportPlan struct {
+	Resources map[string]string
+	Dumps     []*opendiscogsmodel.DiscogsDump
+}
+
+func FetchImportPlan(k *koanf.Koanf, dataRepo Repository) (*ImportPlan, error) {
+	plan := &ImportPlan{
+		Resources: make(map[string]string),
+		Dumps:     make([]*opendiscogsmodel.DiscogsDump, 0, len(k.Strings("types"))),
+	}
 	year, month := k.String("year"), k.String("month")
 	dataRootDir := k.String("data")
 	handler := file.NewHandler()
@@ -214,14 +223,23 @@ func FetchFiles(k *koanf.Koanf, dataRepo Repository) (map[string]string, error) 
 			return nil, err
 		}
 		var (
-			resourceURI = DiscogsS3BaseUrl + d.Uri
-			targetPath  = path.Join(dataRootDir, helper.GetLastUriSegment(d.Uri))
+			resourceURI = DiscogsS3BaseUrl + d.URI
+			targetPath  = path.Join(dataRootDir, helper.GetLastUriSegment(d.URI))
 		)
-		err = handler.FetchAndCheck(resourceURI, targetPath, d.Checksum)
+		err = handler.FetchAndCheck(resourceURI, targetPath, d.ChecksumSHA256)
 		if err != nil {
 			return nil, err
 		}
-		typeResourceMap[typ] = targetPath
+		plan.Resources[typ] = targetPath
+		plan.Dumps = append(plan.Dumps, d)
 	}
-	return typeResourceMap, nil
+	return plan, nil
+}
+
+func FetchFiles(k *koanf.Koanf, dataRepo Repository) (map[string]string, error) {
+	plan, err := FetchImportPlan(k, dataRepo)
+	if err != nil {
+		return nil, err
+	}
+	return plan.Resources, nil
 }

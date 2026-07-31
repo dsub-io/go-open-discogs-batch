@@ -1,0 +1,66 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build, test, race, and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'The following files need gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Verify module metadata
+        run: |
+          set -euo pipefail
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Vet packages
+        run: go vet ./...
+
+      - name: Test with race detector and coverage
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Enforce coverage gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          total="$(
+            go tool cover -func=coverage.out |
+              awk '/^total:/ { gsub("%", "", $3); print $3 }'
+          )"
+          awk -v total="$total" 'BEGIN {
+            minimum = 65.0
+            if (total + 0 < minimum) {
+              printf "coverage %.1f%% is below %.1f%%\n", total, minimum
+              exit 1
+            }
+            printf "coverage %.1f%% meets %.1f%% gate\n", total, minimum
+          }'

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/dsub-io/go-open-discogs-batch/src/batch"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/parsers/toml"
@@ -13,15 +14,14 @@ import (
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"github.com/state303/go-discogs/src/batch"
 	"os"
 	"strings"
 	"time"
 )
 
-const Prefix = "GO_DISCOGS_"
+const Prefix = "OPEN_DISCOGS_BATCH_"
 
-const versionPrintPrefix = "go-discogs"
+const versionPrintPrefix = "go-open-discogs-batch"
 
 var version string
 var conf = koanf.New(".")
@@ -38,10 +38,10 @@ func Execute() {
 
 func NewRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "go-discogs",
-		Short: "A simple discogs data dump batch written in Go",
-		Long: `go-discogs is a data dump batch application written in Go.
-Currently supports databases: PostgresQL, MySQL.`,
+		Use:   "go-open-discogs-batch",
+		Short: "Import OpenDiscogs data dumps into PostgreSQL",
+		Long: `go-open-discogs-batch imports selected OpenDiscogs data dumps
+into the canonical PostgreSQL schema published by open-discogs-model.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return load(cmd.Flags(), conf)
 		},
@@ -50,7 +50,7 @@ Currently supports databases: PostgresQL, MySQL.`,
 	f := rootCmd.Flags()
 	y, m := time.Now().Format("2006"), time.Now().Format("01")
 	home := getHomeDir(new(homeDirSupplier))
-	home += sep + "go-discogs"
+	home += sep + "go-open-discogs-batch"
 	f.BoolP("new", "n", false, "generates tables before batch")
 	f.StringP("config", "c", home+sep+"config.yaml", "config file path")
 	f.StringP("data", "d", home, "data file dir")
@@ -61,7 +61,9 @@ Currently supports databases: PostgresQL, MySQL.`,
 	f.IntP("chunk", "b", 5000, "chunk size")
 	f.BoolP("update", "u", false, "update data repo")
 	f.BoolP("purge", "p", false, "purge files after success")
-	f.StringP("dsn", "s", "", "data source name. expects format of (postgres|mysql)://root:pass@localhost:5432/dbname")
+	f.BoolP("force", "f", false, "rerun a manifest that already completed successfully")
+	f.Bool("allow-downgrade", false, "allow an older entity dump and record the override")
+	f.StringP("dsn", "s", "", "PostgreSQL data source name")
 	return rootCmd
 }
 
@@ -74,7 +76,7 @@ var getMainFunc = func() func(cmd *cobra.Command, args []string) error {
 		if err := new(validator).Validate(conf); err != nil {
 			return err
 		}
-		return new(batch.Runner).Run(context.Background(), conf)
+		return (&batch.Runner{Version: version}).Run(context.Background(), conf)
 	}
 }
 

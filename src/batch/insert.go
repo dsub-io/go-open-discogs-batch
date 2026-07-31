@@ -3,12 +3,12 @@ package batch
 import (
 	"context"
 	"fmt"
+	"github.com/dsub-io/go-open-discogs-batch/src/cache"
+	"github.com/dsub-io/go-open-discogs-batch/src/helper"
+	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/reactivex/rxgo/v2"
-	"github.com/state303/go-discogs/model"
-	"github.com/state303/go-discogs/src/cache"
-	"github.com/state303/go-discogs/src/helper"
-	"github.com/state303/go-discogs/src/reader"
-	"github.com/state303/go-discogs/src/result"
 )
 
 func InsertSimple[F, T any](order Order, topic string, localName string) result.Result {

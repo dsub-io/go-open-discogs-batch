@@ -2,15 +2,15 @@ package batch
 
 import (
 	"fmt"
-	"github.com/state303/go-discogs/model"
-	"github.com/state303/go-discogs/src/cache"
-	"github.com/state303/go-discogs/src/helper"
-	"github.com/state303/go-discogs/src/reader"
-	"github.com/state303/go-discogs/src/result"
-	"github.com/state303/go-discogs/src/unique"
+	"github.com/dsub-io/go-open-discogs-batch/src/helper"
+	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/dsub-io/go-open-discogs-batch/src/unique"
+	"github.com/dsub-io/open-discogs-model/model"
 	"gorm.io/gorm/clause"
 	"strings"
 	"sync"
+	"time"
 )
 
 // TODO: double check ptr exceptions on reference
@@ -64,17 +64,17 @@ func doInsertReleases(order Order, res chan result.Result, wg *sync.WaitGroup) f
 		var (
 			g   = make([]*model.Genre, 0)
 			s   = make([]*model.Style, 0)
-			rel = make([]*model.Release, 0)
-			ra  = make([]*model.ReleaseArtist, 0)
-			rca = make([]*model.ReleaseCreditedArtist, 0)
-			rc  = make([]*model.ReleaseContract, 0)
-			rf  = make([]*model.ReleaseFormat, 0)
-			rs  = make([]*model.ReleaseStyle, 0)
-			rg  = make([]*model.ReleaseGenre, 0)
-			ri  = make([]*model.ReleaseIdentifier, 0)
-			rt  = make([]*model.ReleaseTrack, 0)
-			rv  = make([]*model.ReleaseVideo, 0)
-			rl  = make([]*model.LabelRelease, 0)
+			rel = make([]*model.ReleaseItem, 0)
+			ra  = make([]*model.ReleaseItemArtist, 0)
+			rca = make([]*model.ReleaseItemCreditedArtist, 0)
+			rw  = make([]*model.ReleaseItemWork, 0)
+			rf  = make([]*model.ReleaseItemFormat, 0)
+			rs  = make([]*model.ReleaseItemStyle, 0)
+			rg  = make([]*model.ReleaseItemGenre, 0)
+			ri  = make([]*model.ReleaseItemIdentifier, 0)
+			rt  = make([]*model.ReleaseItemTrack, 0)
+			rv  = make([]*model.ReleaseItemVideo, 0)
+			rl  = make([]*model.LabelReleaseItem, 0)
 		)
 
 		for _, rr := range rrs {
@@ -92,19 +92,6 @@ func doInsertReleases(order Order, res chan result.Result, wg *sync.WaitGroup) f
 			Clauses(clause.OnConflict{DoNothing: true}).
 			CreateInBatches(filterStyles(s), order.getChunkSize())
 
-		var fg []*model.Genre
-		var fs []*model.Style
-
-		order.getDB().Find(&fs)
-		order.getDB().Find(&fg)
-
-		for _, v := range fs {
-			cache.StyleCache.Store(v.Name, v.ID)
-		}
-		for _, v := range fg {
-			cache.GenreCache.Store(v.Name, v.ID)
-		}
-
 		for _, rr := range rrs {
 			if rr == nil {
 				continue
@@ -113,7 +100,7 @@ func doInsertReleases(order Order, res chan result.Result, wg *sync.WaitGroup) f
 			ra = append(ra, rr.GetReleaseArtists()...)
 			rg = append(rg, rr.GetReleaseGenres()...)
 			rs = append(rs, rr.GetReleaseStyles()...)
-			rc = append(rc, rr.GetContracts()...)
+			rw = append(rw, rr.GetWorks()...)
 			rl = append(rl, rr.GetLabels()...)
 			rf = append(rf, rr.GetFormats()...)
 			ri = append(ri, rr.GetIdentifiers()...)
@@ -124,9 +111,35 @@ func doInsertReleases(order Order, res chan result.Result, wg *sync.WaitGroup) f
 
 		go func(res chan result.Result) {
 			defer wg.Done()
-			res <- writeThenReport(order, wg, rel, ra, rc, rs, rg, rl, rf, ri, rt, rv, rca)
+			written := writeThenReport(order, wg, rel, ra, rw, rs, rg, rl, rf, ri, rt, rv, rca)
+			if !written.IsErr() {
+				written = written.Sum(updateMasterMainReleases(order, rrs))
+			}
+			res <- written
 		}(res)
 	}
+}
+
+func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) result.Result {
+	updated := 0
+	for _, release := range releases {
+		if release == nil || !release.MasterInfo.IsMaster || release.MasterInfo.MasterID == nil {
+			continue
+		}
+		tx := order.getDB().
+			Model(&model.Master{}).
+			Where("id = ?", *release.MasterInfo.MasterID).
+			Where("main_release_id IS DISTINCT FROM ?", release.ID).
+			Updates(map[string]any{
+				"main_release_id":  release.ID,
+				"last_modified_at": time.Now().UTC(),
+			})
+		if tx.Error != nil {
+			return result.NewResult(updated, tx.Error)
+		}
+		updated += int(tx.RowsAffected)
+	}
+	return result.NewResult(updated, nil)
 }
 
 func filterGenres(genres []*model.Genre) []*model.Genre {
@@ -135,9 +148,7 @@ func filterGenres(genres []*model.Genre) []*model.Genre {
 		if name := strings.TrimSpace(v.Name); len(name) == 0 {
 			continue
 		}
-		if _, ok := cache.GenreCache.Load(v); !ok {
-			r = append(r, v)
-		}
+		r = append(r, v)
 	}
 	return r
 }
@@ -148,9 +159,7 @@ func filterStyles(styles []*model.Style) []*model.Style {
 		if name := strings.TrimSpace(v.Name); len(name) == 0 {
 			continue
 		}
-		if _, ok := cache.StyleCache.Load(v); !ok {
-			r = append(r, v)
-		}
+		r = append(r, v)
 	}
 	return r
 }

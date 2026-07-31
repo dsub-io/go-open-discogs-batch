@@ -3,7 +3,7 @@ package xmlparser
 import (
 	"bytes"
 	"context"
-	"github.com/state303/go-discogs/internal/test/resource"
+	"github.com/dsub-io/go-open-discogs-batch/internal/test/resource"
 	"github.com/stretchr/testify/assert"
 	"io"
 	"testing"

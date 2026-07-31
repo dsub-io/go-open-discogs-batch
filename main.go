@@ -1,5 +1,5 @@
 /*
-Copyright © 2022 Seunghyun Bosco Bae <state303@dsub.io>
+Copyright © 2022 state303 <state303@dsub.io>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@ THE SOFTWARE.
 package main
 
 import (
-	"github.com/state303/go-discogs/cmd"
+	"github.com/dsub-io/go-open-discogs-batch/cmd"
 )
 
 var (
@@ -35,29 +35,4 @@ func GetVersion() string {
 
 func main() {
 	cmd.Execute()
-	//NOTE >> remainders for model generation
-
-	//g := gen.NewGenerator(gen.Config{
-	//	OutPath:           "./model",
-	//	OutFile:           "",
-	//	ModelPkgPath:      "",
-	//	WithUnitTest:      true,
-	//	FieldNullable:     true,
-	//	FieldCoverable:    true,
-	//	FieldSignable:     true,
-	//	FieldWithIndexTag: true,
-	//	FieldWithTypeTag:  true,
-	//	Mode:              gen.WithDefaultQuery | gen.WithQueryInterface,
-	//})
-	//
-	//dsn := os.Getenv("gorm_init_dsn")
-	//db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	//if err != nil {
-	//	fmt.Println("error:", err.Error())
-	//	return
-	//}
-	//g.UseDB(db)
-	//g.GenerateAllTable()
-	//
-	//g.Execute()
 }

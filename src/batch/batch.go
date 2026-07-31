@@ -1,8 +1,8 @@
 package batch
 
 import (
-	"github.com/state303/go-discogs/src/database"
-	"github.com/state303/go-discogs/src/result"
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"gorm.io/gorm"
 )
 
