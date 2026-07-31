@@ -28,5 +28,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run single-request Discogs data end-to-end test
-        run: go test -tags=e2e -run '^TestDiscogsDumpObjectServesGzipBytes$' -count=1 ./src/data
+      - name: Run dump-to-PostgreSQL end-to-end tests
+        run: >-
+          go test -tags=e2e
+          -run '^(TestBatchE2E|TestImportExecutionCoordinator)$'
+          -count=1
+          ./src/batch

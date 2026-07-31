@@ -87,8 +87,9 @@ go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
 Pull requests run formatting, module consistency, vet, race detection, unit and
 PostgreSQL integration tests, and a coverage gate. The separate E2E workflow
-makes one two-byte ranged request to a public Discogs dump object and runs only
-on GitHub-hosted `ubuntu-latest`.
+imports the complete fixture into PostgreSQL, verifies idempotent reruns and
+entity admission rules, and runs only on GitHub-hosted `ubuntu-latest`. It does
+not depend on Discogs' current Cloudflare and S3 access policy.
 
 Pull request titles and commits must use Conventional Commits. Release Please
 publishes release artifacts only for release-relevant commit types; documentation
