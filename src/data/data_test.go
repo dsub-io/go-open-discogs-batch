@@ -245,20 +245,25 @@ func TestUpdateData(t *testing.T) {
 	data := resource.Read("testdata/update-data-test.xml")
 	server := testserver.NewServer(func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if len(path) == 0 || path == "/" {
-			_, _ = w.Write(data)
-		} else if path == "/data/2008/discogs_20080309_CHECKSUM.txt" {
+		if r.URL.Query().Get("download") == "data/2008/discogs_20080309_CHECKSUM.txt" {
 			_, _ = w.Write([]byte(`8c40390a3e07b60e4eaa51dfb665a20a41a5ffc337644fb4420c6adea8ed8f50 *discogs_20080309_artists.xml.gz
 36772fdcfd019c995fb16f0020a8876df96f522f76de1acfa632299255664e59 *discogs_20080309_labels.xml.gz
 e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_20080309_releases.xml.gz\n`))
+		} else if len(path) == 0 || path == "/" {
+			_, _ = w.Write(data)
 		}
 	})
 	defer server.Close()
 
 	t.Run("UpdateDate updates items", func(t *testing.T) {
-		origin := DiscogsS3BaseUrl
-		defer func() { DiscogsS3BaseUrl = origin }()
+		s3Origin := DiscogsS3BaseUrl
+		dataOrigin := DiscogsDataBaseURL
+		defer func() {
+			DiscogsS3BaseUrl = s3Origin
+			DiscogsDataBaseURL = dataOrigin
+		}()
 		DiscogsS3BaseUrl = server.URL + "/"
+		DiscogsDataBaseURL = server.URL + "/"
 		repo := &RepositoryStub{items: make([]*Data, 0)}
 		updateCount, err := UpdateData(context.Background(), repo)
 		require.NoError(t, err)

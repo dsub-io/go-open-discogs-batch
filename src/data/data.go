@@ -11,6 +11,7 @@ import (
 	"github.com/knadh/koanf"
 	"github.com/reactivex/rxgo/v2"
 	"io"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -19,6 +20,7 @@ import (
 )
 
 var DiscogsS3BaseUrl = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com/"
+var DiscogsDataBaseURL = "https://data.discogs.com/"
 
 var dumpUriPattern = regexp.MustCompile(`^data/(\d{4})/discogs_(\d{8})_(\w+).(.*)$`)
 var checksumPattern = regexp.MustCompile(`^([^ ]+) +.*(\d{8})_([^.]+).*$`)
@@ -118,7 +120,7 @@ func DispatchChecksumFetch() func(context.Context, interface{}) (interface{}, er
 			go func() {
 				defer checksumFetchWg.Done()
 				select {
-				case v := <-getClient().Get(ctx, DiscogsS3BaseUrl+dump.Uri).Observe():
+				case v := <-getClient().Get(ctx, checksumDownloadURL(dump.Uri)).Observe():
 					if !v.Error() {
 						storeChecksum(string(v.V.([]byte)))
 					}
@@ -129,6 +131,10 @@ func DispatchChecksumFetch() func(context.Context, interface{}) (interface{}, er
 		}
 		return i, nil
 	}
+}
+
+func checksumDownloadURL(uri string) string {
+	return DiscogsDataBaseURL + "?download=" + url.QueryEscape(uri)
 }
 
 func SetChecksumValues(m map[time.Time]map[string]string) func(ctx context.Context, i interface{}) (interface{}, error) {

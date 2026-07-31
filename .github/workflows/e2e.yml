@@ -29,4 +29,4 @@ jobs:
           cache: true
 
       - name: Run single-request Discogs data end-to-end test
-        run: go test -tags=e2e -run '^TestDiscogsChecksumManifestIsReachable$' -count=1 ./src/data
+        run: go test -tags=e2e -run '^TestDiscogsDumpObjectServesGzipBytes$' -count=1 ./src/data

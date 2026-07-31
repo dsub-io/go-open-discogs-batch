@@ -3,6 +3,7 @@
 package data
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -11,17 +12,17 @@ import (
 	"time"
 )
 
-const e2eChecksumManifestURL = "https://data.discogs.com/?download=" +
-	"data%2F2026%2Fdiscogs_20260701_CHECKSUM.txt"
+const e2eDumpObjectURL = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com/" +
+	"data/2026/discogs_20260701_releases.xml.gz"
 
-func TestDiscogsChecksumManifestIsReachable(t *testing.T) {
+func TestDiscogsDumpObjectServesGzipBytes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	request, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		e2eChecksumManifestURL,
+		e2eDumpObjectURL,
 		nil,
 	)
 	if err != nil {
@@ -31,32 +32,28 @@ func TestDiscogsChecksumManifestIsReachable(t *testing.T) {
 		"User-Agent",
 		"GoOpenDiscogsBatch-E2E/1.0 (+https://github.com/dsub-io/go-open-discogs-batch)",
 	)
+	request.Header.Set("Range", "bytes=0-1")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = response.Body.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4096))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusPartialContent {
 		t.Fatalf(
-			"Discogs checksum manifest status = %d, want 200: %s",
+			"Discogs dump object status = %d, want 206: %s",
 			response.StatusCode,
 			string(body),
 		)
 	}
-	manifest := string(body)
-	for _, fileName := range []string{
-		"discogs_20260701_artists.xml.gz",
-		"discogs_20260701_labels.xml.gz",
-		"discogs_20260701_masters.xml.gz",
-		"discogs_20260701_releases.xml.gz",
-	} {
-		if !strings.Contains(manifest, fileName) {
-			t.Fatalf("Discogs checksum manifest is missing %s", fileName)
-		}
+	if got := response.Header.Get("Content-Range"); !strings.HasPrefix(got, "bytes 0-1/") {
+		t.Fatalf("Discogs dump Content-Range = %q, want bytes 0-1/...", got)
+	}
+	if !bytes.Equal(body, []byte{0x1f, 0x8b}) {
+		t.Fatalf("Discogs dump prefix = %x, want gzip magic 1f8b", body)
 	}
 }
