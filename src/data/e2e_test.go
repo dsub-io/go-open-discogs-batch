@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const e2eChecksumManifestURL = DiscogsS3BaseUrl + "data/2026/discogs_20260701_CHECKSUM.txt"
+var e2eChecksumManifestURL = DiscogsS3BaseUrl + "data/2026/discogs_20260701_CHECKSUM.txt"
 
 func TestDiscogsChecksumManifestIsReachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -36,12 +36,16 @@ func TestDiscogsChecksumManifestIsReachable(t *testing.T) {
 	}
 	defer func() { _ = response.Body.Close() }()
 
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("Discogs checksum manifest status = %d, want 200", response.StatusCode)
-	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf(
+			"Discogs checksum manifest status = %d, want 200: %s",
+			response.StatusCode,
+			string(body),
+		)
 	}
 	manifest := string(body)
 	for _, fileName := range []string{

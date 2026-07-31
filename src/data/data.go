@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var DiscogsS3BaseUrl = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/"
+var DiscogsS3BaseUrl = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com/"
 
 var dumpUriPattern = regexp.MustCompile(`^data/(\d{4})/discogs_(\d{8})_(\w+).(.*)$`)
 var checksumPattern = regexp.MustCompile(`^([^ ]+) +.*(\d{8})_([^.]+).*$`)
