@@ -1,78 +1,84 @@
 # go-open-discogs-batch
 
-`go-open-discogs-batch` imports selected OpenDiscogs data dumps into PostgreSQL.
-It uses the canonical schema and generated Go models published by
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model), so Go and
-Java importers write the same database contract.
+`go-open-discogs-batch` imports the public OpenDiscogs monthly dumps into
+PostgreSQL. It uses the canonical schema and generated Go models from
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model), so the Go
+and Java importers write the same database contract.
 
-## Import safety
+This is an independent DSUB project. It is not affiliated with or endorsed by
+Discogs. The Discogs name identifies only the public data source.
 
-Each run records an immutable manifest containing the exact dump date, SHA-256
-checksum, source URI, size, and ETag for every selected entity.
+## Import behavior and safety
 
-- A manifest that already completed successfully is skipped.
-- `--force` reruns that same manifest, while preserving idempotent database state.
-- An older dump is rejected even with `--force`.
-- `--allow-downgrade` is the separate, explicit override for older dumps, and the
+- Schema migrations and the dump catalog refresh run automatically.
+- Artist, label, master, and release select their newest available dump
+  independently unless an exact `--dump-month` is requested.
+- Every run records the selected dump dates, SHA-256 checksums, source URIs,
+  sizes, and stable identifiers as one immutable manifest.
+- A manifest that already succeeded is skipped. `--force` reruns that same
+  manifest without changing the idempotent database result.
+- An older entity dump is rejected unless `--allow-downgrade` is supplied; the
   override is recorded in import history.
-- PostgreSQL advisory locks are acquired in canonical entity order. Runs for
-  disjoint entity sets may proceed together; a run that overlaps any active
-  entity fails before modifying data.
-- Artists, labels, masters, and releases keep independent successful checkpoints,
-  because Discogs may publish those dumps on different dates.
+- PostgreSQL advisory locks prevent concurrent runs from updating an overlapping
+  entity set. Runs with disjoint entity sets may proceed together.
+- Downloads are retained by default. `--cleanup` deletes only the selected dump
+  files after a successful import or successful-manifest skip. Failed imports
+  retain their files for retry.
+
+If the upstream catalog refresh fails, the importer tries the catalog already
+stored in PostgreSQL. It fails if that catalog cannot satisfy the request.
 
 ## Requirements
 
 - PostgreSQL
-- Go 1.26 or a published release binary/container
-
-The application applies the versioned migrations embedded in
-`open-discogs-model` when `--new` is supplied.
+- Go 1.26 for source builds, or a published binary/container
 
 ## Usage
 
 ```shell
 go-open-discogs-batch \
-  --dsn 'postgresql://user:password@localhost:5432/open_discogs' \
-  --new \
-  --update \
-  --year 2026 \
-  --month 7 \
-  --types artists,labels,masters,releases
+  --database-url 'postgresql://user:password@localhost:5432/open_discogs' \
+  --entities artist,label,master,release
 ```
 
-Important options:
+Use `--dump-month=2026-07` to require that exact month. Without it, each selected
+entity uses its own latest available dump.
 
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `--dsn`, `-s` | required | PostgreSQL connection URL |
-| `--types`, `-t` | all entities | Selected entity dumps |
-| `--year`, `-y` | current year | Catalog year |
-| `--month`, `-m` | current month | Catalog month |
-| `--data`, `-d` | user data directory | Download cache |
-| `--chunk`, `-b` | `5000` | Insert chunk size |
-| `--update`, `-u` | `false` | Refresh the upstream dump catalog |
-| `--new`, `-n` | `false` | Apply canonical schema migrations |
-| `--purge`, `-p` | `false` | Delete downloaded files after success |
-| `--force`, `-f` | `false` | Rerun an already-successful manifest |
-| `--allow-downgrade` | `false` | Permit and audit an older entity dump |
+| Option | Environment variable | Default | Purpose |
+| --- | --- | --- | --- |
+| `--database-url` | `OPEN_DISCOGS_BATCH_DATABASE_URL` | required | PostgreSQL URI including percent-encoded credentials |
+| `--entities`, `-e` | `OPEN_DISCOGS_BATCH_ENTITIES` | all four | Comma-separated `artist`, `label`, `master`, `release` |
+| `--dump-month`, `-m` | `OPEN_DISCOGS_BATCH_DUMP_MONTH` | latest per entity | Exact dump month in `yyyy-MM` form |
+| `--data-dir` | `OPEN_DISCOGS_BATCH_DATA_DIR` | `~/.cache/open-discogs-batch` | Download directory |
+| `--chunk-size`, `-b` | `OPEN_DISCOGS_BATCH_CHUNK_SIZE` | `5000` | Import chunk size |
+| `--cleanup`, `-c` | `OPEN_DISCOGS_BATCH_CLEANUP` | `false` | Delete downloads after success |
+| `--force`, `-f` | `OPEN_DISCOGS_BATCH_FORCE` | `false` | Rerun an already-successful manifest |
+| `--allow-downgrade` | `OPEN_DISCOGS_BATCH_ALLOW_DOWNGRADE` | `false` | Permit and audit older entity dumps |
+| `--help`, `-h` | — | — | Show help |
+| `--version`, `-v` | — | — | Show version |
 
-Configuration may also come from YAML, TOML, or JSON via `--config`. Environment
-variables use the `OPEN_DISCOGS_BATCH_` prefix; for example:
-
-```shell
-export OPEN_DISCOGS_BATCH_DSN='postgresql://user:password@localhost:5432/open_discogs'
-go-open-discogs-batch --new --update
-```
+Command-line options take precedence over environment variables, which take
+precedence over defaults. The two importer implementations accept this same
+public contract. Configuration files and the former `new`, `update`, `purge`,
+`dsn`, `types`, `year`, `month`, and `data` options are no longer supported.
 
 ## Container
 
-Release images are published only from Release Please release commits:
+Release images are published from Release Please release commits:
 
 ```shell
 docker pull ghcr.io/dsub-io/go-open-discogs-batch:latest
-docker run --rm ghcr.io/dsub-io/go-open-discogs-batch:latest --version
+docker run --rm \
+  -e OPEN_DISCOGS_BATCH_DATABASE_URL='postgresql://user:password@db:5432/open_discogs' \
+  -e OPEN_DISCOGS_BATCH_ENTITIES='artist,label,master,release' \
+  -e OPEN_DISCOGS_BATCH_DATA_DIR=/data \
+  -v open-discogs-data:/data \
+  ghcr.io/dsub-io/go-open-discogs-batch:latest
 ```
+
+The image runs as a non-root user. Mount a writable volume when downloads must
+survive container removal. Setting `OPEN_DISCOGS_BATCH_CLEANUP=true` removes the
+selected files only after success.
 
 Versioned binaries are attached to the repository's GitHub Releases.
 
@@ -87,15 +93,14 @@ go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
 Pull requests run formatting, module consistency, vet, race detection, unit and
 PostgreSQL integration tests, and a coverage gate. The separate E2E workflow
-imports the complete fixture into PostgreSQL, verifies idempotent reruns and
-entity admission rules, and runs only on GitHub-hosted `ubuntu-latest`. It does
-not depend on Discogs' current Cloudflare and S3 access policy.
+uses deterministic fixtures on GitHub-hosted `ubuntu-latest`; it does not depend
+on live Discogs availability.
 
 Pull request titles and commits must use Conventional Commits. Release Please
-publishes release artifacts only for release-relevant commit types; documentation
-changes alone do not create a release.
+publishes only release-relevant changes; documentation-only changes do not
+create a release.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Attribution to `state303` must be retained as required
-by the license.
+MIT. See [LICENSE](LICENSE). The `state303` attribution must be retained as
+required by the license.

@@ -1,18 +1,17 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
-	"github.com/knadh/koanf"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/knadh/koanf"
 )
 
-var YearPattern = regexp.MustCompile(`^\d{4}$`)
-var MonthPattern = regexp.MustCompile(`^(0?[1-9]|1[0-2])$`)
-var PluralPattern = regexp.MustCompile(`^.*s$`)
-var DslPattern = regexp.MustCompile(`^postgres(?:ql)?://([^/]+:[^/]+)@([^/]+:\d+)(/.*)?$`)
+var dumpMonthPattern = regexp.MustCompile(`^\d{4}-\d{2}$`)
 
 type ConfigValidator interface {
 	Validate(k koanf.Koanf) error
@@ -20,62 +19,81 @@ type ConfigValidator interface {
 
 type validator struct{}
 
-// Validate command values
-func (v *validator) Validate(koanf *koanf.Koanf) error {
-	y, m := koanf.String("year"), koanf.String("month")
-	if err := ValidYearMonth(y, m); err != nil {
-		return err
-	} else if err = ValidTypes(koanf.Strings("types")); err != nil {
-		return err
-	} else if err = ValidDsnFormat(koanf.String("dsn")); err != nil {
-		return err
-	}
-	return ValidChunkSize(koanf.String("chunk"))
-}
-
-func ValidChunkSize(chunkSizeVal string) (err error) {
-	if ok, _ := regexp.MatchString("^\\d+$", chunkSizeVal); !ok {
-		err = fmt.Errorf("invalid chunk option: %+v", chunkSizeVal)
-	} else if n, _ := strconv.Atoi(chunkSizeVal); n <= 0 {
-		err = fmt.Errorf("chunk size cannot be zero or negative")
-	}
-	return
-}
-
-func ValidDsnFormat(dsn string) (err error) {
-	if len(dsn) == 0 {
-		err = fmt.Errorf("missing dsn")
-	} else if !DslPattern.MatchString(dsn) {
-		err = fmt.Errorf("failed to verify dsn: invalid format")
-	}
-	return
-}
-
-func ValidTypes(types []string) (err error) {
-	u := make([]string, 0)
-	for _, t := range types {
-		s := t
-		if !PluralPattern.MatchString(t) {
-			s += "s"
-		}
-		if !containsKey(Types, s) {
-			u = append(u, t)
+func (v *validator) Validate(config *koanf.Koanf) error {
+	for _, key := range []string{"cleanup", "force", "allow-downgrade"} {
+		if _, invalid := config.Get(key).(string); invalid {
+			return fmt.Errorf("OPEN_DISCOGS_BATCH_%s must be a boolean value", strings.ToUpper(strings.ReplaceAll(key, "-", "_")))
 		}
 	}
-	if len(u) > 0 {
-		err = fmt.Errorf("unknown types: [%+v]", strings.Join(u, ","))
+	if err := ValidDumpMonth(config.String("dump-month")); err != nil {
+		return err
 	}
-	return
+	if err := ValidEntities(config.Strings("entities")); err != nil {
+		return err
+	}
+	if err := ValidDatabaseURL(config.String("database-url")); err != nil {
+		return err
+	}
+	return ValidChunkSize(config.String("chunk-size"))
 }
 
-// ValidYearMonth validates year and month if it has given user command value.
-func ValidYearMonth(y, m string) (err error) {
-	if len(y) > 0 && !YearPattern.MatchString(y) { // invalid year set
-		return errors.New("invalid year")
+func ValidChunkSize(value string) error {
+	chunkSize, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || chunkSize <= 0 {
+		return fmt.Errorf("chunk-size must be a positive integer")
 	}
+	return nil
+}
 
-	if len(m) > 0 && !MonthPattern.MatchString(m) { // invalid month set
-		return fmt.Errorf("%w\ninvalid month: %+v", err, m)
+func ValidDatabaseURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") {
+		return fmt.Errorf("database-url must use postgresql://user:password@host:port/database format")
 	}
-	return err
+	if parsed.User == nil || parsed.User.Username() == "" {
+		return fmt.Errorf("database-url must include a username and password")
+	}
+	if _, present := parsed.User.Password(); !present {
+		return fmt.Errorf("database-url must include a username and password")
+	}
+	if parsed.Hostname() == "" || strings.Trim(parsed.Path, "/") == "" {
+		return fmt.Errorf("database-url must include a host and database name")
+	}
+	return nil
+}
+
+func ValidEntities(entities []string) error {
+	known := map[string]bool{"artist": true, "label": true, "master": true, "release": true}
+	unknown := make([]string, 0)
+	for _, entity := range entities {
+		if !known[strings.TrimSuffix(strings.ToLower(entity), "s")] {
+			unknown = append(unknown, entity)
+		}
+	}
+	if len(entities) == 0 {
+		return fmt.Errorf("entities must not be empty")
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("unknown entities: [%s]", strings.Join(unknown, ","))
+	}
+	return nil
+}
+
+func ValidDumpMonth(value string) error {
+	if value == "" {
+		return nil
+	}
+	if !dumpMonthPattern.MatchString(value) {
+		return fmt.Errorf("dump-month must use yyyy-MM format")
+	}
+	target, err := time.Parse("2006-01", value)
+	if err != nil {
+		return fmt.Errorf("dump-month must use yyyy-MM format")
+	}
+	earliest, current := time.Date(2008, 3, 1, 0, 0, 0, 0, time.UTC), time.Now().UTC()
+	current = time.Date(current.Year(), current.Month(), 1, 0, 0, 0, 0, time.UTC)
+	if target.Before(earliest) || target.After(current) {
+		return fmt.Errorf("dump-month must be between 2008-03 and %s", current.Format("2006-01"))
+	}
+	return nil
 }

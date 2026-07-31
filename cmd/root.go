@@ -3,20 +3,16 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/batch"
 	"github.com/knadh/koanf"
-	"github.com/knadh/koanf/parsers/json"
-	"github.com/knadh/koanf/parsers/toml"
-	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/env"
-	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/posflag"
-	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"os"
-	"strings"
-	"time"
 )
 
 const Prefix = "OPEN_DISCOGS_BATCH_"
@@ -25,21 +21,17 @@ const versionPrintPrefix = "go-open-discogs-batch"
 
 var version string
 var conf = koanf.New(".")
-var sep = string(os.PathSeparator)
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute() {
-	err := NewRootCommand().Execute()
-	if err != nil {
-		fmt.Printf("critical error: %+v\n", err.Error())
-	}
+func Execute() error {
+	return NewRootCommand().Execute()
 }
 
 func NewRootCommand() *cobra.Command {
+	conf = koanf.New(".")
 	rootCmd := &cobra.Command{
-		Use:   "go-open-discogs-batch",
-		Short: "Import OpenDiscogs data dumps into PostgreSQL",
+		Use:          "go-open-discogs-batch",
+		Short:        "Import OpenDiscogs data dumps into PostgreSQL",
+		SilenceUsage: true,
 		Long: `go-open-discogs-batch imports selected OpenDiscogs data dumps
 into the canonical PostgreSQL schema published by open-discogs-model.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -47,30 +39,25 @@ into the canonical PostgreSQL schema published by open-discogs-model.`,
 		},
 		RunE: getMainFunc(),
 	}
+
+	dataDir := filepath.Join(getHomeDir(new(homeDirSupplier)), ".cache", "open-discogs-batch")
 	f := rootCmd.Flags()
-	y, m := time.Now().Format("2006"), time.Now().Format("01")
-	home := getHomeDir(new(homeDirSupplier))
-	home += sep + "go-open-discogs-batch"
-	f.BoolP("new", "n", false, "generates tables before batch")
-	f.StringP("config", "c", home+sep+"config.yaml", "config file path")
-	f.StringP("data", "d", home, "data file dir")
-	f.StringSliceP("types", "t", []string{"artists", "labels", "masters", "releases"}, "target types")
-	f.StringP("year", "y", y, "target year")
-	f.StringP("month", "m", m, "target month")
-	f.BoolP("version", "v", false, "prints version")
-	f.IntP("chunk", "b", 5000, "chunk size")
-	f.BoolP("update", "u", false, "update data repo")
-	f.BoolP("purge", "p", false, "purge files after success")
-	f.BoolP("force", "f", false, "rerun a manifest that already completed successfully")
-	f.Bool("allow-downgrade", false, "allow an older entity dump and record the override")
-	f.StringP("dsn", "s", "", "PostgreSQL data source name")
+	f.String("database-url", "", "PostgreSQL URI including credentials (required)")
+	f.StringSliceP("entities", "e", []string{"artist", "label", "master", "release"}, "entities to import")
+	f.StringP("dump-month", "m", "", "exact dump month in yyyy-MM form (default: latest per entity)")
+	f.String("data-dir", dataDir, "download directory")
+	f.IntP("chunk-size", "b", 5000, "import chunk size")
+	f.BoolP("cleanup", "c", false, "delete downloads after a successful import")
+	f.BoolP("force", "f", false, "reprocess an already successful dump")
+	f.Bool("allow-downgrade", false, "allow an older dump than the entity checkpoint")
+	f.BoolP("version", "v", false, "print version")
 	return rootCmd
 }
 
 var getMainFunc = func() func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		if ok, _ := cmd.Flags().GetBool("version"); ok {
-			fmt.Println(versionPrintPrefix, version)
+			fmt.Println(versionPrintPrefix, printableVersion())
 			return nil
 		}
 		if err := new(validator).Validate(conf); err != nil {
@@ -80,84 +67,91 @@ var getMainFunc = func() func(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func getFilename(path string) string {
-	return getLastPart(path, string(os.PathSeparator))
-}
-
-func getFileExtension(path string) string {
-	return getLastPart(getFilename(path), ".")
-}
-
-func getLastPart(s, delim string) string {
-	if len(s) == 0 {
-		return ""
+func printableVersion() string {
+	if strings.TrimSpace(version) == "" {
+		return "development"
 	}
-	parts := strings.Split(s, delim)
-	return parts[len(parts)-1]
-}
-
-func getTrimEnvPrefixFunc(prefix string) func(key string) string {
-	return func(key string) string {
-		return strings.Replace(strings.ToLower(strings.TrimPrefix(key, prefix)), "_", ".", -1)
-	}
-}
-
-func getParser(filepath string) koanf.Parser {
-	ex := getFileExtension(filepath)
-	switch ex {
-	case "yaml", "yml":
-		return yaml.Parser()
-	case "toml", "tml":
-		return toml.Parser()
-	}
-	return json.Parser()
+	return version
 }
 
 func load(flags *pflag.FlagSet, k *koanf.Koanf) error {
 	if ok, _ := flags.GetBool("version"); ok {
 		return nil
 	}
-	loadConfigFile(k, getConfigFilePath(flags))
 	if err := loadEnvironment(k); err != nil {
 		return err
 	}
-	if err := loadFlags(flags, k); err != nil {
+	if err := k.Load(posflag.Provider(flags, ".", k), nil); err != nil {
 		return err
 	}
-	fixTypesAsPlural(k)
-	return setTypesIntoBooleans(k)
-}
-
-func setTypesIntoBooleans(k *koanf.Koanf) error {
-	yml := ""
-	for _, typ := range k.Strings("types") {
-		yml += fmt.Sprintf("%+v: true\n", typ)
-	}
-	return k.Load(rawbytes.Provider([]byte(yml)), yaml.Parser())
-}
-
-func getConfigFilePath(flags *pflag.FlagSet) string {
-	path, _ := flags.GetString("config")
-	return path
-}
-
-func loadConfigFile(k *koanf.Koanf, path string) {
-	if err := k.Load(file.Provider(path), getParser(path)); err == nil {
-		fmt.Printf("located config [%+v]: loaded\n", path)
-	} else {
-		fmt.Printf("failed to locate config [%+v]: skipping\n", path)
-	}
-}
-
-func loadFlags(flags *pflag.FlagSet, k *koanf.Koanf) error {
-	return k.Load(posflag.Provider(flags, ".", k), nil)
+	return normalizeEntities(k)
 }
 
 func loadEnvironment(k *koanf.Koanf) error {
-	if err := k.Load(env.Provider(Prefix, ".", getTrimEnvPrefixFunc(Prefix)), nil); err != nil {
+	return k.Load(
+		env.ProviderWithValue(Prefix, ".", func(key string, value string) (string, interface{}) {
+			suffix := strings.TrimPrefix(key, Prefix)
+			mapped := map[string]string{
+				"DATABASE_URL":    "database-url",
+				"ENTITIES":        "entities",
+				"DUMP_MONTH":      "dump-month",
+				"DATA_DIR":        "data-dir",
+				"CHUNK_SIZE":      "chunk-size",
+				"CLEANUP":         "cleanup",
+				"FORCE":           "force",
+				"ALLOW_DOWNGRADE": "allow-downgrade",
+			}
+			name, ok := mapped[suffix]
+			if !ok {
+				return "", nil
+			}
+			if suffix == "ENTITIES" {
+				return name, splitValues(value)
+			}
+			if suffix == "CLEANUP" || suffix == "FORCE" || suffix == "ALLOW_DOWNGRADE" {
+				switch strings.ToLower(strings.TrimSpace(value)) {
+				case "true", "1", "yes", "on":
+					return name, true
+				case "false", "0", "no", "off":
+					return name, false
+				default:
+					return name, value
+				}
+			}
+			return name, value
+		}),
+		nil,
+	)
+}
+
+func normalizeEntities(k *koanf.Koanf) error {
+	entities := make([]string, 0, len(k.Strings("entities")))
+	selected := make(map[string]bool)
+	for _, entity := range k.Strings("entities") {
+		normalized := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(entity)), "s")
+		if normalized == "" || selected[normalized] {
+			continue
+		}
+		selected[normalized] = true
+		entities = append(entities, normalized)
+	}
+	if err := k.Set("entities", entities); err != nil {
 		return err
 	}
+	for _, entity := range []string{"artist", "label", "master", "release"} {
+		if err := k.Set(entity+"s", selected[entity]); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func splitValues(value string) []string {
+	values := strings.Split(value, ",")
+	for i := range values {
+		values[i] = strings.TrimSpace(values[i])
+	}
+	return values
 }
 
 func getHomeDir(supplier HomeDirSupplier) string {

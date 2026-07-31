@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -227,18 +228,36 @@ func (r *RepositoryStub) BatchInsert(data []*Data) (int, error) {
 func (r *RepositoryStub) FindByYearMonthType(
 	year, month, typ string,
 ) (*opendiscogsmodel.DiscogsDump, error) {
+	typ = strings.TrimSuffix(typ, "s")
 	for _, v := range r.items {
-		if v.TargetType != typ {
+		if strings.TrimSuffix(v.TargetType, "s") != typ {
 			continue
 		}
 		if len(month) == 1 { // padding
 			month = " " + month
 		}
-		if v.TargetType == typ && v.GeneratedAt.Format("200601") == year+month {
+		if strings.TrimSuffix(v.TargetType, "s") == typ && v.GeneratedAt.Format("200601") == year+month {
 			return v.Dump(), nil
 		}
 	}
 	return nil, errors.New("record not found")
+}
+
+func (r *RepositoryStub) FindLatestByType(typ string) (*opendiscogsmodel.DiscogsDump, error) {
+	typ = strings.TrimSuffix(typ, "s")
+	var latest *Data
+	for _, item := range r.items {
+		if strings.TrimSuffix(item.TargetType, "s") != typ {
+			continue
+		}
+		if latest == nil || item.GeneratedAt.After(latest.GeneratedAt) {
+			latest = item
+		}
+	}
+	if latest == nil {
+		return nil, errors.New("record not found")
+	}
+	return latest.Dump(), nil
 }
 
 func TestUpdateData(t *testing.T) {
@@ -281,6 +300,42 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 	})
 }
 
+func TestUpdateSelectedDataBoundsChecksumRequests(t *testing.T) {
+	listing := resource.Read("testdata/update-data-test.xml")
+	server := testserver.NewServer(func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("download") == "data/2008/discogs_20080309_CHECKSUM.txt" {
+			_, _ = w.Write([]byte(`8c40390a3e07b60e4eaa51dfb665a20a41a5ffc337644fb4420c6adea8ed8f50 *discogs_20080309_artists.xml.gz
+36772fdcfd019c995fb16f0020a8876df96f522f76de1acfa632299255664e59 *discogs_20080309_labels.xml.gz
+e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_20080309_releases.xml.gz
+`))
+			return
+		}
+		_, _ = w.Write(listing)
+	})
+	defer server.Close()
+
+	s3Origin, dataOrigin := DiscogsS3BaseUrl, DiscogsDataBaseURL
+	defer func() {
+		DiscogsS3BaseUrl = s3Origin
+		DiscogsDataBaseURL = dataOrigin
+	}()
+	DiscogsS3BaseUrl = server.URL + "/"
+	DiscogsDataBaseURL = server.URL + "/"
+	repo := &RepositoryStub{}
+
+	updated, err := UpdateSelectedData(
+		context.Background(),
+		repo,
+		[]string{"artist", "label", "release"},
+		"",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 3, updated)
+	require.Len(t, repo.items, 3)
+	require.Len(t, server.Requests(), 2, "one listing plus one shared-date checksum request")
+}
+
 func TestFetchFiles(t *testing.T) {
 
 	h := file.NewHandler()
@@ -301,13 +356,13 @@ func TestFetchFiles(t *testing.T) {
 		t.Cleanup(func() { _ = h.Delete("testdata/fetch-data-result") })
 		k := koanf.New(".")
 		err := k.Load(rawbytes.Provider([]byte(`
-types:
+entities:
   - artist
   - label
   - master
   - release
-year: 2022
-month: 10
+dump-month: 2022-10
+data-dir: testdata
 `)), yaml.Parser())
 		require.NoError(t, err)
 		repo := &RepositoryStub{}
@@ -324,11 +379,10 @@ month: 10
 		DiscogsS3BaseUrl = server.URL + "/"
 		k := koanf.New(".")
 		err := k.Load(rawbytes.Provider([]byte(`
-types:
-  - artists
-year: 2010
-month: 10
-data: testdata
+entities:
+  - artist
+dump-month: 2010-10
+data-dir: testdata
 `)), yaml.Parser())
 		require.NoError(t, err)
 		checksum := "69718470e15145cf586db15389bb2bf81b4cf4ee179aa6c0dd61afaf17d56b3d"
@@ -371,11 +425,10 @@ data: testdata
 		DiscogsS3BaseUrl = server.URL + "/"
 		k := koanf.New(".")
 		err := k.Load(rawbytes.Provider([]byte(`
-types:
-  - artists
-year: 2010
-month: 10
-data: testdata/
+entities:
+  - artist
+dump-month: 2010-10
+data-dir: testdata/
 `)), yaml.Parser())
 		require.NoError(t, err)
 		checksum := "69718470e15145cf586db15389bb2bf81b4cf4ee179aa6c0dd61afaf17d56b3d"

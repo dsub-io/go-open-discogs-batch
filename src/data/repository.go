@@ -14,6 +14,20 @@ import (
 type Repository interface {
 	BatchInsert([]*Data) (int, error)
 	FindByYearMonthType(year, month, typ string) (*opendiscogsmodel.DiscogsDump, error)
+	FindLatestByType(typ string) (*opendiscogsmodel.DiscogsDump, error)
+}
+
+func (d *repositoryImpl) FindLatestByType(typ string) (*opendiscogsmodel.DiscogsDump, error) {
+	var result opendiscogsmodel.DiscogsDump
+	entityType := strings.TrimSuffix(strings.ToLower(typ), "s")
+	tx := d.DB.
+		Where("entity_type = ?", entityType).
+		Order("dump_date DESC, id DESC").
+		First(&result)
+	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("latest %s data not found", entityType)
+	}
+	return &result, tx.Error
 }
 
 type repositoryImpl struct {
