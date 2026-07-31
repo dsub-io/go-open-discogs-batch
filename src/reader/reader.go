@@ -2,8 +2,8 @@ package reader
 
 import (
 	"context"
+	"github.com/dsub-io/go-open-discogs-batch/src/xmlparser"
 	"github.com/reactivex/rxgo/v2"
-	"github.com/state303/go-discogs/src/xmlparser"
 	"io"
 )
 

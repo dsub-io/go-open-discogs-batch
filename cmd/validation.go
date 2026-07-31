@@ -12,7 +12,7 @@ import (
 var YearPattern = regexp.MustCompile(`^\d{4}$`)
 var MonthPattern = regexp.MustCompile(`^(0?[1-9]|1[0-2])$`)
 var PluralPattern = regexp.MustCompile(`^.*s$`)
-var DslPattern = regexp.MustCompile(`^(mysql|postgres)://([^/]+:[^/]+)@([^/]+:\d+)(/.*)?$`)
+var DslPattern = regexp.MustCompile(`^postgres(?:ql)?://([^/]+:[^/]+)@([^/]+:\d+)(/.*)?$`)
 
 type ConfigValidator interface {
 	Validate(k koanf.Koanf) error

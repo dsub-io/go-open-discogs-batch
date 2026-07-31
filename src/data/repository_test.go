@@ -1,8 +1,9 @@
 package data
 
 import (
-	"github.com/state303/go-discogs/internal/testutils"
-	"github.com/state303/go-discogs/src/database"
+	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
+	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -22,6 +23,7 @@ func (s *DataRepoSuite) Prepare() {
 		dbInfo := testutils.GetDatabase(testutils.Postgres)
 		require.NoError(s.T(), database.Connect(testutils.GetDsn(testutils.Postgres, dbInfo)))
 		s.DB = database.DB
+		require.NoError(s.T(), testutils.ApplySharedSchema(s.DB))
 		s.DB.Logger.LogMode(3)
 		s.repo = NewDataRepository(s.DB)
 	}
@@ -51,7 +53,7 @@ func (s *DataRepoSuite) TestBatchInsert() {
 	var (
 		etag = "test-etag-test-batch-insert"
 		gen  = time.Now()
-		chk  = "test-checksum"
+		chk  = "69718470e15145cf586db15389bb2bf81b4cf4ee179aa6c0dd61afaf17d56b3d"
 		typ  = "artist"
 		uri  = "data/somewhere"
 	)
@@ -59,23 +61,23 @@ func (s *DataRepoSuite) TestBatchInsert() {
 	count, err := s.repo.BatchInsert(d)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), 1, count)
-	var md Data
+	var md opendiscogsmodel.DiscogsDump
 	s.DB.First(&md)
 	require.Equal(s.T(), etag, md.ETag)
-	require.Equal(s.T(), gen.Format("20060102"), md.GeneratedAt.Format("20060102"))
-	require.Equal(s.T(), chk, md.Checksum)
-	require.Equal(s.T(), typ, md.TargetType)
-	require.Equal(s.T(), uri, md.Uri)
+	require.Equal(s.T(), gen.Format("20060102"), md.DumpDate.Format("20060102"))
+	require.Equal(s.T(), chk, md.ChecksumSHA256)
+	require.Equal(s.T(), typ, md.EntityType)
+	require.Equal(s.T(), uri, md.URI)
 
 	count, err = s.repo.BatchInsert(d)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), 0, count)
 	s.DB.First(&md)
 	require.Equal(s.T(), etag, md.ETag)
-	require.Equal(s.T(), gen.Format("20060102"), md.GeneratedAt.Format("20060102"))
-	require.Equal(s.T(), chk, md.Checksum)
-	require.Equal(s.T(), typ, md.TargetType)
-	require.Equal(s.T(), uri, md.Uri)
+	require.Equal(s.T(), gen.Format("20060102"), md.DumpDate.Format("20060102"))
+	require.Equal(s.T(), chk, md.ChecksumSHA256)
+	require.Equal(s.T(), typ, md.EntityType)
+	require.Equal(s.T(), uri, md.URI)
 
 	s.DB.Where("etag = ?", etag).Delete(&md)
 	assert.ErrorContains(s.T(), s.DB.First(&md).Error, "record not found")

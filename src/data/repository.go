@@ -3,6 +3,8 @@ package data
 import (
 	"errors"
 	"fmt"
+
+	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"strings"
@@ -11,7 +13,7 @@ import (
 
 type Repository interface {
 	BatchInsert([]*Data) (int, error)
-	FindByYearMonthType(year, month, typ string) (*Data, error)
+	FindByYearMonthType(year, month, typ string) (*opendiscogsmodel.DiscogsDump, error)
 }
 
 type repositoryImpl struct {
@@ -19,28 +21,54 @@ type repositoryImpl struct {
 }
 
 func (d *repositoryImpl) BatchInsert(items []*Data) (int, error) {
-	tx := d.DB.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&items, len(items))
+	dumps := make([]*opendiscogsmodel.DiscogsDump, 0, len(items))
+	for _, item := range items {
+		if item.TargetType == "checksum" {
+			continue
+		}
+		dumps = append(dumps, item.Dump())
+	}
+	if len(dumps) == 0 {
+		return 0, nil
+	}
+	tx := d.DB.
+		Omit("ID", "CreatedAt", "LastModifiedAt").
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "dump_date"},
+				{Name: "entity_type"},
+				{Name: "checksum_sha256"},
+			},
+			DoNothing: true,
+		}).
+		CreateInBatches(&dumps, len(dumps))
 	return int(tx.RowsAffected), tx.Error
 }
 
-func (d *repositoryImpl) FindByYearMonthType(y, m, t string) (*Data, error) {
+func (d *repositoryImpl) FindByYearMonthType(
+	y, m, t string,
+) (*opendiscogsmodel.DiscogsDump, error) {
 	var (
-		result *Data
+		result opendiscogsmodel.DiscogsDump
 		begin  time.Time
 		end    time.Time
 		err    error
 	)
 
 	if begin, err = time.Parse("20060102", y+m+"01"); err != nil {
-		return result, errors.New("failed to parse y and m: " + y + "." + m)
+		return nil, errors.New("failed to parse y and m: " + y + "." + m)
 	}
 	end = begin.AddDate(0, 1, 0)
-	tx := d.DB.Where("target_type=? AND generated_at >= ? AND generated_at < ?", t, begin, end).First(&result)
+	entityType := strings.TrimSuffix(strings.ToLower(t), "s")
+	tx := d.DB.
+		Where("entity_type = ? AND dump_date >= ? AND dump_date < ?", entityType, begin, end).
+		Order("dump_date DESC, id DESC").
+		First(&result)
 	err = tx.Error
-	if err != nil && strings.Contains(err.Error(), "record not found") {
-		err = fmt.Errorf(fmt.Sprintf("%+v data not found from y:%+v m:%+v", t, y, m))
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = fmt.Errorf("%s data not found from y:%s m:%s", t, y, m)
 	}
-	return result, err
+	return &result, err
 }
 
 func NewDataRepository(db *gorm.DB) Repository {

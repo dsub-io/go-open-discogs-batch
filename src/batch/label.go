@@ -2,14 +2,10 @@ package batch
 
 import (
 	"fmt"
-	"github.com/sirupsen/logrus"
-	"github.com/state303/go-discogs/model"
-	"github.com/state303/go-discogs/src/cache"
-	"github.com/state303/go-discogs/src/helper"
-	"github.com/state303/go-discogs/src/reader"
-	"github.com/state303/go-discogs/src/result"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+	"github.com/dsub-io/go-open-discogs-batch/src/helper"
+	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/dsub-io/open-discogs-model/model"
 	"sync"
 )
 
@@ -79,33 +75,17 @@ func signalDone(done chan<- struct{}, wg *sync.WaitGroup) func() {
 
 func writeLabelRelations(order Order, res chan result.Result, wg *sync.WaitGroup) func(i interface{}) {
 	return func(i interface{}) {
-		wg.Add(2)
+		wg.Add(1)
 		u := make([]*model.LabelURL, 0)
+		s := make([]*model.LabelSubLabel, 0)
 		lrs := i.([]*XmlLabelRelation)
 		for _, lr := range lrs {
 			u = append(u, lr.GetUrls()...)
+			s = append(s, lr.GetSubLabels()...)
 		}
-		go func() { defer wg.Done(); res <- updateLabelsParent(lrs, order.getDB()) }()
-		go func() { defer wg.Done(); res <- writeThenReport(order, wg, u) }()
+		go func() {
+			defer wg.Done()
+			res <- writeThenReport(order, wg, u, s)
+		}()
 	}
-}
-
-func updateLabelsParent(labels []*XmlLabelRelation, db *gorm.DB) result.Result {
-	lps := make([]*model.Label, 0)
-	for _, v := range labels {
-		pid := v.GetParentID()
-		if pid == nil {
-			continue
-		}
-		if _, ok := cache.LabelIDCache.Load(*pid); ok {
-			logrus.Debugf("\nlookup for lable id %+v failed due to missing cache\n", *pid)
-			lps = append(lps, &model.Label{ID: v.ID, ParentID: pid})
-		}
-	}
-	tx := db.Session(&gorm.Session{}).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"parent_id"}),
-	}).CreateInBatches(&lps, len(lps))
-
-	return result.NewResult(int(tx.RowsAffected), tx.Error)
 }

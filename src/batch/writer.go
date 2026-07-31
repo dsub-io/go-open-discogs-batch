@@ -1,10 +1,10 @@
 package batch
 
 import (
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/dsub-io/go-open-discogs-batch/src/unique"
+	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/sirupsen/logrus"
-	"github.com/state303/go-discogs/model"
-	"github.com/state303/go-discogs/src/result"
-	"github.com/state303/go-discogs/src/unique"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"sync"
@@ -50,14 +50,18 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 			r = doWrite[*model.ArtistAlias](o, chunkSize, g.db)
 		case []*model.ArtistGroup:
 			r = doWrite[*model.ArtistGroup](o, chunkSize, g.db)
+		case []*model.ArtistMember:
+			r = doWrite[*model.ArtistMember](o, chunkSize, g.db)
 		case []*model.ArtistNameVariation:
 			r = doWrite[*model.ArtistNameVariation](o, chunkSize, g.db)
 		case []*model.Label:
 			r = doWrite[*model.Label](o, chunkSize, g.db)
 		case []*model.LabelURL:
 			r = doWrite[*model.LabelURL](o, chunkSize, g.db)
-		case []*model.LabelRelease:
-			r = doWrite[*model.LabelRelease](o, chunkSize, g.db)
+		case []*model.LabelSubLabel:
+			r = doWrite[*model.LabelSubLabel](o, chunkSize, g.db)
+		case []*model.LabelReleaseItem:
+			r = doWrite[*model.LabelReleaseItem](o, chunkSize, g.db)
 		case []*model.Master:
 			r = doWrite[*model.Master](o, chunkSize, g.db)
 		case []*model.MasterArtist:
@@ -68,28 +72,28 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 			r = doWrite[*model.MasterStyle](o, chunkSize, g.db)
 		case []*model.MasterVideo:
 			r = doWrite[*model.MasterVideo](o, chunkSize, g.db)
-		case []*model.Release:
-			r = doWrite[*model.Release](o, chunkSize, g.db)
-		case []*model.ReleaseArtist:
-			r = doWrite[*model.ReleaseArtist](o, chunkSize, g.db)
-		case []*model.ReleaseContract:
-			r = doWrite[*model.ReleaseContract](o, chunkSize, g.db)
-		case []*model.ReleaseFormat:
-			r = doWrite[*model.ReleaseFormat](o, chunkSize, g.db)
-		case []*model.ReleaseCreditedArtist:
-			r = doWrite[*model.ReleaseCreditedArtist](o, chunkSize, g.db)
-		case []*model.ReleaseGenre:
-			r = doWrite[*model.ReleaseGenre](o, chunkSize, g.db)
-		case []*model.ReleaseStyle:
-			r = doWrite[*model.ReleaseStyle](o, chunkSize, g.db)
-		case []*model.ReleaseIdentifier:
-			r = doWrite[*model.ReleaseIdentifier](o, chunkSize, g.db)
-		case []*model.ReleaseImage:
-			r = doWrite[*model.ReleaseImage](o, chunkSize, g.db)
-		case []*model.ReleaseTrack:
-			r = doWrite[*model.ReleaseTrack](o, chunkSize, g.db)
-		case []*model.ReleaseVideo:
-			r = doWrite[*model.ReleaseVideo](o, chunkSize, g.db)
+		case []*model.ReleaseItem:
+			r = doWrite[*model.ReleaseItem](o, chunkSize, g.db)
+		case []*model.ReleaseItemArtist:
+			r = doWrite[*model.ReleaseItemArtist](o, chunkSize, g.db)
+		case []*model.ReleaseItemWork:
+			r = doWrite[*model.ReleaseItemWork](o, chunkSize, g.db)
+		case []*model.ReleaseItemFormat:
+			r = doWrite[*model.ReleaseItemFormat](o, chunkSize, g.db)
+		case []*model.ReleaseItemCreditedArtist:
+			r = doWrite[*model.ReleaseItemCreditedArtist](o, chunkSize, g.db)
+		case []*model.ReleaseItemGenre:
+			r = doWrite[*model.ReleaseItemGenre](o, chunkSize, g.db)
+		case []*model.ReleaseItemStyle:
+			r = doWrite[*model.ReleaseItemStyle](o, chunkSize, g.db)
+		case []*model.ReleaseItemIdentifier:
+			r = doWrite[*model.ReleaseItemIdentifier](o, chunkSize, g.db)
+		case []*model.ReleaseItemImage:
+			r = doWrite[*model.ReleaseItemImage](o, chunkSize, g.db)
+		case []*model.ReleaseItemTrack:
+			r = doWrite[*model.ReleaseItemTrack](o, chunkSize, g.db)
+		case []*model.ReleaseItemVideo:
+			r = doWrite[*model.ReleaseItemVideo](o, chunkSize, g.db)
 		case []*model.Style:
 			r = doWrite[*model.Style](o, chunkSize, g.db)
 		case []*model.Genre:

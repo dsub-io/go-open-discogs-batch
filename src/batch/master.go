@@ -2,11 +2,11 @@ package batch
 
 import (
 	"fmt"
-	"github.com/state303/go-discogs/model"
-	"github.com/state303/go-discogs/src/cache"
-	"github.com/state303/go-discogs/src/helper"
-	"github.com/state303/go-discogs/src/reader"
-	"github.com/state303/go-discogs/src/result"
+	"github.com/dsub-io/go-open-discogs-batch/src/cache"
+	"github.com/dsub-io/go-open-discogs-batch/src/helper"
+	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/dsub-io/open-discogs-model/model"
 	"gorm.io/gorm/clause"
 	"sync"
 )
@@ -77,19 +77,6 @@ func WriteMasterRelations(order Order, res chan result.Result, wg *sync.WaitGrou
 			Clauses(clause.OnConflict{DoNothing: true}).
 			CreateInBatches(filterStyles(s), order.getChunkSize())
 
-		var fg []*model.Genre
-		var fs []*model.Style
-
-		order.getDB().Find(&fs)
-		order.getDB().Find(&fg)
-
-		for _, v := range fs {
-			cache.StyleCache.Store(v.Name, v.ID)
-		}
-		for _, v := range fg {
-			cache.GenreCache.Store(v.Name, v.ID)
-		}
-
 		var (
 			m  = make([]*model.Master, 0)
 			mv = make([]*model.MasterVideo, 0)
@@ -102,7 +89,9 @@ func WriteMasterRelations(order Order, res chan result.Result, wg *sync.WaitGrou
 			if mr == nil {
 				continue
 			}
-			m = append(m, mr.GetMaster())
+			master := mr.GetMaster()
+			m = append(m, master)
+			cache.MasterIDCache.Store(master.ID, struct{}{})
 			ms = append(ms, mr.GetMasterStyles()...)
 			mg = append(mg, mr.GetMasterGenres()...)
 			mv = append(mv, mr.GetMasterVideos()...)

@@ -15,9 +15,9 @@ func TestValidDsnFormat(t *testing.T) {
 		assert.NoError(t, ValidDsnFormat("postgres://user:pass@host:5432/db_name?options"))
 		assert.NoError(t, ValidDsnFormat("postgres://user:pass@host:35432/db_name"))
 	})
-	t.Run("no error when valid mysql dsn format", func(t *testing.T) {
-		assert.NoError(t, ValidDsnFormat("mysql://user:pass@host:3306/db_name?options&other=option"))
-		assert.NoError(t, ValidDsnFormat("mysql://user:pass@host:33060/db_name"))
+	t.Run("rejects mysql dsn format", func(t *testing.T) {
+		assert.Error(t, ValidDsnFormat("mysql://user:pass@host:3306/db_name?options&other=option"))
+		assert.Error(t, ValidDsnFormat("mysql://user:pass@host:33060/db_name"))
 	})
 	t.Run("error when invalid dsn format", func(t *testing.T) {
 		assert.Error(t, ValidDsnFormat("mysql://user:pass@host:port/db_name?options"))

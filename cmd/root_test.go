@@ -13,7 +13,7 @@ import (
 )
 
 func Test_FlagMustOverrideEnv(t *testing.T) {
-	t.Setenv("GO_DISCOGS_DSN", "env_dsn")
+	t.Setenv("OPEN_DISCOGS_BATCH_DSN", "env_dsn")
 	cmd := NewRootCommand()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
 	cmd.SetArgs([]string{"--config", "testdata/config.yaml"})
@@ -47,7 +47,7 @@ func TestChunkSizePassed(t *testing.T) {
 	t.Run("chunk set via environment", func(t *testing.T) {
 		cmd := NewRootCommand()
 		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		t.Setenv("GO_DISCOGS_CHUNK", "3500")
+		t.Setenv("OPEN_DISCOGS_BATCH_CHUNK", "3500")
 		require.NoError(t, cmd.Execute())
 		require.Equal(t, 3500, conf.Int("chunk"))
 	})

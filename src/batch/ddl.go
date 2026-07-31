@@ -1,55 +1,90 @@
 package batch
 
 import (
-	"github.com/state303/go-discogs/src/database"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io/fs"
+	"path/filepath"
+	"sort"
+
+	opendiscogsschema "github.com/dsub-io/open-discogs-model/schema"
 	"gorm.io/gorm"
-	"os"
-	"path"
-	"regexp"
-	"strings"
 )
 
+const migrationTable = "open_discogs_schema_migration"
+
+// RunDDL applies the versioned PostgreSQL migrations embedded in open-discogs-model.
+// Applied checksums are persisted so a released migration can never change silently.
 func RunDDL(db *gorm.DB) error {
-	if sql, err := ReadScript(); err != nil {
-		return err
-	} else {
-		parts := strings.Split(sql, ";")
-		for i := range parts {
-			q := strings.TrimSpace(parts[i])
-			if len(q) == 0 {
-				continue
+	migrations, err := opendiscogsschema.Migrations()
+	if err != nil {
+		return fmt.Errorf("load shared schema migrations: %w", err)
+	}
+
+	names, err := fs.Glob(migrations, "*.sql")
+	if err != nil {
+		return fmt.Errorf("list shared schema migrations: %w", err)
+	}
+	sort.Strings(names)
+
+	if err := db.Exec(`
+		create table if not exists public.open_discogs_schema_migration
+		(
+		    version     varchar(255) primary key,
+		    checksum    char(64) not null,
+		    applied_at  timestamp not null default now()
+		)`).Error; err != nil {
+		return fmt.Errorf("create schema migration ledger: %w", err)
+	}
+
+	for _, name := range names {
+		contents, readErr := fs.ReadFile(migrations, name)
+		if readErr != nil {
+			return fmt.Errorf("read shared migration %s: %w", name, readErr)
+		}
+		sum := sha256.Sum256(contents)
+		checksum := hex.EncodeToString(sum[:])
+
+		if err := applyMigration(db, filepath.Base(name), checksum, string(contents)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyMigration(db *gorm.DB, version, checksum, sql string) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var appliedChecksum string
+		result := tx.Raw(
+			"select checksum from public.open_discogs_schema_migration where version = ?",
+			version,
+		).Scan(&appliedChecksum)
+		if result.Error != nil {
+			return fmt.Errorf("read migration ledger for %s: %w", version, result.Error)
+		}
+		if result.RowsAffected > 0 {
+			if appliedChecksum != checksum {
+				return fmt.Errorf(
+					"shared migration %s checksum changed: database=%s artifact=%s",
+					version,
+					appliedChecksum,
+					checksum,
+				)
 			}
-			if err := db.Session(&gorm.Session{}).Exec(q).Error; err != nil {
-				return err
-			}
+			return nil
+		}
+
+		if err := tx.Exec(sql).Error; err != nil {
+			return fmt.Errorf("apply shared migration %s: %w", version, err)
+		}
+		if err := tx.Exec(
+			"insert into public.open_discogs_schema_migration (version, checksum) values (?, ?)",
+			version,
+			checksum,
+		).Error; err != nil {
+			return fmt.Errorf("record shared migration %s: %w", version, err)
 		}
 		return nil
-	}
-}
-
-func ReadScript() (string, error) {
-	v, err := os.ReadFile(GetScriptPath())
-	return string(v), err
-}
-
-func GetScriptPath() string {
-	return path.Join(GetProjectRoot(), "scripts", GetScriptFolderName(), "schema.sql")
-}
-
-func GetScriptFolderName() string {
-	switch database.Kind {
-	case database.MySQL:
-		return "mysql"
-	case database.Postgres:
-		return "postgres"
-	default:
-		return "unknown"
-	}
-}
-
-var ProjectRootPattern = regexp.MustCompile("^(.*go-discogs).*")
-
-func GetProjectRoot() string {
-	d, _ := os.Getwd()
-	return ProjectRootPattern.FindStringSubmatch(d)[1]
+	})
 }

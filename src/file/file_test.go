@@ -3,8 +3,8 @@ package file
 import (
 	"bytes"
 	"errors"
-	"github.com/state303/go-discogs/internal/test/resource"
-	"github.com/state303/go-discogs/internal/testserver"
+	"github.com/dsub-io/go-open-discogs-batch/internal/test/resource"
+	"github.com/dsub-io/go-open-discogs-batch/internal/testserver"
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"os"

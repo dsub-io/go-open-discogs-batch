@@ -1,7 +1,7 @@
 package helper
 
 import (
-	"github.com/state303/go-discogs/model"
+	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

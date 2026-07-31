@@ -2,12 +2,16 @@ package batch
 
 import (
 	"context"
-	"github.com/state303/go-discogs/internal/testutils"
-	"github.com/state303/go-discogs/model"
-	"github.com/state303/go-discogs/src/database"
+	"encoding/json"
+	"fmt"
+	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
+	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -16,6 +20,7 @@ func TestBatch(t *testing.T) {
 	dsn := testutils.GetDsn(testutils.Postgres, pg)
 	db, err := database.GetConnect(dsn)
 	require.NoError(t, err)
+	require.NoError(t, RunDDL(db))
 
 	var (
 		ctx   = context.Background()
@@ -55,28 +60,112 @@ func TestBatch(t *testing.T) {
 	require.NoError(t, res.Err())
 
 	var count int64
-	db.Session(&gorm.Session{}).Model(&model.Release{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItem{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseContract{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemWork{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseIdentifier{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemIdentifier{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseFormat{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemFormat{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseTrack{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemTrack{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseCreditedArtist{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemCreditedArtist{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseVideo{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemVideo{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.LabelRelease{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.LabelReleaseItem{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseArtist{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemArtist{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseGenre{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemGenre{}).Count(&count)
 	require.NotZero(t, count)
-	db.Session(&gorm.Session{}).Model(&model.ReleaseStyle{}).Count(&count)
+	db.Session(&gorm.Session{}).Model(&model.ReleaseItemStyle{}).Count(&count)
 	require.NotZero(t, count)
+
+	before := snapshotBusinessTables(t, db)
+	for _, fixture := range []struct {
+		path string
+		step func(Order) Step
+	}{
+		{"testdata/artist.xml.gz", newBatch().UpdateArtist},
+		{"testdata/label.xml.gz", newBatch().UpdateLabel},
+		{"testdata/master.xml.gz", newBatch().UpdateMaster},
+		{"testdata/release.xml.gz", newBatch().UpdateRelease},
+	} {
+		repeated := fixture.step(NewOrder(ctx, chunk, fixture.path, db))()
+		require.NoError(t, repeated.Err())
+	}
+	after := snapshotBusinessTables(t, db)
+	require.Equal(t, before, after)
+
+	normalized := normalizedBusinessState(t, db)
+	goldenPath := filepath.Join("testdata", "cross-language-state.json")
+	if os.Getenv("UPDATE_CROSS_LANGUAGE_GOLDEN") == "1" {
+		encoded, err := json.MarshalIndent(normalized, "", "  ")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(goldenPath, append(encoded, '\n'), 0o644))
+	}
+	expected, err := os.ReadFile(goldenPath)
+	require.NoError(t, err)
+	actual, err := json.Marshal(normalized)
+	require.NoError(t, err)
+	require.JSONEq(t, string(expected), string(actual))
+}
+
+func snapshotBusinessTables(t *testing.T, db *gorm.DB) map[string]string {
+	t.Helper()
+	snapshot := make(map[string]string)
+	for _, table := range model.TableNames {
+		if len(table) >= len("discogs_") && table[:len("discogs_")] == "discogs_" {
+			continue
+		}
+		var rows string
+		query := fmt.Sprintf(
+			`select coalesce(jsonb_agg(to_jsonb(row_data) order by to_jsonb(row_data)::text), '[]'::jsonb)::text
+			   from public.%s row_data`,
+			table,
+		)
+		require.NoError(t, db.Raw(query).Scan(&rows).Error)
+		snapshot[table] = rows
+	}
+	return snapshot
+}
+
+func normalizedBusinessState(
+	t *testing.T,
+	db *gorm.DB,
+) map[string]json.RawMessage {
+	t.Helper()
+	state := make(map[string]json.RawMessage)
+	coreTables := map[string]bool{
+		"artist":       true,
+		"label":        true,
+		"master":       true,
+		"release_item": true,
+	}
+	for _, table := range model.TableNames {
+		if len(table) >= len("discogs_") && table[:len("discogs_")] == "discogs_" {
+			continue
+		}
+		projection := "to_jsonb(row_data) - 'created_at' - 'last_modified_at'"
+		if !coreTables[table] && table != "genre" && table != "style" {
+			projection += " - 'id'"
+		}
+		var rows string
+		query := fmt.Sprintf(
+			`select coalesce(jsonb_agg(projected order by projected::text), '[]'::jsonb)::text
+			   from (
+			       select %s as projected
+			         from public.%s row_data
+			   ) normalized`,
+			projection,
+			table,
+		)
+		require.NoError(t, db.Raw(query).Scan(&rows).Error)
+		state[table] = json.RawMessage(rows)
+	}
+	return state
 }
 
 func Test_batch_UpdateLabel(t *testing.T) {

@@ -2,7 +2,7 @@ package batch
 
 import (
 	"context"
-	"github.com/state303/go-discogs/src/reader"
+	"github.com/dsub-io/go-open-discogs-batch/src/reader"
 	"github.com/stretchr/testify/require"
 	"os"
 	"testing"

@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/dsub-io/go-open-discogs-batch/internal/test/resource"
+	"github.com/dsub-io/go-open-discogs-batch/internal/testserver"
+	"github.com/dsub-io/go-open-discogs-batch/src/client"
+	"github.com/dsub-io/go-open-discogs-batch/src/file"
+	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/reactivex/rxgo/v2"
-	"github.com/state303/go-discogs/internal/test/resource"
-	"github.com/state303/go-discogs/internal/testserver"
-	"github.com/state303/go-discogs/src/client"
-	"github.com/state303/go-discogs/src/file"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"net/http"
@@ -166,6 +167,7 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 		v, err := DispatchChecksumFetch()(context.Background(), dump)
 		assert.NoError(t, err)
 		assert.Equal(t, dump, v.(*Data))
+		checksumFetchWg.Wait()
 	})
 }
 
@@ -222,7 +224,9 @@ func (r *RepositoryStub) BatchInsert(data []*Data) (int, error) {
 	return len(data), nil
 }
 
-func (r *RepositoryStub) FindByYearMonthType(year, month, typ string) (*Data, error) {
+func (r *RepositoryStub) FindByYearMonthType(
+	year, month, typ string,
+) (*opendiscogsmodel.DiscogsDump, error) {
 	for _, v := range r.items {
 		if v.TargetType != typ {
 			continue
@@ -231,7 +235,7 @@ func (r *RepositoryStub) FindByYearMonthType(year, month, typ string) (*Data, er
 			month = " " + month
 		}
 		if v.TargetType == typ && v.GeneratedAt.Format("200601") == year+month {
-			return v, nil
+			return v.Dump(), nil
 		}
 	}
 	return nil, errors.New("record not found")
@@ -241,20 +245,25 @@ func TestUpdateData(t *testing.T) {
 	data := resource.Read("testdata/update-data-test.xml")
 	server := testserver.NewServer(func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if len(path) == 0 || path == "/" {
-			_, _ = w.Write(data)
-		} else if path == "/data/2008/discogs_20080309_CHECKSUM.txt" {
+		if r.URL.Query().Get("download") == "data/2008/discogs_20080309_CHECKSUM.txt" {
 			_, _ = w.Write([]byte(`8c40390a3e07b60e4eaa51dfb665a20a41a5ffc337644fb4420c6adea8ed8f50 *discogs_20080309_artists.xml.gz
 36772fdcfd019c995fb16f0020a8876df96f522f76de1acfa632299255664e59 *discogs_20080309_labels.xml.gz
 e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_20080309_releases.xml.gz\n`))
+		} else if len(path) == 0 || path == "/" {
+			_, _ = w.Write(data)
 		}
 	})
 	defer server.Close()
 
 	t.Run("UpdateDate updates items", func(t *testing.T) {
-		origin := DiscogsS3BaseUrl
-		defer func() { DiscogsS3BaseUrl = origin }()
+		s3Origin := DiscogsS3BaseUrl
+		dataOrigin := DiscogsDataBaseURL
+		defer func() {
+			DiscogsS3BaseUrl = s3Origin
+			DiscogsDataBaseURL = dataOrigin
+		}()
 		DiscogsS3BaseUrl = server.URL + "/"
+		DiscogsDataBaseURL = server.URL + "/"
 		repo := &RepositoryStub{items: make([]*Data, 0)}
 		updateCount, err := UpdateData(context.Background(), repo)
 		require.NoError(t, err)

@@ -2,16 +2,19 @@ package batch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/dsub-io/go-open-discogs-batch/src/data"
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	"github.com/knadh/koanf"
-	"github.com/state303/go-discogs/src/data"
-	"github.com/state303/go-discogs/src/database"
 	"time"
 )
 
-type Runner struct{}
+type Runner struct {
+	Version string
+}
 
-func (*Runner) Run(ctx context.Context, config *koanf.Koanf) error {
+func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	begin := time.Now()
 	if err := database.Connect(config.String("dsn")); err != nil {
 		return err
@@ -35,9 +38,32 @@ func (*Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		}
 	}
 
-	typeResourceMap, err := data.FetchFiles(config, dataRepo)
+	plan, err := data.FetchImportPlan(config, dataRepo)
 	if err != nil {
 		return err
+	}
+
+	sqlDB, err := database.DB.DB()
+	if err != nil {
+		return fmt.Errorf("open SQL connection pool: %w", err)
+	}
+	coordinator := NewImportExecutionCoordinator(sqlDB, runner.Version)
+	preparation, err := coordinator.Prepare(
+		ctx,
+		plan.Dumps,
+		config.Bool("force"),
+		config.Bool("allow-downgrade"),
+	)
+	if err != nil {
+		return err
+	}
+	if preparation.Skipped {
+		fmt.Printf(
+			"manifest %s already succeeded as import run %d; skipping\n",
+			preparation.ManifestSHA256,
+			preparation.RunID,
+		)
+		return nil
 	}
 
 	var (
@@ -49,22 +75,22 @@ func (*Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	)
 
 	if hasArtist(config) {
-		order := NewOrder(ctx, chunk, typeResourceMap["artists"], db)
+		order := NewOrder(ctx, chunk, plan.Resources["artists"], db)
 		steps = append(steps, b.UpdateArtist(order))
 	}
 
 	if hasLabel(config) {
-		order := NewOrder(ctx, chunk, typeResourceMap["labels"], db)
+		order := NewOrder(ctx, chunk, plan.Resources["labels"], db)
 		steps = append(steps, b.UpdateLabel(order))
 	}
 
 	if hasMaster(config) {
-		order := NewOrder(ctx, chunk, typeResourceMap["masters"], db)
+		order := NewOrder(ctx, chunk, plan.Resources["masters"], db)
 		steps = append(steps, b.UpdateMaster(order))
 	}
 
 	if hasRelease(config) {
-		order := NewOrder(ctx, chunk, typeResourceMap["releases"], db)
+		order := NewOrder(ctx, chunk, plan.Resources["releases"], db)
 		steps = append(steps, b.UpdateRelease(order))
 	}
 
@@ -77,6 +103,10 @@ func (*Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		}
 	}
 
+	completionErr := coordinator.Complete(ctx, err)
+	if completionErr != nil {
+		err = errors.Join(err, completionErr)
+	}
 	printResult(begin, totalUpdates, err)
 	return err
 }

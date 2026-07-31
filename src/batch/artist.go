@@ -3,10 +3,10 @@ package batch
 import (
 	"context"
 	"fmt"
-	"github.com/state303/go-discogs/model"
-	"github.com/state303/go-discogs/src/helper"
-	"github.com/state303/go-discogs/src/reader"
-	"github.com/state303/go-discogs/src/result"
+	"github.com/dsub-io/go-open-discogs-batch/src/helper"
+	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/dsub-io/open-discogs-model/model"
 	"io"
 	"os"
 	"sync"
@@ -77,16 +77,18 @@ func writeArtistRelations(order Order, res chan result.Result, wg *sync.WaitGrou
 		n := make([]*model.ArtistNameVariation, 0)
 		a := make([]*model.ArtistAlias, 0)
 		g := make([]*model.ArtistGroup, 0)
+		m := make([]*model.ArtistMember, 0)
 		u := make([]*model.ArtistURL, 0)
 		for _, item := range items {
 			a = append(a, item.GetAliases()...)
 			g = append(g, item.GetGroups()...)
+			m = append(m, item.GetMembers()...)
 			n = append(n, item.GetNameVars()...)
 			u = append(u, item.GetUrls()...)
 		}
 		go func(res chan result.Result) {
 			defer wg.Done()
-			res <- writeThenReport(order, wg, a, g, n, u)
+			res <- writeThenReport(order, wg, a, g, m, n, u)
 		}(res)
 	}
 }

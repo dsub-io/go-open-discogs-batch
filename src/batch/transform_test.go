@@ -1,8 +1,8 @@
 package batch
 
 import (
+	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/reactivex/rxgo/v2"
-	"github.com/state303/go-discogs/model"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
