@@ -13,7 +13,7 @@ import (
 )
 
 const e2eDumpObjectURL = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com/" +
-	"data/2026/discogs_20260701_releases.xml.gz"
+	"data/2024/discogs_20240701_releases.xml.gz"
 
 func TestDiscogsDumpObjectServesGzipBytes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
