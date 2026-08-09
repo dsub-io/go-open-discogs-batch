@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/dsub-io/go-open-discogs-batch/src/reader"
 	"github.com/stretchr/testify/require"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +31,20 @@ func TestReleaseRead(t *testing.T) {
 	require.True(t, s[0].MasterInfo.IsMaster)
 	require.True(t, s[1].MasterInfo.IsMaster)
 	require.False(t, s[2].MasterInfo.IsMaster)
+}
+
+func TestMasterMainReleaseUpdateStatementBatchesMappings(t *testing.T) {
+	updates := map[int32]int32{10: 100, 20: 200, 30: 300}
+
+	query, arguments := masterMainReleaseUpdateStatement([]int32{10, 20, 30}, updates)
+
+	require.Contains(t, query, "UPDATE public.master AS target")
+	require.Equal(t, 3, strings.Count(query, "(?::integer, ?::integer)"))
+	require.Len(t, arguments, 7)
+	require.Equal(t, int32(10), arguments[1])
+	require.Equal(t, int32(100), arguments[2])
+	require.Equal(t, int32(30), arguments[5])
+	require.Equal(t, int32(300), arguments[6])
 }
 
 func TestReleaseRelationRead(t *testing.T) {

@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -43,12 +44,14 @@ func processRelationChunks[T any](
 	progressText string,
 	writeRelationChunk relationChunkWriter[T],
 ) result.Result {
+	ctx, cancel := context.WithCancel(order.getContext())
+	defer cancel()
 	results := make(chan result.Result)
 	var workers sync.WaitGroup
 	sourceErrors := new(sourceErrorRecorder)
 
 	reader.NewReader[T](
-		order.getContext(),
+		ctx,
 		newReadCloser(order.getFilePath(), progressText),
 		localName,
 	).
@@ -58,14 +61,18 @@ func processRelationChunks[T any](
 			func(value interface{}) {
 				items := value.([]*T)
 				workers.Add(1)
-				if order.submitWorker(func() {
+				if order.submitWorker(ctx, func() {
 					defer workers.Done()
-					results <- writeRelationChunk(order, items)
+					written := writeRelationChunk(order, items)
+					if written.IsErr() {
+						cancel()
+					}
+					results <- written
 				}) {
 					return
 				}
 				workers.Done()
-				sourceErrors.record(order.getContext().Err())
+				sourceErrors.record(ctx.Err())
 			},
 			sourceErrors.record,
 			func() {

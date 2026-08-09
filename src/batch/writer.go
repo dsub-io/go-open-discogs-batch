@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"fmt"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
@@ -121,16 +122,24 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 }
 
 func doWrite[T comparable](items []T, chunkSize int, db *gorm.DB) result.Result {
+	if len(items) == 0 {
+		return result.NewResult(0, nil)
+	}
+	statement := &gorm.Statement{DB: db}
+	if err := statement.Parse(items[0]); err != nil {
+		return result.NewResult(0, fmt.Errorf("parse insert schema: %w", err))
+	}
+	chunkSize, err := postgresSafeBatchSize(chunkSize, len(statement.Schema.DBNames))
+	if err != nil {
+		return result.NewResult(0, err)
+	}
 	var (
 		start     = 0
 		end       = chunkSize
 		resultSum = result.NewResult(0, nil)
 		size      = len(items)
-		cl        clause.OnConflict
+		cl        = ExtractClause(items[0])
 	)
-	if len(items) > 0 {
-		cl = ExtractClause(items[0])
-	}
 	for {
 		if resultSum.IsErr() {
 			logrus.Errorf("error during insertion: %+v\n", resultSum.Err())
@@ -147,4 +156,19 @@ func doWrite[T comparable](items []T, chunkSize int, db *gorm.DB) result.Result 
 		start += chunkSize
 		end += chunkSize
 	}
+}
+
+func postgresSafeBatchSize(requested, columnCount int) (int, error) {
+	const postgresBindParameterLimit = 65_535
+	if requested < 1 {
+		return 0, fmt.Errorf("chunk size must be positive")
+	}
+	if columnCount < 1 {
+		return 0, fmt.Errorf("insert schema has no columns")
+	}
+	maxRows := postgresBindParameterLimit / columnCount
+	if maxRows < 1 {
+		return 0, fmt.Errorf("insert schema has too many columns: %d", columnCount)
+	}
+	return min(requested, maxRows), nil
 }

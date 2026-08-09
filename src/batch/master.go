@@ -53,7 +53,7 @@ func writeMasterRelationChunk(order Order, items []*XmlMasterRelation) result.Re
 		}
 		master := item.GetMaster()
 		m = append(m, master)
-		cache.MasterIDCache.Store(master.ID, struct{}{})
+		cache.MasterIDs.Add(master.ID)
 		ms = append(ms, item.GetMasterStyles()...)
 		mg = append(mg, item.GetMasterGenres()...)
 		mv = append(mv, item.GetMasterVideos()...)

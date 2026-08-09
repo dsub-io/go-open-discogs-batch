@@ -19,9 +19,9 @@ func InsertSimple[F, T any](order Order, topic string, localName string) result.
 		Map(registerCache).
 		WindowWithCount(order.getChunkSize()).
 		Map(helper.MapWindowedSlice[*T]()).
-		Map(insertBySlice[*T](order)).
+		Map(insertBySlice[*T](order), rxgo.WithPool(order.getMaxWorkers())).
 		Reduce(helper.MergeCount()).
-		Observe(rxgo.WithPool(order.getMaxWorkers()))
+		Observe()
 	if res.E != nil {
 		return result.NewResult(0, res.E)
 	}
@@ -46,11 +46,11 @@ func registerCache(_ context.Context, i interface{}) (interface{}, error) {
 	}
 	switch o := i.(type) {
 	case *model.Artist:
-		cache.ArtistIDCache.Store(o.ID, struct{}{})
+		cache.ArtistIDs.Add(o.ID)
 	case *model.Label:
-		cache.LabelIDCache.Store(o.ID, struct{}{})
+		cache.LabelIDs.Add(o.ID)
 	case *model.Master:
-		cache.MasterIDCache.Store(o.ID, struct{}{})
+		cache.MasterIDs.Add(o.ID)
 	}
 	return i, nil
 }

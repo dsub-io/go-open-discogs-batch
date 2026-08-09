@@ -88,7 +88,7 @@ func (a *XmlArtistRelation) GetNameVars() []*opendiscogsmodel.ArtistNameVariatio
 func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
 	items := make([]*opendiscogsmodel.ArtistAlias, 0, len(a.Aliases))
 	for _, alias := range a.Aliases {
-		if _, exists := cache.ArtistIDCache.Load(alias.ID); !exists {
+		if !cache.ArtistIDs.Contains(alias.ID) {
 			continue
 		}
 		now := time.Now().UTC()
@@ -105,7 +105,7 @@ func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
 func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
 	items := make([]*opendiscogsmodel.ArtistGroup, 0, len(a.Groups))
 	for _, group := range a.Groups {
-		if _, exists := cache.ArtistIDCache.Load(group.ID); !exists {
+		if !cache.ArtistIDs.Contains(group.ID) {
 			continue
 		}
 		now := time.Now().UTC()
@@ -122,7 +122,7 @@ func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
 func (a *XmlArtistRelation) GetMembers() []*opendiscogsmodel.ArtistMember {
 	items := make([]*opendiscogsmodel.ArtistMember, 0, len(a.Members))
 	for _, member := range a.Members {
-		if _, exists := cache.ArtistIDCache.Load(member.ID); !exists {
+		if !cache.ArtistIDs.Contains(member.ID) {
 			continue
 		}
 		now := time.Now().UTC()
@@ -185,7 +185,7 @@ func (l *XmlLabelRelation) GetUrls() []*opendiscogsmodel.LabelURL {
 func (l *XmlLabelRelation) GetSubLabels() []*opendiscogsmodel.LabelSubLabel {
 	items := make([]*opendiscogsmodel.LabelSubLabel, 0, len(l.SubLabels))
 	for _, subLabel := range l.SubLabels {
-		if _, exists := cache.LabelIDCache.Load(subLabel.ID); !exists {
+		if !cache.LabelIDs.Contains(subLabel.ID) {
 			continue
 		}
 		now := time.Now().UTC()
@@ -325,7 +325,7 @@ func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
 func (m *XmlMasterRelation) GetMasterArtists() []*opendiscogsmodel.MasterArtist {
 	items := make([]*opendiscogsmodel.MasterArtist, 0, len(m.Artists))
 	for _, artistID := range m.Artists {
-		if _, exists := cache.ArtistIDCache.Load(artistID); !exists {
+		if !cache.ArtistIDs.Contains(artistID) {
 			continue
 		}
 		now := time.Now().UTC()
@@ -451,7 +451,7 @@ func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
 		if value == "" {
 			continue
 		}
-		if _, exists := cache.LabelIDCache.Load(work.LabelID); !exists {
+		if !cache.LabelIDs.Contains(work.LabelID) {
 			continue
 		}
 		now := time.Now().UTC()
@@ -559,7 +559,7 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseItemCreditedArtist {
 	items := make([]*opendiscogsmodel.ReleaseItemCreditedArtist, 0, len(r.CreditedArtists))
 	for _, creditedArtist := range r.CreditedArtists {
-		if _, exists := cache.ArtistIDCache.Load(creditedArtist.ArtistID); !exists {
+		if !cache.ArtistIDs.Contains(creditedArtist.ArtistID) {
 			continue
 		}
 		role := strings.TrimSpace(creditedArtist.Role)
@@ -582,7 +582,7 @@ func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseIte
 func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItemArtist {
 	items := make([]*opendiscogsmodel.ReleaseItemArtist, 0, len(r.Artists))
 	for _, artistID := range r.Artists {
-		if _, exists := cache.ArtistIDCache.Load(artistID); !exists {
+		if !cache.ArtistIDs.Contains(artistID) {
 			continue
 		}
 		now := time.Now().UTC()
@@ -599,7 +599,7 @@ func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItem
 func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
 	items := make([]*opendiscogsmodel.LabelReleaseItem, 0, len(r.Labels))
 	for _, label := range r.Labels {
-		if _, exists := cache.LabelIDCache.Load(label.LabelID); !exists {
+		if !cache.LabelIDs.Contains(label.LabelID) {
 			continue
 		}
 		categoryNotation := strings.TrimSpace(label.CategoryNotation)
@@ -663,7 +663,7 @@ func releaseItem(
 ) *opendiscogsmodel.ReleaseItem {
 	var masterID *int32
 	if masterInfo.MasterID != nil {
-		if _, exists := cache.MasterIDCache.Load(*masterInfo.MasterID); exists {
+		if cache.MasterIDs.Contains(*masterInfo.MasterID) {
 			masterID = masterInfo.MasterID
 		}
 	}

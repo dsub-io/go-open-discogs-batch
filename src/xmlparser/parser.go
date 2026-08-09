@@ -62,6 +62,9 @@ func NewParser[T any]() Parser[T] {
 type parserImpl[T any] struct{}
 
 func (p *parserImpl[T]) Parse(ctx context.Context, order TokenParseOrder) rxgo.Observable {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c := make(chan rxgo.Item)
 
 	go func(chan rxgo.Item) {
@@ -80,7 +83,7 @@ func (p *parserImpl[T]) Parse(ctx context.Context, order TokenParseOrder) rxgo.O
 				token, err := order.Token()
 				if err != nil {
 					if !errors.Is(err, io.EOF) {
-						c <- rxgo.Error(err)
+						emit(ctx, c, rxgo.Error(err))
 					}
 					return
 				}
@@ -90,12 +93,25 @@ func (p *parserImpl[T]) Parse(ctx context.Context, order TokenParseOrder) rxgo.O
 				se := token.(xml.StartElement)
 				v := new(T)
 				if err := order.DecodeElement(v, &se); err != nil {
-					c <- rxgo.Error(err)
+					if !emit(ctx, c, rxgo.Error(err)) {
+						return
+					}
 				} else {
-					c <- rxgo.Of(v)
+					if !emit(ctx, c, rxgo.Of(v)) {
+						return
+					}
 				}
 			}
 		}
 	}(c)
 	return rxgo.FromChannel(c)
+}
+
+func emit(ctx context.Context, target chan<- rxgo.Item, item rxgo.Item) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case target <- item:
+		return true
+	}
 }

@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"fmt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -22,12 +23,27 @@ var DB *gorm.DB
 func Connect(dsn string) (err error) {
 	if DB, err = GetConnect(dsn); err != nil {
 		return
-	} else if sqlDB, sqlDbErr := DB.DB(); sqlDbErr != nil {
-		return sqlDbErr
-	} else {
-		sqlDB.SetConnMaxLifetime(time.Second)
-		return
 	}
+	return nil
+}
+
+// ConfigurePool reserves one connection for the import coordinator and bounds all remaining
+// connections by the configured worker limit. Connections are not forcibly recycled during a long
+// import; only idle connections expire.
+func ConfigurePool(db *gorm.DB, maxWorkers int) error {
+	if maxWorkers < 1 {
+		return fmt.Errorf("max workers must be positive")
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("open SQL connection pool: %w", err)
+	}
+	poolSize := maxWorkers + 1
+	sqlDB.SetMaxOpenConns(poolSize)
+	sqlDB.SetMaxIdleConns(poolSize)
+	sqlDB.SetConnMaxLifetime(0)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
+	return nil
 }
 
 func GetConnect(dsn string) (*gorm.DB, error) {
@@ -53,5 +69,8 @@ func GetConnect(dsn string) (*gorm.DB, error) {
 			LogLevel:                  logger.Error,
 		})
 
-	return gorm.Open(dl, &gorm.Config{Logger: newLogger})
+	return gorm.Open(dl, &gorm.Config{
+		Logger:                 newLogger,
+		SkipDefaultTransaction: true,
+	})
 }

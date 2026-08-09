@@ -15,9 +15,17 @@ func TestConnect(t *testing.T) {
 		err := Connect(dsn)
 		assert.NoError(t, err)
 		assert.NotNil(t, DB)
+		assert.True(t, DB.Config.SkipDefaultTransaction)
+		assert.NoError(t, ConfigurePool(DB, 3))
+		sqlDB, dbErr := DB.DB()
+		assert.NoError(t, dbErr)
+		assert.Equal(t, 4, sqlDB.Stats().MaxOpenConnections)
 		result := DB.Exec("SELECT 1")
 		assert.Equal(t, int64(1), result.RowsAffected)
 		assert.Nil(t, result.Error)
+	})
+	t.Run("reject invalid pool limit", func(t *testing.T) {
+		assert.Error(t, ConfigurePool(DB, 0))
 	})
 	t.Run("must complain", func(t *testing.T) {
 		err := Connect("mongo://gorm:LoremIpsum86@localhost:9930?database=dbname")
