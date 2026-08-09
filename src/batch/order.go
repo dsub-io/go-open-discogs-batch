@@ -12,7 +12,7 @@ type Order interface {
 	getMaxWorkers() int
 	getFilePath() string
 	getDB() *gorm.DB
-	submitWorker(func()) bool
+	submitWorker(context.Context, func()) bool
 }
 
 type orderImpl struct {
@@ -44,12 +44,15 @@ func (o *orderImpl) getDB() *gorm.DB {
 	return o.db.Session(&gorm.Session{})
 }
 
-func (o *orderImpl) submitWorker(work func()) bool {
-	if err := o.ctx.Err(); err != nil {
+func (o *orderImpl) submitWorker(ctx context.Context, work func()) bool {
+	if ctx == nil {
+		ctx = o.ctx
+	}
+	if err := ctx.Err(); err != nil {
 		return false
 	}
 	select {
-	case <-o.ctx.Done():
+	case <-ctx.Done():
 		return false
 	case o.workers <- struct{}{}:
 	}

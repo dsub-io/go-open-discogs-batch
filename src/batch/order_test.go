@@ -19,7 +19,7 @@ func TestOrderLimitsConcurrentWorkers(t *testing.T) {
 
 	for range 8 {
 		workers.Add(1)
-		order.submitWorker(func() {
+		order.submitWorker(context.Background(), func() {
 			defer workers.Done()
 			current := active.Add(1)
 			for {
@@ -51,5 +51,5 @@ func TestOrderStopsSubmittingAfterContextCancellation(t *testing.T) {
 	cancel()
 	order := NewOrder(ctx, 1, 1, "unused", nil)
 
-	require.False(t, order.submitWorker(func() {}))
+	require.False(t, order.submitWorker(ctx, func() {}))
 }

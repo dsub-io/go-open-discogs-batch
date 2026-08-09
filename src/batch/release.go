@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -79,25 +80,54 @@ func writeReleaseRelationChunk(order Order, items []*XmlReleaseRelation) result.
 }
 
 func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) result.Result {
-	updated := 0
+	updates := make(map[int32]int32)
 	for _, release := range releases {
 		if release == nil || !release.MasterInfo.IsMaster || release.MasterInfo.MasterID == nil {
 			continue
 		}
-		tx := order.getDB().
-			Model(&model.Master{}).
-			Where("id = ?", *release.MasterInfo.MasterID).
-			Where("main_release_id IS DISTINCT FROM ?", release.ID).
-			Updates(map[string]any{
-				"main_release_id":  release.ID,
-				"last_modified_at": time.Now().UTC(),
-			})
+		updates[*release.MasterInfo.MasterID] = release.ID
+	}
+	if len(updates) == 0 {
+		return result.NewResult(0, nil)
+	}
+
+	masterIDs := make([]int32, 0, len(updates))
+	for masterID := range updates {
+		masterIDs = append(masterIDs, masterID)
+	}
+	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
+
+	updated := 0
+	batchSize := min(order.getChunkSize(), 32_767)
+	for start := 0; start < len(masterIDs); start += batchSize {
+		end := min(start+batchSize, len(masterIDs))
+		query, arguments := masterMainReleaseUpdateStatement(masterIDs[start:end], updates)
+		tx := order.getDB().Exec(query, arguments...)
 		if tx.Error != nil {
 			return result.NewResult(updated, tx.Error)
 		}
 		updated += int(tx.RowsAffected)
 	}
 	return result.NewResult(updated, nil)
+}
+
+func masterMainReleaseUpdateStatement(
+	masterIDs []int32,
+	updates map[int32]int32,
+) (string, []any) {
+	rows := make([]string, len(masterIDs))
+	arguments := make([]any, 0, 1+len(masterIDs)*2)
+	arguments = append(arguments, time.Now().UTC())
+	for index, masterID := range masterIDs {
+		rows[index] = "(?::integer, ?::integer)"
+		arguments = append(arguments, masterID, updates[masterID])
+	}
+	return `UPDATE public.master AS target
+		SET main_release_id = incoming.release_id,
+			last_modified_at = ?
+		FROM (VALUES ` + strings.Join(rows, ", ") + `) AS incoming(master_id, release_id)
+		WHERE target.id = incoming.master_id
+			AND target.main_release_id IS DISTINCT FROM incoming.release_id`, arguments
 }
 
 func filterGenres(genres []*model.Genre) []*model.Genre {
