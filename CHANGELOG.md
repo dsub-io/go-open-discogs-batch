@@ -8,6 +8,30 @@
 * releases and masters will not contain empty genre, style entry ([60c59b5](https://github.com/state303/go-discogs/commit/60c59b5e4d4814c015e6c71087ee5fec2125bfeb))
 * removes redundant ctx reference ([b823bcc](https://github.com/state303/go-discogs/commit/b823bcc976f432f76ce64a7d5de04c3d0001a19b))
 
+## [2.0.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v1.2.0...v2.0.0) (2026-08-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* unify runtime options and environment variables
+
+### Features
+
+* bound concurrent import workers ([b7087e6](https://github.com/dsub-io/go-open-discogs-batch/commit/b7087e664ef969734cff6d27c7e4e530bc13fb09))
+* unify runtime options and environment variables ([4783137](https://github.com/dsub-io/go-open-discogs-batch/commit/47831370f9712b6b68a76bc7a6ed7515a9b7ca0e))
+
+
+### Performance Improvements
+
+* replace `sync.Map` ID caches with segmented bit sets; in the same 1,000,000-ID benchmark, median elapsed time fell from 234.656 ms to 9.257 ms (`25.4x` faster), allocated bytes fell from about 109.5 MB/op to 132.9 KB/op (`99.88%` lower), and allocations fell from 2,359,348 to 39 per operation ([37255eb](https://github.com/dsub-io/go-open-discogs-batch/commit/37255eb262d1f573572c4bdb10a692559f7742f7))
+* bound the PostgreSQL pool to `max-workers + 1`, remove one-second connection recycling, stream dependency IDs, and cap inserts below PostgreSQL's 65,535 bind-parameter limit
+* replace up to 5,000 row-by-row master-main updates at the default chunk size with one set-based SQL statement (`99.98%` fewer statements)
+
+### Distribution
+
+* publish GoReleaser binaries and packages to GitHub Releases
+* publish non-root `linux/amd64` and `linux/arm64` images to `ghcr.io/dsub-io/go-open-discogs-batch`, with a post-publish architecture check
+
 ## [1.2.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v1.1.3...v1.2.0) (2026-07-31)
 
 
