@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"time"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/data"
 	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	fileutil "github.com/dsub-io/go-open-discogs-batch/src/file"
 	"github.com/knadh/koanf"
-	"sort"
-	"time"
+	"gorm.io/gorm"
 )
 
 type Runner struct {
@@ -76,29 +78,10 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		b            = New()
 		totalUpdates = 0
 		chunk        = config.Int("chunk-size")
-		db           = database.DB
-		steps        = make([]Step, 0)
+		maxWorkers   = config.Int("max-workers")
 	)
-
-	if hasArtist(config) {
-		order := NewOrder(ctx, chunk, plan.Resources["artists"], db)
-		steps = append(steps, b.UpdateArtist(order))
-	}
-
-	if hasLabel(config) {
-		order := NewOrder(ctx, chunk, plan.Resources["labels"], db)
-		steps = append(steps, b.UpdateLabel(order))
-	}
-
-	if hasMaster(config) {
-		order := NewOrder(ctx, chunk, plan.Resources["masters"], db)
-		steps = append(steps, b.UpdateMaster(order))
-	}
-
-	if hasRelease(config) {
-		order := NewOrder(ctx, chunk, plan.Resources["releases"], db)
-		steps = append(steps, b.UpdateRelease(order))
-	}
+	fmt.Printf("max-workers=%d\n", maxWorkers)
+	steps := buildImportSteps(ctx, config, plan, b, chunk, maxWorkers, database.DB)
 
 	for i := range steps {
 		r := steps[i]()
@@ -118,6 +101,42 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	}
 	printResult(begin, totalUpdates, err)
 	return err
+}
+
+func buildImportSteps(
+	ctx context.Context,
+	config *koanf.Koanf,
+	plan *data.ImportPlan,
+	batch Batch,
+	chunkSize int,
+	maxWorkers int,
+	db *gorm.DB,
+) []Step {
+	definitions := []struct {
+		enabled     bool
+		resourceKey string
+		build       func(Order) Step
+	}{
+		{hasArtist(config), "artists", batch.UpdateArtist},
+		{hasLabel(config), "labels", batch.UpdateLabel},
+		{hasMaster(config), "masters", batch.UpdateMaster},
+		{hasRelease(config), "releases", batch.UpdateRelease},
+	}
+	steps := make([]Step, 0, len(definitions))
+	for _, definition := range definitions {
+		if !definition.enabled {
+			continue
+		}
+		order := NewOrder(
+			ctx,
+			chunkSize,
+			maxWorkers,
+			plan.Resources[definition.resourceKey],
+			db,
+		)
+		steps = append(steps, definition.build(order))
+	}
+	return steps
 }
 
 func cleanupImportFiles(plan *data.ImportPlan) error {

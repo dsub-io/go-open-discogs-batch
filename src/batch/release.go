@@ -1,16 +1,12 @@
 package batch
 
 import (
-	"fmt"
-	"github.com/dsub-io/go-open-discogs-batch/src/helper"
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"strings"
+	"time"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
-	"gorm.io/gorm/clause"
-	"strings"
-	"sync"
-	"time"
 )
 
 // TODO: double check ptr exceptions on reference
@@ -24,100 +20,62 @@ func GetReleaseStep(order Order) Step {
 }
 
 func insertReleases(order Order) result.Result {
-	r := newReadCloser(order.getFilePath(), "updating releases...")
-
-	var (
-		wg   = new(sync.WaitGroup)
-		res  = make(chan result.Result)
-		done = make(chan struct{}, 1)
+	return processRelationChunks(
+		order,
+		"release relations",
+		"release",
+		"updating releases...",
+		writeReleaseRelationChunk,
 	)
-
-	go func() {
-		<-reader.NewReader[XmlReleaseRelation](order.getContext(), r, "release").
-			WindowWithCount(order.getChunkSize()).
-			Map(helper.MapWindowedSlice[*XmlReleaseRelation]()).
-			ForEach(
-				doInsertReleases(order, res, wg),
-				printError(),
-				signalDone(done, wg))
-	}()
-
-	go func() {
-		<-done
-		close(res)
-	}()
-
-	sum := result.NewResult(0, nil)
-	for next := range res {
-		sum = sum.Sum(next)
-	}
-
-	fmt.Printf("\nUpdated %+v release relations\n", sum.Count())
-	return sum
 }
 
-func doInsertReleases(order Order, res chan result.Result, wg *sync.WaitGroup) func(i interface{}) {
-	return func(i interface{}) {
-		wg.Add(1)
-		rrs := i.([]*XmlReleaseRelation)
-
-		var (
-			g   = make([]*model.Genre, 0)
-			s   = make([]*model.Style, 0)
-			rel = make([]*model.ReleaseItem, 0)
-			ra  = make([]*model.ReleaseItemArtist, 0)
-			rca = make([]*model.ReleaseItemCreditedArtist, 0)
-			rw  = make([]*model.ReleaseItemWork, 0)
-			rf  = make([]*model.ReleaseItemFormat, 0)
-			rs  = make([]*model.ReleaseItemStyle, 0)
-			rg  = make([]*model.ReleaseItemGenre, 0)
-			ri  = make([]*model.ReleaseItemIdentifier, 0)
-			rt  = make([]*model.ReleaseItemTrack, 0)
-			rv  = make([]*model.ReleaseItemVideo, 0)
-			rl  = make([]*model.LabelReleaseItem, 0)
-		)
-
-		for _, rr := range rrs {
-			if rr == nil {
-				continue
-			}
-			g = append(g, rr.GetGenres()...)
-			s = append(s, rr.GetStyles()...)
+func writeReleaseRelationChunk(order Order, items []*XmlReleaseRelation) result.Result {
+	var (
+		g   = make([]*model.Genre, 0)
+		s   = make([]*model.Style, 0)
+		rel = make([]*model.ReleaseItem, 0)
+		ra  = make([]*model.ReleaseItemArtist, 0)
+		rca = make([]*model.ReleaseItemCreditedArtist, 0)
+		rw  = make([]*model.ReleaseItemWork, 0)
+		rf  = make([]*model.ReleaseItemFormat, 0)
+		rs  = make([]*model.ReleaseItemStyle, 0)
+		rg  = make([]*model.ReleaseItemGenre, 0)
+		ri  = make([]*model.ReleaseItemIdentifier, 0)
+		rt  = make([]*model.ReleaseItemTrack, 0)
+		rv  = make([]*model.ReleaseItemVideo, 0)
+		rl  = make([]*model.LabelReleaseItem, 0)
+	)
+	for _, item := range items {
+		if item == nil {
+			continue
 		}
-
-		order.getDB().
-			Clauses(clause.OnConflict{DoNothing: true}).
-			CreateInBatches(filterGenres(g), order.getChunkSize())
-		order.getDB().
-			Clauses(clause.OnConflict{DoNothing: true}).
-			CreateInBatches(filterStyles(s), order.getChunkSize())
-
-		for _, rr := range rrs {
-			if rr == nil {
-				continue
-			}
-			rel = append(rel, rr.GetRelease())
-			ra = append(ra, rr.GetReleaseArtists()...)
-			rg = append(rg, rr.GetReleaseGenres()...)
-			rs = append(rs, rr.GetReleaseStyles()...)
-			rw = append(rw, rr.GetWorks()...)
-			rl = append(rl, rr.GetLabels()...)
-			rf = append(rf, rr.GetFormats()...)
-			ri = append(ri, rr.GetIdentifiers()...)
-			rt = append(rt, rr.GetTracks()...)
-			rv = append(rv, rr.GetVideos()...)
-			rca = append(rca, rr.GetCreditedArtists()...)
-		}
-
-		go func(res chan result.Result) {
-			defer wg.Done()
-			written := writeThenReport(order, wg, rel, ra, rw, rs, rg, rl, rf, ri, rt, rv, rca)
-			if !written.IsErr() {
-				written = written.Sum(updateMasterMainReleases(order, rrs))
-			}
-			res <- written
-		}(res)
+		g = append(g, item.GetGenres()...)
+		s = append(s, item.GetStyles()...)
 	}
+	if referenceResult := writeReferenceEntities(order, filterGenres(g), filterStyles(s)); referenceResult.IsErr() {
+		return referenceResult
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		rel = append(rel, item.GetRelease())
+		ra = append(ra, item.GetReleaseArtists()...)
+		rg = append(rg, item.GetReleaseGenres()...)
+		rs = append(rs, item.GetReleaseStyles()...)
+		rw = append(rw, item.GetWorks()...)
+		rl = append(rl, item.GetLabels()...)
+		rf = append(rf, item.GetFormats()...)
+		ri = append(ri, item.GetIdentifiers()...)
+		rt = append(rt, item.GetTracks()...)
+		rv = append(rv, item.GetVideos()...)
+		rca = append(rca, item.GetCreditedArtists()...)
+	}
+	written := writeChunk(order, rel, ra, rw, rs, rg, rl, rf, ri, rt, rv, rca)
+	if !written.IsErr() {
+		written = written.Sum(updateMasterMainReleases(order, items))
+	}
+	return written
 }
 
 func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) result.Result {

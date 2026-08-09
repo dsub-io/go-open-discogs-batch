@@ -3,6 +3,7 @@ package batch
 import (
 	"context"
 	"fmt"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/helper"
 	"github.com/dsub-io/go-open-discogs-batch/src/reader"
@@ -20,12 +21,22 @@ func InsertSimple[F, T any](order Order, topic string, localName string) result.
 		Map(helper.MapWindowedSlice[*T]()).
 		Map(insertBySlice[*T](order)).
 		Reduce(helper.MergeCount()).
-		Observe(rxgo.WithCPUPool())
+		Observe(rxgo.WithPool(order.getMaxWorkers()))
 	if res.E != nil {
 		return result.NewResult(0, res.E)
-	} else {
-		fmt.Printf("\nUpdated %+v %+v\n", res.V.(int), topic)
-		return result.NewResult(res.V.(int), nil)
+	}
+	updated, ok := res.V.(int)
+	if !ok {
+		return result.NewResult(0, fmt.Errorf("insert result for %s did not contain a count", topic))
+	}
+	fmt.Printf("\nUpdated %+v %+v\n", updated, topic)
+	return result.NewResult(updated, nil)
+}
+
+func insertBySlice[T any](order Order) func(_ context.Context, i interface{}) (interface{}, error) {
+	return func(_ context.Context, i interface{}) (interface{}, error) {
+		res := NewWriter(order.getDB()).Write(order.getChunkSize(), i.([]T))
+		return res.Count(), res.Err()
 	}
 }
 

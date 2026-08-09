@@ -7,13 +7,25 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"sync"
 )
 
-func writeThenReport(order Order, wg *sync.WaitGroup, slices ...interface{}) result.Result {
-	wg.Add(1)
-	defer wg.Done()
+func writeChunk(order Order, slices ...interface{}) result.Result {
 	return NewWriter(order.getDB()).Write(order.getChunkSize(), slices...)
+}
+
+func writeReferenceEntities(
+	order Order,
+	genres []*model.Genre,
+	styles []*model.Style,
+) result.Result {
+	for _, items := range []interface{}{genres, styles} {
+		if err := order.getDB().
+			Clauses(clause.OnConflict{DoNothing: true}).
+			CreateInBatches(items, order.getChunkSize()).Error; err != nil {
+			return result.NewResult(0, err)
+		}
+	}
+	return result.NewResult(0, nil)
 }
 
 type Writer interface {

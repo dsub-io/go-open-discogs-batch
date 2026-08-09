@@ -23,22 +23,23 @@ func TestBatch(t *testing.T) {
 	require.NoError(t, RunDDL(db))
 
 	var (
-		ctx   = context.Background()
-		chunk = 5
+		ctx        = context.Background()
+		chunk      = 5
+		maxWorkers = 2
 	)
-	order := NewOrder(ctx, chunk, "testdata/artist.xml.gz", db)
+	order := NewOrder(ctx, chunk, maxWorkers, "testdata/artist.xml.gz", db)
 
 	res := newBatch().UpdateArtist(order)()
 	require.NoError(t, res.Err())
 	require.NotZero(t, res.Count())
 
-	order = NewOrder(ctx, chunk, "testdata/label.xml.gz", db)
+	order = NewOrder(ctx, chunk, maxWorkers, "testdata/label.xml.gz", db)
 
 	res = newBatch().UpdateLabel(order)()
 	require.NoError(t, res.Err())
 	require.NotZero(t, res.Count())
 
-	order = NewOrder(ctx, chunk, "testdata/master.xml.gz", db)
+	order = NewOrder(ctx, chunk, maxWorkers, "testdata/master.xml.gz", db)
 	res = newBatch().UpdateMaster(order)()
 	require.NoError(t, res.Err())
 	require.NotZero(t, res.Count())
@@ -55,7 +56,7 @@ func TestBatch(t *testing.T) {
 		require.NotZero(t, count)
 	}
 
-	order = NewOrder(ctx, chunk, "testdata/release.xml.gz", db)
+	order = NewOrder(ctx, chunk, maxWorkers, "testdata/release.xml.gz", db)
 	res = newBatch().UpdateRelease(order)()
 	require.NoError(t, res.Err())
 
@@ -93,7 +94,7 @@ func TestBatch(t *testing.T) {
 		{"testdata/master.xml.gz", newBatch().UpdateMaster},
 		{"testdata/release.xml.gz", newBatch().UpdateRelease},
 	} {
-		repeated := fixture.step(NewOrder(ctx, chunk, fixture.path, db))()
+		repeated := fixture.step(NewOrder(ctx, chunk, maxWorkers, fixture.path, db))()
 		require.NoError(t, repeated.Err())
 	}
 	after := snapshotBusinessTables(t, db)

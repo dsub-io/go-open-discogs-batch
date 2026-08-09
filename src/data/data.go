@@ -4,13 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/dsub-io/go-open-discogs-batch/src/client"
-	"github.com/dsub-io/go-open-discogs-batch/src/file"
-	"github.com/dsub-io/go-open-discogs-batch/src/helper"
-	"github.com/dsub-io/go-open-discogs-batch/src/xmlparser"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
-	"github.com/knadh/koanf"
-	"github.com/reactivex/rxgo/v2"
 	"io"
 	"net/url"
 	"os"
@@ -19,42 +12,63 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dsub-io/go-open-discogs-batch/src/client"
+	"github.com/dsub-io/go-open-discogs-batch/src/file"
+	"github.com/dsub-io/go-open-discogs-batch/src/helper"
+	"github.com/dsub-io/go-open-discogs-batch/src/xmlparser"
+	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	"github.com/knadh/koanf"
+	"github.com/reactivex/rxgo/v2"
 )
 
 var DiscogsS3BaseUrl = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com/"
 var DiscogsDataBaseURL = "https://data.discogs.com/"
 
-var dumpUriPattern = regexp.MustCompile(`^data/(\d{4})/discogs_(\d{8})_(\w+).(.*)$`)
+var dumpUriPattern = regexp.MustCompile(`^data/(\d{4})/discogs_(\d{8})_(\w+)\.(.*)$`)
 var checksumPattern = regexp.MustCompile(`^([^ ]+) +.*(\d{8})_([^.]+).*$`)
 var dataTypesRegexp = regexp.MustCompile(`^(artists|labels|masters|releases|checksum)$`)
 
-// checksumMap to collect checksum
-var checksumMap = make(map[time.Time]map[string]string)
+type checksumStore struct {
+	mu     sync.RWMutex
+	values map[time.Time]map[string]string
+}
 
-// mu locks checksumMap write
-var mu = new(sync.RWMutex)
+func newChecksumStore() *checksumStore {
+	return &checksumStore{values: make(map[time.Time]map[string]string)}
+}
 
-// checksumFetchWg forces execution stage to wait until checksum fetch is done
-var checksumFetchWg = new(sync.WaitGroup)
-
-func syncSave(g time.Time, t, c string) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if v, ok := checksumMap[g]; ok {
-		v[t] = c
-	} else {
-		checksumMap[g] = make(map[string]string)
-		checksumMap[g][t] = c
+func (s *checksumStore) addText(text string) {
+	for _, line := range strings.Split(text, "\n") {
+		if checksum, ok := parseChecksumTextLine(line); ok {
+			s.save(checksum)
+		}
 	}
 }
 
-func storeChecksum(s string) {
-	for _, line := range strings.Split(s, "\n") {
-		if c, ok := parseChecksumTextLine(line); ok {
-			syncSave(c.gen, c.typ, c.chk)
+func (s *checksumStore) save(checksum chkSumP) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if values, ok := s.values[checksum.gen]; ok {
+		values[checksum.typ] = checksum.chk
+		return
+	}
+	s.values[checksum.gen] = map[string]string{checksum.typ: checksum.chk}
+}
+
+func (s *checksumStore) snapshot() map[time.Time]map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot := make(map[time.Time]map[string]string, len(s.values))
+	for generatedAt, values := range s.values {
+		snapshot[generatedAt] = make(map[string]string, len(values))
+		for targetType, checksum := range values {
+			snapshot[generatedAt][targetType] = checksum
 		}
 	}
+	return snapshot
 }
 
 func parseChecksumTextLine(line string) (chk chkSumP, ok bool) {
@@ -66,21 +80,27 @@ func parseChecksumTextLine(line string) (chk chkSumP, ok bool) {
 		return chk, false
 	}
 	c, g, t := match[1], match[2], match[3]
-	if pt, err := time.Parse("20060102", g); err != nil {
+	pt, err := time.Parse("20060102", g)
+	if err != nil {
 		return chk, false
-	} else {
-		chk.gen = pt
-		chk.chk = c
-		chk.typ = t
-		return chk, true
 	}
+	chk.gen = pt
+	chk.chk = c
+	chk.typ = t
+	return chk, true
 }
 
-func PopulateFromUri() func(ctx context.Context, i interface{}) (interface{}, error) {
-	return func(ctx context.Context, i interface{}) (interface{}, error) {
+func PopulateFromUri() func(_ context.Context, i interface{}) (interface{}, error) {
+	return func(_ context.Context, i interface{}) (interface{}, error) {
 		dump := i.(*Data)
 		match := dumpUriPattern.FindStringSubmatch(dump.Uri)
-		t, _ := time.Parse("20060102", match[2])
+		if match == nil {
+			return nil, fmt.Errorf("invalid dump URI: %s", dump.Uri)
+		}
+		t, err := time.Parse("20060102", match[2])
+		if err != nil {
+			return nil, fmt.Errorf("invalid dump date in URI %s: %w", dump.Uri, err)
+		}
 		vt := strings.ToLower(match[3])
 		dump.TargetType = vt
 		dump.GeneratedAt = t
@@ -92,22 +112,21 @@ func NotNilFilter() func(i interface{}) bool {
 	return func(i interface{}) bool { return i != nil }
 }
 
-// TODO: refactor
-
 // ValidUriFilter filter items by validating URI, judged by date, types and uri pattern.
 func ValidUriFilter() func(i interface{}) bool {
 	return func(i interface{}) bool {
-		if m, ok := i.(*Data); !ok {
+		dump, ok := i.(*Data)
+		if !ok || dump == nil {
 			return false
-		} else {
-			if m := dumpUriPattern.FindStringSubmatch(m.Uri); m == nil {
-				return false
-			} else if _, err := time.Parse("20060102", m[2]); err != nil {
-				return false
-			} else {
-				return isKnownType(strings.ToLower(m[3]))
-			}
 		}
+		match := dumpUriPattern.FindStringSubmatch(dump.Uri)
+		if match == nil {
+			return false
+		}
+		if _, err := time.Parse("20060102", match[2]); err != nil {
+			return false
+		}
+		return isKnownType(strings.ToLower(match[3]))
 	}
 }
 
@@ -115,21 +134,25 @@ func isKnownType(typeStr string) bool {
 	return dataTypesRegexp.MatchString(typeStr)
 }
 
-func DispatchChecksumFetch() func(context.Context, interface{}) (interface{}, error) {
+func DispatchChecksumFetch(store *checksumStore) func(context.Context, interface{}) (interface{}, error) {
 	return func(ctx context.Context, i interface{}) (interface{}, error) {
 		if dump := i.(*Data); dump.TargetType == "checksum" {
-			checksumFetchWg.Add(1)
-			go func() {
-				defer checksumFetchWg.Done()
-				select {
-				case v := <-getClient().Get(ctx, checksumDownloadURL(dump.Uri)).Observe():
-					if !v.Error() {
-						storeChecksum(string(v.V.([]byte)))
-					}
-				case <-ctx.Done():
-					return
+			select {
+			case v, ok := <-getClient().Get(ctx, checksumDownloadURL(dump.Uri)).Observe():
+				if !ok {
+					return i, fmt.Errorf("checksum response closed for %s", dump.Uri)
 				}
-			}()
+				if v.Error() {
+					return i, v.E
+				}
+				body, ok := v.V.([]byte)
+				if !ok {
+					return i, fmt.Errorf("checksum response for %s was not a byte payload", dump.Uri)
+				}
+				store.addText(string(body))
+			case <-ctx.Done():
+				return i, ctx.Err()
+			}
 		}
 		return i, nil
 	}
@@ -139,10 +162,18 @@ func checksumDownloadURL(uri string) string {
 	return DiscogsDataBaseURL + "?download=" + url.QueryEscape(uri)
 }
 
-func SetChecksumValues(m map[time.Time]map[string]string) func(ctx context.Context, i interface{}) (interface{}, error) {
-	return func(ctx context.Context, i interface{}) (interface{}, error) {
+func SetChecksumValues(m map[time.Time]map[string]string) func(_ context.Context, i interface{}) (interface{}, error) {
+	return func(_ context.Context, i interface{}) (interface{}, error) {
 		v := i.(*Data)
-		v.Checksum = m[v.GeneratedAt][v.TargetType]
+		checksum := m[v.GeneratedAt][v.TargetType]
+		if v.TargetType != "checksum" && checksum == "" {
+			return nil, fmt.Errorf(
+				"checksum not found for %s %s",
+				v.GeneratedAt.Format("2006-01-02"),
+				v.TargetType,
+			)
+		}
+		v.Checksum = checksum
 		return v, nil
 	}
 }
@@ -165,48 +196,44 @@ func ParseDumpModel(ctx context.Context) func(item rxgo.Item) rxgo.Observable {
 	}
 }
 
-func UpdateData(ctx context.Context, repo Repository) (int, error) {
+func UpdateData(ctx context.Context, repo Repository, maxWorkers int) (int, error) {
+	if maxWorkers <= 0 {
+		return -1, fmt.Errorf("max-workers must be a positive integer")
+	}
 	c := client.NewClient()
+	checksums := newChecksumStore()
 
 	items, err := c.Get(ctx, DiscogsS3BaseUrl).
 		FlatMap(ParseDumpModel(ctx)).
 		Filter(NotNilFilter()).
 		Filter(ValidUriFilter()).
 		Map(PopulateFromUri()).
-		Map(DispatchChecksumFetch(), rxgo.WithCPUPool()). // NOT ordered
-		ToSlice(400, rxgo.WithContext(ctx))               // known size: 777 and beyond
+		Map(DispatchChecksumFetch(checksums), rxgo.WithPool(maxWorkers)).
+		ToSlice(400, rxgo.WithContext(ctx)) // known size: 777 and beyond
 
 	if err != nil {
 		return -1, err
 	}
 
-	// wait until checksum fetch is complete
-	wgSig := make(chan struct{}, 1)
-	go func() {
-		defer close(wgSig)
-		checksumFetchWg.Wait()
-		wgSig <- struct{}{}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return 0, nil
-	case <-wgSig:
-		break
-	}
-
 	res := <-rxgo.Just(items)().
-		Map(SetChecksumValues(checksumMap)).
+		Map(SetChecksumValues(checksums.snapshot())).
 		Map(helper.SliceMapper[*Data]()).
 		Filter(NotNilFilter()).
 		Reduce(helper.SliceReducer[*Data]()).
 		Map(BatchInsertItems(repo)).
 		Observe()
-	return res.V.(int), res.E
+	if res.E != nil {
+		return 0, res.E
+	}
+	updated, ok := res.V.(int)
+	if !ok {
+		return 0, fmt.Errorf("catalog update result did not contain a count")
+	}
+	return updated, nil
 }
 
-func BatchInsertItems(repo Repository) func(ctx context.Context, i interface{}) (interface{}, error) {
-	return func(ctx context.Context, i interface{}) (interface{}, error) {
+func BatchInsertItems(repo Repository) func(_ context.Context, i interface{}) (interface{}, error) {
+	return func(_ context.Context, i interface{}) (interface{}, error) {
 		data := i.([]*Data)
 		return repo.BatchInsert(data)
 	}
