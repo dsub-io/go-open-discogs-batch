@@ -69,6 +69,42 @@ runtime; no percentage or physical-core heuristic is applied. It is not a hard
 CPU quota. Use the container or workload scheduler's CPU limit when the process
 itself must not exceed a CPU allocation.
 
+## Large-import resource model
+
+Dump downloads, gzip decompression, and XML parsing are streamed; a dump is
+never loaded into memory as one document. Chunk submission blocks when
+`max-workers` chunks are active, so in-flight work cannot grow with the total
+dump size. The PostgreSQL pool is limited to `max-workers + 1`: one connection
+per possible writer plus the import coordinator's advisory-lock connection.
+
+Integer reference IDs use a segmented concurrent bit set. Each occupied range
+of 65,536 IDs allocates 8 KiB of bit storage, so dense IDs use one bit each.
+Dependencies for a partial import are streamed from PostgreSQL into these sets.
+Release-to-master changes use one set-based update per chunk instead of one SQL
+statement per release. Insert batches are also capped below PostgreSQL's 65,535
+bind-parameter limit even when a larger `--chunk-size` is requested.
+
+Peak working memory is driven by `chunk-size × max-workers × relation fan-out`,
+not by the total row count. Release records have the largest fan-out. For a
+large production import, set `--max-workers` explicitly to the smaller of the
+container CPU allocation and the number of database write connections reserved
+for this job, then tune `--chunk-size` separately from measured heap usage and
+database latency. Lower `chunk-size` when one expanded relation chunk is too
+large; lower `max-workers` when concurrent chunks or PostgreSQL are the
+constraint.
+
+### Measured ID-cache improvement
+
+On an Apple M2 Pro, the previous `sync.Map` ID set and the segmented bit set
+were compared with the same 1,000,000 sequential IDs using three iterations per
+sample and five samples. Median time fell from 234.656 ms to 9.257 ms (`25.4×`
+faster), allocated bytes fell from approximately 109.5 MB/op to 132.9 KB/op
+(`99.88%` lower), and allocations fell from 2,359,348 to 39 per operation. The
+release-to-master update also changes up to 5,000 row-by-row SQL statements at
+the default chunk size into one set-based statement. These figures isolate the
+measured operations; end-to-end import throughput still depends on dump shape,
+PostgreSQL, storage, and runtime limits.
+
 ## Container
 
 Release images are published from Release Please release commits:
@@ -98,6 +134,7 @@ gofmt -w .
 go mod tidy
 go vet ./...
 go test -race -coverprofile=coverage.out -covermode=atomic ./...
+go test -run '^$' -bench 'IDSetLoadMillion' -benchmem ./src/cache
 ```
 
 Pull requests run formatting, module consistency, vet, race detection, unit and
