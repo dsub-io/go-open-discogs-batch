@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/batch"
@@ -21,6 +22,24 @@ const versionPrintPrefix = "go-open-discogs-batch"
 
 var version string
 var conf = koanf.New(".")
+
+var environmentOptionNames = map[string]string{
+	"DATABASE_URL":    "database-url",
+	"ENTITIES":        "entities",
+	"DUMP_MONTH":      "dump-month",
+	"DATA_DIR":        "data-dir",
+	"CHUNK_SIZE":      "chunk-size",
+	"MAX_WORKERS":     "max-workers",
+	"CLEANUP":         "cleanup",
+	"FORCE":           "force",
+	"ALLOW_DOWNGRADE": "allow-downgrade",
+}
+
+var booleanEnvironmentOptions = map[string]struct{}{
+	"CLEANUP":         {},
+	"FORCE":           {},
+	"ALLOW_DOWNGRADE": {},
+}
 
 func Execute() error {
 	return NewRootCommand().Execute()
@@ -47,6 +66,7 @@ into the canonical PostgreSQL schema published by open-discogs-model.`,
 	f.StringP("dump-month", "m", "", "exact dump month in yyyy-MM form (default: latest per entity)")
 	f.String("data-dir", dataDir, "download directory")
 	f.IntP("chunk-size", "b", 5000, "import chunk size")
+	f.Int("max-workers", runtime.GOMAXPROCS(0), "maximum concurrent import workers")
 	f.BoolP("cleanup", "c", false, "delete downloads after a successful import")
 	f.BoolP("force", "f", false, "reprocess an already successful dump")
 	f.Bool("allow-downgrade", false, "allow an older dump than the entity checkpoint")
@@ -91,24 +111,14 @@ func loadEnvironment(k *koanf.Koanf) error {
 	return k.Load(
 		env.ProviderWithValue(Prefix, ".", func(key string, value string) (string, interface{}) {
 			suffix := strings.TrimPrefix(key, Prefix)
-			mapped := map[string]string{
-				"DATABASE_URL":    "database-url",
-				"ENTITIES":        "entities",
-				"DUMP_MONTH":      "dump-month",
-				"DATA_DIR":        "data-dir",
-				"CHUNK_SIZE":      "chunk-size",
-				"CLEANUP":         "cleanup",
-				"FORCE":           "force",
-				"ALLOW_DOWNGRADE": "allow-downgrade",
-			}
-			name, ok := mapped[suffix]
+			name, ok := environmentOptionNames[suffix]
 			if !ok {
 				return "", nil
 			}
 			if suffix == "ENTITIES" {
 				return name, splitValues(value)
 			}
-			if suffix == "CLEANUP" || suffix == "FORCE" || suffix == "ALLOW_DOWNGRADE" {
+			if _, isBoolean := booleanEnvironmentOptions[suffix]; isBoolean {
 				switch strings.ToLower(strings.TrimSpace(value)) {
 				case "true", "1", "yes", "on":
 					return name, true

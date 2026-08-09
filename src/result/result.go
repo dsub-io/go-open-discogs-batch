@@ -22,6 +22,9 @@ func (r *result) Sum(that Result) Result {
 		return r
 	}
 	r.count += that.Count()
+	if r.err == nil {
+		r.err = that.Err()
+	}
 	return r
 }
 

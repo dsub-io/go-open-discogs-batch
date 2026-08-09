@@ -34,13 +34,24 @@ func (v *validator) Validate(config *koanf.Koanf) error {
 	if err := ValidDatabaseURL(config.String("database-url")); err != nil {
 		return err
 	}
-	return ValidChunkSize(config.String("chunk-size"))
+	if err := ValidChunkSize(config.String("chunk-size")); err != nil {
+		return err
+	}
+	return ValidMaxWorkers(config.String("max-workers"))
+}
+
+func ValidMaxWorkers(value string) error {
+	return validPositiveInteger("max-workers", value)
 }
 
 func ValidChunkSize(value string) error {
-	chunkSize, err := strconv.ParseInt(value, 10, 32)
-	if err != nil || chunkSize <= 0 {
-		return fmt.Errorf("chunk-size must be a positive integer")
+	return validPositiveInteger("chunk-size", value)
+}
+
+func validPositiveInteger(name, value string) error {
+	parsed, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || parsed <= 0 {
+		return fmt.Errorf("%s must be a positive integer", name)
 	}
 	return nil
 }

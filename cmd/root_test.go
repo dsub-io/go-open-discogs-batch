@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -22,6 +23,7 @@ func TestPublicDefaults(t *testing.T) {
 
 	require.Equal(t, []string{"artist", "label", "master", "release"}, conf.Strings("entities"))
 	require.Equal(t, 5000, conf.Int("chunk-size"))
+	require.Equal(t, runtime.GOMAXPROCS(0), conf.Int("max-workers"))
 	require.Equal(t, filepath.Join(getHomeDir(new(homeDirSupplier)), ".cache", "open-discogs-batch"), conf.String("data-dir"))
 	require.False(t, conf.Bool("cleanup"))
 }
@@ -32,6 +34,7 @@ func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
 	t.Setenv("OPEN_DISCOGS_BATCH_DUMP_MONTH", "2026-07")
 	t.Setenv("OPEN_DISCOGS_BATCH_DATA_DIR", "/env-data")
 	t.Setenv("OPEN_DISCOGS_BATCH_CHUNK_SIZE", "3500")
+	t.Setenv("OPEN_DISCOGS_BATCH_MAX_WORKERS", "7")
 	t.Setenv("OPEN_DISCOGS_BATCH_CLEANUP", "true")
 	t.Setenv("OPEN_DISCOGS_BATCH_FORCE", "true")
 	t.Setenv("OPEN_DISCOGS_BATCH_ALLOW_DOWNGRADE", "true")
@@ -41,6 +44,7 @@ func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
 		"--database-url", "postgresql://cli:pass@db:5432/discogs",
 		"--entities", "label,master",
 		"--chunk-size", "5500",
+		"--max-workers", "3",
 		"--data-dir", "/cli-data",
 	)
 
@@ -49,6 +53,7 @@ func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
 	require.Equal(t, "2026-07", conf.String("dump-month"))
 	require.Equal(t, "/cli-data", conf.String("data-dir"))
 	require.Equal(t, 5500, conf.Int("chunk-size"))
+	require.Equal(t, 3, conf.Int("max-workers"))
 	require.True(t, conf.Bool("cleanup"))
 	require.True(t, conf.Bool("force"))
 	require.True(t, conf.Bool("allow-downgrade"))

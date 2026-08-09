@@ -55,27 +55,25 @@ func Test_parseChecksumTextLine(t *testing.T) {
 	})
 }
 
-func Test_storeChecksum(t *testing.T) {
+func TestChecksumStore(t *testing.T) {
 	t.Run("must save on valid line", func(t *testing.T) {
-		t.Cleanup(func() {
-			for k := range checksumMap {
-				delete(checksumMap, k)
-			}
-		})
+		store := newChecksumStore()
 		tTime, _ := time.Parse("20060102", "20080309")
 		for _, v := range validChecksumTextSliceSample {
-			storeChecksum(v)
+			store.addText(v)
 		}
-		assert.Len(t, checksumMap[tTime], 3)
+		values := store.snapshot()
+		assert.Len(t, values[tTime], 3)
 		for i, v := range []string{"artists", "labels", "releases"} {
-			vv, ok := checksumMap[tTime][v]
+			vv, ok := values[tTime][v]
 			assert.True(t, ok)
 			assert.Contains(t, validChecksumTextSliceSample[i], vv)
 		}
 	})
 	t.Run("must not save invalid line", func(t *testing.T) {
-		storeChecksum("")
-		assert.Zero(t, len(checksumMap))
+		store := newChecksumStore()
+		store.addText("")
+		assert.Zero(t, len(store.snapshot()))
 	})
 }
 
@@ -122,6 +120,10 @@ func TestPopulateFromUri(t *testing.T) {
 		assert.Equal(t, pt, d.GeneratedAt)
 		assert.Equal(t, "releases", d.TargetType)
 	})
+	t.Run("must reject invalid URI", func(t *testing.T) {
+		_, err := PopulateFromUri()(context.Background(), &Data{Uri: "invalid"})
+		require.Error(t, err)
+	})
 }
 
 func TestNotNilFilter(t *testing.T) {
@@ -145,9 +147,11 @@ func (c clientStub) Get(_ context.Context, _ string) rxgo.Observable {
 			next <- rxgo.Of(c.pl)
 		})
 		return rxgo.Create([]rxgo.Producer{p})
-	} else {
-		return rxgo.Just(c.err)()
 	}
+	p := rxgo.Producer(func(_ context.Context, next chan<- rxgo.Item) {
+		next <- rxgo.Error(c.err)
+	})
+	return rxgo.Create([]rxgo.Producer{p})
 }
 
 func getClientStub(pl []byte, err error) func() client.Client {
@@ -165,10 +169,16 @@ func TestDispatchChecksumFetch(t *testing.T) {
 e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_20080309_releases.xml.gz`
 		getClient = getClientStub([]byte(data), nil)
 		dump := &Data{TargetType: "checksum", Uri: ""}
-		v, err := DispatchChecksumFetch()(context.Background(), dump)
+		v, err := DispatchChecksumFetch(newChecksumStore())(context.Background(), dump)
 		assert.NoError(t, err)
 		assert.Equal(t, dump, v.(*Data))
-		checksumFetchWg.Wait()
+	})
+	t.Run("must return fetch error", func(t *testing.T) {
+		fetchErr := errors.New("checksum fetch failed")
+		getClient = getClientStub(nil, fetchErr)
+		dump := &Data{TargetType: "checksum", Uri: "checksum.txt"}
+		_, err := DispatchChecksumFetch(newChecksumStore())(context.Background(), dump)
+		require.ErrorIs(t, err, fetchErr)
 	})
 }
 
@@ -191,6 +201,12 @@ func TestSetChecksumValues(t *testing.T) {
 		d, ok := v.(*Data)
 		assert.True(t, ok)
 		assert.Equal(t, "test_checksum", d.Checksum)
+	})
+	t.Run("must reject a missing data checksum", func(t *testing.T) {
+		pt, _ := time.Parse("20060102", "20190301")
+		dump := &Data{GeneratedAt: pt, TargetType: "artists"}
+		_, err := SetChecksumValues(map[time.Time]map[string]string{})(context.Background(), dump)
+		require.ErrorContains(t, err, "checksum not found")
 	})
 }
 
@@ -284,7 +300,7 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 		DiscogsS3BaseUrl = server.URL + "/"
 		DiscogsDataBaseURL = server.URL + "/"
 		repo := &RepositoryStub{items: make([]*Data, 0)}
-		updateCount, err := UpdateData(context.Background(), repo)
+		updateCount, err := UpdateData(context.Background(), repo, 2)
 		require.NoError(t, err)
 		require.Equal(t, 4, updateCount)
 		require.Len(t, repo.items, 4)
@@ -298,6 +314,11 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 			require.NotEmpty(t, item.Uri)
 		}
 	})
+}
+
+func TestUpdateDataRejectsNonPositiveMaxWorkers(t *testing.T) {
+	_, err := UpdateData(context.Background(), &RepositoryStub{}, 0)
+	require.ErrorContains(t, err, "max-workers must be a positive integer")
 }
 
 func TestUpdateSelectedDataBoundsChecksumRequests(t *testing.T) {

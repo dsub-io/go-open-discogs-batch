@@ -1,12 +1,8 @@
 package batch
 
 import (
-	"fmt"
-	"github.com/dsub-io/go-open-discogs-batch/src/helper"
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/open-discogs-model/model"
-	"sync"
 )
 
 //TODO: add label release step for future use
@@ -33,59 +29,21 @@ func insertLabels(order Order) result.Result {
 }
 
 func insertLabelRelations(order Order) result.Result {
-	r := newReadCloser(order.getFilePath(), "updating label relations...")
-
-	var (
-		wg   = new(sync.WaitGroup)
-		res  = make(chan result.Result)
-		done = make(chan struct{}, 1)
+	return processRelationChunks(
+		order,
+		"label relations",
+		"label",
+		"updating label relations...",
+		writeLabelRelationChunk,
 	)
-
-	go func() {
-		<-reader.NewReader[XmlLabelRelation](order.getContext(), r, "label").
-			WindowWithCount(order.getChunkSize()).
-			Map(helper.MapWindowedSlice[*XmlLabelRelation]()).
-			ForEach(
-				writeLabelRelations(order, res, wg), // DoOnNext
-				printError(),                        // DoOnError
-				signalDone(done, wg))                //DoOnComplete
-	}()
-
-	go func() { // wait until done called then close res chan
-		<-done
-		close(res)
-	}()
-
-	sum := result.NewResult(0, nil)
-	for next := range res {
-		sum = sum.Sum(next)
-	}
-
-	fmt.Printf("\nUpdated %+v label relations\n", sum.Count())
-	return sum
 }
 
-func signalDone(done chan<- struct{}, wg *sync.WaitGroup) func() {
-	return func() {
-		defer close(done)
-		wg.Wait()
-		done <- struct{}{}
+func writeLabelRelationChunk(order Order, items []*XmlLabelRelation) result.Result {
+	u := make([]*model.LabelURL, 0)
+	s := make([]*model.LabelSubLabel, 0)
+	for _, item := range items {
+		u = append(u, item.GetUrls()...)
+		s = append(s, item.GetSubLabels()...)
 	}
-}
-
-func writeLabelRelations(order Order, res chan result.Result, wg *sync.WaitGroup) func(i interface{}) {
-	return func(i interface{}) {
-		wg.Add(1)
-		u := make([]*model.LabelURL, 0)
-		s := make([]*model.LabelSubLabel, 0)
-		lrs := i.([]*XmlLabelRelation)
-		for _, lr := range lrs {
-			u = append(u, lr.GetUrls()...)
-			s = append(s, lr.GetSubLabels()...)
-		}
-		go func() {
-			defer wg.Done()
-			res <- writeThenReport(order, wg, u, s)
-		}()
-	}
+	return writeChunk(order, u, s)
 }

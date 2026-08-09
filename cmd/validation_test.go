@@ -40,6 +40,14 @@ func TestValidChunkSize(t *testing.T) {
 	require.Error(t, ValidChunkSize("2147483648"))
 }
 
+func TestValidMaxWorkers(t *testing.T) {
+	for _, value := range []string{"-1", "0", "x", "", "2147483648"} {
+		require.Error(t, ValidMaxWorkers(value))
+	}
+	require.NoError(t, ValidMaxWorkers("1"))
+	require.NoError(t, ValidMaxWorkers("32"))
+}
+
 func TestValidDumpMonth(t *testing.T) {
 	require.NoError(t, ValidDumpMonth(""))
 	require.NoError(t, ValidDumpMonth("2008-03"))
@@ -54,6 +62,7 @@ func TestValidator(t *testing.T) {
 	require.NoError(t, config.Set("database-url", "postgresql://user:pass@db:5432/discogs"))
 	require.NoError(t, config.Set("entities", []string{"artist"}))
 	require.NoError(t, config.Set("chunk-size", 5000))
+	require.NoError(t, config.Set("max-workers", 4))
 	require.NoError(t, config.Set("dump-month", "2026-07"))
 
 	require.NoError(t, new(validator).Validate(config))

@@ -51,6 +51,7 @@ entity uses its own latest available dump.
 | `--dump-month`, `-m` | `OPEN_DISCOGS_BATCH_DUMP_MONTH` | latest per entity | Exact dump month in `yyyy-MM` form |
 | `--data-dir` | `OPEN_DISCOGS_BATCH_DATA_DIR` | `~/.cache/open-discogs-batch` | Download directory |
 | `--chunk-size`, `-b` | `OPEN_DISCOGS_BATCH_CHUNK_SIZE` | `5000` | Import chunk size |
+| `--max-workers` | `OPEN_DISCOGS_BATCH_MAX_WORKERS` | runtime CPU allocation | Maximum concurrent import workers |
 | `--cleanup`, `-c` | `OPEN_DISCOGS_BATCH_CLEANUP` | `false` | Delete downloads after success |
 | `--force`, `-f` | `OPEN_DISCOGS_BATCH_FORCE` | `false` | Rerun an already-successful manifest |
 | `--allow-downgrade` | `OPEN_DISCOGS_BATCH_ALLOW_DOWNGRADE` | `false` | Permit and audit older entity dumps |
@@ -62,6 +63,12 @@ precedence over defaults. The two importer implementations accept this same
 public contract. Configuration files and the former `new`, `update`, `purge`,
 `dsn`, `types`, `year`, `month`, and `data` options are no longer supported.
 
+`--max-workers` is the exact upper bound on application-managed concurrent
+import workers. When omitted, it resolves to the CPU allocation used by the Go
+runtime; no percentage or physical-core heuristic is applied. It is not a hard
+CPU quota. Use the container or workload scheduler's CPU limit when the process
+itself must not exceed a CPU allocation.
+
 ## Container
 
 Release images are published from Release Please release commits:
@@ -69,9 +76,11 @@ Release images are published from Release Please release commits:
 ```shell
 docker pull ghcr.io/dsub-io/go-open-discogs-batch:latest
 docker run --rm \
+  --cpus=4 \
   -e OPEN_DISCOGS_BATCH_DATABASE_URL='postgresql://user:password@db:5432/open_discogs' \
   -e OPEN_DISCOGS_BATCH_ENTITIES='artist,label,master,release' \
   -e OPEN_DISCOGS_BATCH_DATA_DIR=/data \
+  -e OPEN_DISCOGS_BATCH_MAX_WORKERS=4 \
   -v open-discogs-data:/data \
   ghcr.io/dsub-io/go-open-discogs-batch:latest
 ```
