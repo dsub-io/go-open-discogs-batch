@@ -71,6 +71,10 @@ dump: missing relations are deleted, changed mutable values are updated, and
 unchanged relation rows retain their identifiers. Root artist, label, master,
 and release rows are upserted; roots absent from a later dump are not currently
 deleted. The importer assumes official dump root identifiers are unique.
+The v1 schema still identifies several relation values with a 32-bit Java hash;
+a collision within one root can merge distinct values. The measured, online
+migration to collision-resistant identity is tracked in
+[`open-discogs-model#43`](https://github.com/dsub-io/open-discogs-model/issues/43).
 
 Atomicity is per chunk, not per monthly snapshot. Permanent full-dump staging is
 intentionally avoided because it would duplicate a catalog exceeding 200
