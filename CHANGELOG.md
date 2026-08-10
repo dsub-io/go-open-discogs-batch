@@ -8,6 +8,22 @@
 * releases and masters will not contain empty genre, style entry ([60c59b5](https://github.com/state303/go-discogs/commit/60c59b5e4d4814c015e6c71087ee5fec2125bfeb))
 * removes redundant ctx reference ([b823bcc](https://github.com/state303/go-discogs/commit/b823bcc976f432f76ce64a7d5de04c3d0001a19b))
 
+## [2.1.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.0.0...v2.1.0) (2026-08-10)
+
+
+### Features
+
+* make snapshot imports durable and convergent ([2a1ddbd](https://github.com/dsub-io/go-open-discogs-batch/commit/2a1ddbd20dca4fc2b2301994d0b12c66379e16b7))
+
+
+### Bug Fixes
+
+* close Go batch correctness and coverage gaps ([c6da0ce](https://github.com/dsub-io/go-open-discogs-batch/commit/c6da0ce7b3732c44e7afa65181ee274a607c417e))
+* fence durable import recovery ([f18b42b](https://github.com/dsub-io/go-open-discogs-batch/commit/f18b42b0ea477189ffd14b06b92d709281c255ef))
+* lock import reference dependencies ([c325747](https://github.com/dsub-io/go-open-discogs-batch/commit/c3257475defa6162a91c746d6ac534eee7cad420))
+* make snapshot imports durable and convergent ([0217cac](https://github.com/dsub-io/go-open-discogs-batch/commit/0217cac39e58d6378ff91c7a5fddd58676e7a3e4))
+* normalize model dependency metadata ([5632a98](https://github.com/dsub-io/go-open-discogs-batch/commit/5632a98294a0a9f14f6066a088fb43399b0999ad))
+
 ## [2.0.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v1.2.0...v2.0.0) (2026-08-09)
 
 
