@@ -45,6 +45,32 @@ func TestGetReturnsBodyAndPropagatesContext(t *testing.T) {
 	require.Equal(t, []byte("payload"), item.V)
 }
 
+func TestNewClientAndNilContext(t *testing.T) {
+	require.IsType(t, &clientImpl{}, NewClient())
+	client := &clientImpl{wc: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		require.NotNil(t, request.Context())
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader("payload")),
+		}, nil
+	})}
+
+	item := <-client.Get(nil, "https://example.test/catalog").Observe()
+
+	require.NoError(t, item.E)
+}
+
+func TestGetRejectsMalformedURI(t *testing.T) {
+	client := &clientImpl{wc: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("must not execute")
+	})}
+
+	item := <-client.Get(context.Background(), "://bad-uri").Observe()
+
+	require.Error(t, item.E)
+}
+
 func TestGetRejectsNonSuccessStatus(t *testing.T) {
 	client := &clientImpl{wc: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{

@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"gorm.io/gorm"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,6 +74,33 @@ func (s *DataRepoSuite) TestFindLatestByTypeUsesIndependentEntityDate() {
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), "latest-label-new", latest.ETag)
 	require.Equal(s.T(), "label", latest.EntityType)
+}
+
+func (s *DataRepoSuite) TestFindLatestByTypeReturnsNotFound() {
+	_, err := s.repo.FindLatestByType("never-existing-entity")
+	require.ErrorContains(s.T(), err, "latest never-existing-entity data not found")
+}
+
+func (s *DataRepoSuite) TestBatchInsertSkipsChecksumOnlyCatalog() {
+	count, err := s.repo.BatchInsert([]*Data{{TargetType: "checksum"}})
+	require.NoError(s.T(), err)
+	require.Zero(s.T(), count)
+}
+
+func (s *DataRepoSuite) TestBatchInsertPropagatesDatabaseError() {
+	expected := errors.New("fixture")
+	errorDB := s.DB.Session(&gorm.Session{})
+	errorDB.AddError(expected)
+	repository := NewDataRepository(errorDB)
+
+	count, err := repository.BatchInsert([]*Data{{
+		GeneratedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		TargetType:  "artist",
+		Checksum:    strings.Repeat("a", 64),
+		Uri:         "data/2026/discogs_20260701_artists.xml.gz",
+	}})
+	require.Zero(s.T(), count)
+	require.ErrorIs(s.T(), err, expected)
 }
 
 func (s *DataRepoSuite) TestBatchInsert() {

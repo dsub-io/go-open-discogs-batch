@@ -14,4 +14,13 @@ func TestResultSumPreservesTheFirstError(t *testing.T) {
 
 	require.Equal(t, 9, sum.Count())
 	require.ErrorIs(t, sum.Err(), firstError)
+	require.True(t, sum.IsErr())
+	require.False(t, NewResult(0, nil).IsErr())
+}
+
+func TestResultSumIgnoresNil(t *testing.T) {
+	result := NewResult(2, nil)
+
+	require.Same(t, result, result.Sum(nil))
+	require.Equal(t, 2, result.Count())
 }

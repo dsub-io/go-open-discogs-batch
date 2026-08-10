@@ -25,6 +25,10 @@ func InsertSimple[F, T any](order Order, topic string, localName string) result.
 		Map(insertBySlice[*T](order), rxgo.WithPool(order.getMaxWorkers())).
 		Reduce(helper.MergeCount()).
 		Observe()
+	return simpleInsertResult(topic, res)
+}
+
+func simpleInsertResult(topic string, res rxgo.Item) result.Result {
 	if res.E != nil {
 		return result.NewResult(0, res.E)
 	}

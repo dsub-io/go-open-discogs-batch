@@ -101,9 +101,7 @@ func processRelationChunks[T any](
 	for next := range results {
 		sum = sum.Sum(next)
 	}
-	if sourceErr := sourceErrors.get(); sourceErr != nil {
-		sum = sum.Sum(result.NewResult(0, sourceErr))
-	}
+	sum = mergeSourceError(sum, sourceErrors.get())
 	if !sum.IsErr() {
 		if progressErr := completeEntityProgress(order, totalItems, totalChunks); progressErr != nil {
 			sum = sum.Sum(result.NewResult(0, progressErr))
@@ -112,4 +110,11 @@ func processRelationChunks[T any](
 
 	fmt.Printf("\nUpdated %+v %s\n", sum.Count(), topic)
 	return sum
+}
+
+func mergeSourceError(sum result.Result, sourceErr error) result.Result {
+	if sourceErr == nil {
+		return sum
+	}
+	return sum.Sum(result.NewResult(0, sourceErr))
 }

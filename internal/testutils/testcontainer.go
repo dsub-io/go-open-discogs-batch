@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	containerapi "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -38,6 +40,35 @@ type Database struct {
 	Port     string
 }
 
+type testReporter interface {
+	Helper()
+	Cleanup(func())
+	Fatalf(string, ...interface{})
+	Errorf(string, ...interface{})
+}
+
+type postgresContainer interface {
+	Terminate(context.Context, ...testcontainers.TerminateOption) error
+	Inspect(context.Context) (*containerapi.InspectResponse, error)
+	Host(context.Context) (string, error)
+	MappedPort(context.Context, string) (network.Port, error)
+}
+
+var createPostgresContainer = startPostgresContainer
+
+func startPostgresContainer(
+	ctx context.Context,
+	req testcontainers.ContainerRequest,
+) (postgresContainer, error) {
+	return testcontainers.GenericContainer(
+		ctx,
+		testcontainers.GenericContainerRequest{
+			ContainerRequest: req,
+			Started:          true,
+		},
+	)
+}
+
 func GetDsn(dt DatabaseType, db Database) string {
 	if dt != Postgres {
 		panic("unsupported database type")
@@ -60,7 +91,7 @@ func GetDatabase(t testing.TB, db DatabaseType) Database {
 	panic("unsupported database type")
 }
 
-func setupPostgres(t testing.TB) Database {
+func setupPostgres(t testReporter) Database {
 	t.Helper()
 	ctx := context.Background()
 	req := testcontainers.ContainerRequest{
@@ -85,38 +116,51 @@ func setupPostgres(t testing.TB) Database {
 			wait.ForListeningPort(postgresPort).WithStartupTimeout(10*time.Second),
 		).WithDeadline(time.Second * 120),
 	}
-	dbContainer, err := testcontainers.GenericContainer(
-		ctx,
-		testcontainers.GenericContainerRequest{
-			ContainerRequest: req,
-			Started:          true,
-		})
+	dbContainer, err := createPostgresContainer(ctx, req)
 	if err != nil {
 		t.Fatalf("start PostgreSQL test container: %v", err)
+		return Database{}
 	}
 	t.Cleanup(func() {
-		if terminateErr := dbContainer.Terminate(context.Background()); terminateErr != nil {
-			t.Errorf("terminate PostgreSQL test container: %v", terminateErr)
-		}
+		reportPostgresTermination(t, dbContainer)
 	})
 
+	database, err := databaseFromContainer(ctx, dbContainer)
+	if err != nil {
+		t.Fatalf("resolve PostgreSQL test container: %v", err)
+		return Database{}
+	}
+	return database
+}
+
+func reportPostgresTermination(t testReporter, dbContainer postgresContainer) {
+	if err := dbContainer.Terminate(context.Background()); err != nil {
+		t.Errorf("terminate PostgreSQL test container: %v", err)
+	}
+}
+
+func databaseFromContainer(ctx context.Context, dbContainer postgresContainer) (Database, error) {
 	inspection, err := dbContainer.Inspect(ctx)
 	if err != nil {
-		t.Fatalf("inspect PostgreSQL test container: %v", err)
+		return Database{}, fmt.Errorf("inspect PostgreSQL test container: %w", err)
 	}
 	for _, mounted := range inspection.Mounts {
 		if mounted.Type == mount.TypeVolume {
-			t.Fatalf("PostgreSQL test container must not create volume %q at %q", mounted.Name, mounted.Destination)
+			return Database{}, fmt.Errorf(
+				"PostgreSQL test container must not create volume %q at %q",
+				mounted.Name,
+				mounted.Destination,
+			)
 		}
 	}
 
 	host, err := dbContainer.Host(ctx)
 	if err != nil {
-		t.Fatalf("resolve PostgreSQL test container host: %v", err)
+		return Database{}, fmt.Errorf("resolve PostgreSQL test container host: %w", err)
 	}
 	port, err := dbContainer.MappedPort(ctx, postgresPort)
 	if err != nil {
-		t.Fatalf("resolve PostgreSQL test container port: %v", err)
+		return Database{}, fmt.Errorf("resolve PostgreSQL test container port: %w", err)
 	}
 	return Database{
 		Username: postgresUsername,
@@ -125,5 +169,5 @@ func setupPostgres(t testing.TB) Database {
 		DBName:   postgresDatabase,
 		Type:     Postgres,
 		Port:     port.Port(),
-	}
+	}, nil
 }

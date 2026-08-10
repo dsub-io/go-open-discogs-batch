@@ -27,9 +27,12 @@ import (
 	"os"
 )
 
+var execute = cmd.Execute
+var exit = os.Exit
+
 func main() {
-	if err := cmd.Execute(); err != nil {
+	if err := execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "critical error:", err)
-		os.Exit(1)
+		exit(1)
 	}
 }

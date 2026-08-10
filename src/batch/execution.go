@@ -14,6 +14,10 @@ import (
 
 const processorName = "go-open-discogs-batch"
 
+var fingerprintImportManifest = opendiscogsmanifest.Fingerprint
+var orderImportEntityTypes = opendiscogsmanifest.OrderedEntityTypes
+var requiredImportLockTypes = opendiscogsmanifest.RequiredLockEntityTypes
+
 type ImportPreparation struct {
 	ManifestSHA256   string
 	RunID            int64
@@ -78,15 +82,15 @@ func (c *ImportExecutionCoordinator) Prepare(
 		entityTypes = append(entityTypes, dump.EntityType)
 	}
 
-	fingerprint, err := opendiscogsmanifest.Fingerprint(manifestDumps)
+	fingerprint, err := fingerprintImportManifest(manifestDumps)
 	if err != nil {
 		return nil, fmt.Errorf("fingerprint import manifest: %w", err)
 	}
-	orderedTypes, err := opendiscogsmanifest.OrderedEntityTypes(entityTypes)
+	orderedTypes, err := orderImportEntityTypes(entityTypes)
 	if err != nil {
 		return nil, err
 	}
-	lockTypes, err := opendiscogsmanifest.RequiredLockEntityTypes(orderedTypes)
+	lockTypes, err := requiredImportLockTypes(orderedTypes)
 	if err != nil {
 		return nil, err
 	}

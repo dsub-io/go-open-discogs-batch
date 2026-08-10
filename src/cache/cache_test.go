@@ -57,6 +57,18 @@ func TestIDSetIgnoresInvalidIDsAndResets(t *testing.T) {
 	require.Zero(t, ids.AllocatedWordBytes())
 }
 
+func TestResetIDsClearsGlobalIdentifierCaches(t *testing.T) {
+	ArtistIDs.Add(1)
+	LabelIDs.Add(2)
+	MasterIDs.Add(3)
+
+	ResetIDs()
+
+	require.False(t, ArtistIDs.Contains(1))
+	require.False(t, LabelIDs.Contains(2))
+	require.False(t, MasterIDs.Contains(3))
+}
+
 func BenchmarkIDSetLoadMillion(b *testing.B) {
 	b.ReportAllocs()
 	for iteration := 0; iteration < b.N; iteration++ {

@@ -12,6 +12,7 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/src/data"
 	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	fileutil "github.com/dsub-io/go-open-discogs-batch/src/file"
+	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
 	"github.com/knadh/koanf"
 	"gorm.io/gorm"
 )
@@ -26,27 +27,46 @@ type importCompleter interface {
 	Complete(context.Context, error) error
 }
 
+type importExecutionCoordinator interface {
+	importCompleter
+	Prepare(context.Context, []*opendiscogsmodel.DiscogsDump, int, bool, bool) (*ImportPreparation, error)
+}
+
+var connectDatabase = database.Connect
+var configureDatabasePool = database.ConfigurePool
+var runDatabaseDDL = RunDDL
+var refreshSelectedData = data.UpdateSelectedData
+var resolveImportPlan = data.ResolveImportPlan
+var fetchImportResources = data.FetchImportResources
+var openSQLDatabase = func(db *gorm.DB) (*sql.DB, error) { return db.DB() }
+var newExecutionCoordinator = func(db *sql.DB, version string) importExecutionCoordinator {
+	return NewImportExecutionCoordinator(db, version)
+}
+var preloadImportReferenceIDs = preloadReferenceIDs
+var newImportBatch = New
+var closeIdentifierRows = func(rows *sql.Rows) error { return rows.Close() }
+
 func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	var (
 		begin      = time.Now()
 		chunk      = config.Int("chunk-size")
 		maxWorkers = config.Int("max-workers")
 	)
-	if err := database.Connect(config.String("database-url")); err != nil {
+	if err := connectDatabase(config.String("database-url")); err != nil {
 		return err
 	}
-	if err := database.ConfigurePool(database.DB, maxWorkers); err != nil {
+	if err := configureDatabasePool(database.DB, maxWorkers); err != nil {
 		return err
 	}
 
 	fmt.Println("execute DDL update...")
-	if err := RunDDL(database.DB); err != nil {
+	if err := runDatabaseDDL(database.DB); err != nil {
 		return err
 	}
 
 	dataRepo := data.NewDataRepository(database.DB)
 	fmt.Println("refreshing dump catalog...")
-	updated, updateErr := data.UpdateSelectedData(
+	updated, updateErr := refreshSelectedData(
 		ctx,
 		dataRepo,
 		config.Strings("entities"),
@@ -58,16 +78,16 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		fmt.Printf("dump catalog refresh affected: %+v rows\n", updated)
 	}
 
-	plan, err := data.ResolveImportPlan(config, dataRepo)
+	plan, err := resolveImportPlan(config, dataRepo)
 	if err != nil {
 		return errors.Join(updateErr, err)
 	}
 
-	sqlDB, err := database.DB.DB()
+	sqlDB, err := openSQLDatabase(database.DB)
 	if err != nil {
 		return fmt.Errorf("open SQL connection pool: %w", err)
 	}
-	coordinator := NewImportExecutionCoordinator(sqlDB, runner.Version)
+	coordinator := newExecutionCoordinator(sqlDB, runner.Version)
 	preparation, err := coordinator.Prepare(
 		ctx,
 		plan.Dumps,
@@ -89,16 +109,16 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		}
 		return nil
 	}
-	if err := data.FetchImportResources(ctx, plan); err != nil {
+	if err := fetchImportResources(ctx, plan); err != nil {
 		return finalizeImport(ctx, coordinator, plan, false, err)
 	}
 	cache.ResetIDs()
-	if err := preloadReferenceIDs(ctx, sqlDB, config); err != nil {
+	if err := preloadImportReferenceIDs(ctx, sqlDB, config); err != nil {
 		return finalizeImport(ctx, coordinator, plan, false, err)
 	}
 
 	var (
-		b            = New()
+		b            = newImportBatch()
 		totalUpdates = 0
 	)
 	fmt.Printf("max-workers=%d\n", maxWorkers)
@@ -192,7 +212,7 @@ func preloadReferenceIDs(ctx context.Context, db *sql.DB, config *koanf.Koanf) e
 			_ = rows.Close()
 			return fmt.Errorf("read %s identifiers: %w", load.table, err)
 		}
-		if err := rows.Close(); err != nil {
+		if err := closeIdentifierRows(rows); err != nil {
 			return fmt.Errorf("close %s identifier stream: %w", load.table, err)
 		}
 		fmt.Printf("cached %d %s identifiers\n", count, load.table)

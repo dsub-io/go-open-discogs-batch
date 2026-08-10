@@ -137,6 +137,9 @@ func isKnownType(typeStr string) bool {
 func DispatchChecksumFetch(store *checksumStore) func(context.Context, interface{}) (interface{}, error) {
 	return func(ctx context.Context, i interface{}) (interface{}, error) {
 		if dump := i.(*Data); dump.TargetType == "checksum" {
+			if err := ctx.Err(); err != nil {
+				return i, err
+			}
 			select {
 			case v, ok := <-getClient().Get(ctx, checksumDownloadURL(dump.Uri)).Observe():
 				if !ok {
@@ -190,8 +193,15 @@ type chkSumP struct {
 
 func ParseDumpModel(ctx context.Context) func(item rxgo.Item) rxgo.Observable {
 	return func(item rxgo.Item) rxgo.Observable {
+		if item.Error() {
+			return rxgo.Thrown(item.E)
+		}
+		body, ok := item.V.([]byte)
+		if !ok {
+			return rxgo.Thrown(fmt.Errorf("dump listing response was not a byte payload"))
+		}
 		p := xmlparser.NewParser[Data]()
-		buf := bytes.NewBuffer(item.V.([]byte))
+		buf := bytes.NewBuffer(body)
 		return p.Parse(ctx, xmlparser.SimpleTokenOrder(io.NopCloser(buf), "Contents"))
 	}
 }
@@ -222,6 +232,10 @@ func UpdateData(ctx context.Context, repo Repository, maxWorkers int) (int, erro
 		Reduce(helper.SliceReducer[*Data]()).
 		Map(BatchInsertItems(repo)).
 		Observe()
+	return catalogUpdateCount(res)
+}
+
+func catalogUpdateCount(res rxgo.Item) (int, error) {
 	if res.E != nil {
 		return 0, res.E
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"github.com/dsub-io/go-open-discogs-batch/internal/test/resource"
 	"github.com/dsub-io/go-open-discogs-batch/internal/testserver"
 	"github.com/stretchr/testify/assert"
@@ -94,6 +95,11 @@ func Test_handlerImpl_Checksum(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChecksumReturnsReadError(t *testing.T) {
+	err := (&handlerImpl{}).Checksum(t.TempDir(), strings.Repeat("0", 64))
+	require.Error(t, err)
 }
 
 func Test_handlerImpl_Copy(t *testing.T) {
@@ -190,6 +196,12 @@ func Test_handlerImpl_Delete(t *testing.T) {
 	}
 }
 
+func TestDeleteReturnsUnexpectedError(t *testing.T) {
+	directory := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "child"), []byte("fixture"), 0600))
+	require.Error(t, (&handlerImpl{}).Delete(directory))
+}
+
 func Test_handlerImpl_Fetch(t *testing.T) {
 	expected := string(resource.Read("testdata/test.xml"))
 	s := testserver.NewServerWithStaticResponse(expected)
@@ -204,7 +216,10 @@ func Test_handlerImpl_Fetch(t *testing.T) {
 
 	slowServer := testserver.NewServer(
 		func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
-			<-time.After(time.Millisecond * 200)
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(expected)))
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			<-time.After(time.Millisecond * 600)
 			_, _ = w.Write([]byte(expected))
 		})
 
@@ -354,6 +369,49 @@ func Test_handlerImpl_FetchAndCheck(t *testing.T) {
 	}
 }
 
+func TestFetchAndCheckContextErrorBoundaries(t *testing.T) {
+	validFile := filepath.Join(t.TempDir(), "valid")
+	require.NoError(t, os.WriteFile(validFile, resource.Read("testdata/test.xml"), 0600))
+	require.NoError(t, (&handlerImpl{reader: &fileReaderImpl{}}).FetchAndCheckContext(
+		context.Background(),
+		"https://example.invalid/not-used",
+		validFile,
+		"69718470e15145cf586db15389bb2bf81b4cf4ee179aa6c0dd61afaf17d56b3d",
+	))
+
+	handler := &handlerImpl{reader: testFileReader{existsErr: errors.New("stat failure")}}
+	require.ErrorContains(t, handler.FetchAndCheckContext(
+		context.Background(),
+		"https://example.invalid/resource",
+		filepath.Join(t.TempDir(), "resource"),
+		strings.Repeat("0", 64),
+	), "stat failure")
+
+	directory := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "child"), []byte("fixture"), 0600))
+	handler = &handlerImpl{reader: testFileReader{exists: true}}
+	require.Error(t, handler.FetchAndCheckContext(
+		context.Background(),
+		"https://example.invalid/resource",
+		directory,
+		strings.Repeat("0", 64),
+	))
+
+	handler = &handlerImpl{reader: testFileReader{}}
+	require.ErrorContains(t, handler.FetchAndCheckContext(
+		context.Background(),
+		"https://example.invalid/resource",
+		filepath.Join(t.TempDir(), "resource"),
+		"not-hex",
+	), "failed to decode checksum")
+	require.ErrorContains(t, handler.FetchAndCheckContext(
+		context.Background(),
+		"://invalid",
+		filepath.Join(t.TempDir(), "resource"),
+		strings.Repeat("0", 64),
+	), "create download request")
+}
+
 func Test_handlerImpl_Write(t *testing.T) {
 	openedFilePath := "testdata/test_write_opened_file.txt"
 	f, _ := os.OpenFile(openedFilePath, os.O_RDONLY, 0644)
@@ -391,14 +449,43 @@ func Test_handlerImpl_Write(t *testing.T) {
 	}
 }
 
+type writableFileStub struct {
+	writeErr error
+	closeErr error
+}
+
+func (f *writableFileStub) Write([]byte) (int, error) { return 0, f.writeErr }
+func (f *writableFileStub) Close() error              { return f.closeErr }
+
+func TestWriteErrorBoundaries(t *testing.T) {
+	handler := &handlerImpl{}
+	require.Error(t, handler.Write(t.TempDir(), []byte("fixture"), 0600))
+
+	originalOpen := openWritableFile
+	t.Cleanup(func() { openWritableFile = originalOpen })
+	writeErr := errors.New("write failure")
+	openWritableFile = func(string, os.FileMode) (writableFile, error) {
+		return &writableFileStub{writeErr: writeErr, closeErr: errors.New("close failure")}, nil
+	}
+	require.ErrorIs(t, handler.Write("unused", []byte("fixture"), 0600), writeErr)
+
+	closeErr := errors.New("close failure")
+	openWritableFile = func(string, os.FileMode) (writableFile, error) {
+		return &writableFileStub{closeErr: closeErr}, nil
+	}
+	require.ErrorIs(t, handler.Write("unused", []byte("fixture"), 0600), closeErr)
+}
+
 type testFileReader struct {
-	path string
-	res  []byte
-	err  error
+	path      string
+	res       []byte
+	err       error
+	exists    bool
+	existsErr error
 }
 
 func (t testFileReader) Exists(path string) (bool, error) {
-	panic("no-op")
+	return t.exists, t.existsErr
 }
 
 func (t testFileReader) ReadFile(path string) ([]byte, error) {
@@ -480,4 +567,17 @@ func TestNewHandler(t *testing.T) {
 			assert.Equalf(t, tt.want, NewHandler(), "NewHandler()")
 		})
 	}
+}
+
+func TestFileReaderExists(t *testing.T) {
+	reader := &fileReaderImpl{}
+	exists, err := reader.Exists(filepath.Join(t.TempDir(), "missing"))
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	regularFile := filepath.Join(t.TempDir(), "regular")
+	require.NoError(t, os.WriteFile(regularFile, []byte("fixture"), 0600))
+	exists, err = reader.Exists(filepath.Join(regularFile, "child"))
+	require.Error(t, err)
+	require.False(t, exists)
 }

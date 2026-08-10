@@ -61,6 +61,10 @@ func NewParser[T any]() Parser[T] {
 
 type parserImpl[T any] struct{}
 
+var beforeEmitSelect = noOpBeforeEmitSelect
+
+func noOpBeforeEmitSelect() {}
+
 func (p *parserImpl[T]) Parse(ctx context.Context, order TokenParseOrder) rxgo.Observable {
 	if ctx == nil {
 		ctx = context.Background()
@@ -69,17 +73,14 @@ func (p *parserImpl[T]) Parse(ctx context.Context, order TokenParseOrder) rxgo.O
 
 	go func(chan rxgo.Item) {
 		defer func() {
-			close(c)
 			_ = order.Close()
+			close(c)
 		}()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				if ctx.Err() != nil {
-					return
-				}
 				token, err := order.Token()
 				if err != nil {
 					if !errors.Is(err, io.EOF) {
@@ -108,6 +109,10 @@ func (p *parserImpl[T]) Parse(ctx context.Context, order TokenParseOrder) rxgo.O
 }
 
 func emit(ctx context.Context, target chan<- rxgo.Item, item rxgo.Item) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	beforeEmitSelect()
 	select {
 	case <-ctx.Done():
 		return false

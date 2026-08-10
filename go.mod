@@ -3,6 +3,7 @@ module github.com/dsub-io/go-open-discogs-batch
 go 1.26
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/cavaliergopher/grab/v3 v3.0.1
 	github.com/knadh/koanf v1.5.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2

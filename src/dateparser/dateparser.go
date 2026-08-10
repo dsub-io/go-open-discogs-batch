@@ -7,7 +7,6 @@ import (
 
 var releaseDateDelimRegexp = regexp.MustCompile(`[-_. \D]`)
 var dateByDelimRegexp = regexp.MustCompile(`^(\d+)[-_. ](\d+)[-_. ](\d+)$`)
-var fourDigitYearOnlyRegexp = regexp.MustCompile(`^(\d{4})(\\D{1,2})$`)
 var fourDigitYearMonthOnlyRegexp = regexp.MustCompile(`^(\d{4})(\d{1,2})\D{0,2}$`)
 
 func ParseYMD(ymd string) (y, m, d *int16) {
@@ -23,9 +22,7 @@ func ParseYMD(ymd string) (y, m, d *int16) {
 		}
 	}
 	ymd = releaseDateDelimRegexp.ReplaceAllString(ymd, "")
-	if m := fourDigitYearOnlyRegexp.FindStringSubmatch(ymd); m != nil {
-		ymd = m[1]
-	} else if m := fourDigitYearMonthOnlyRegexp.FindStringSubmatch(ymd); m != nil {
+	if m := fourDigitYearMonthOnlyRegexp.FindStringSubmatch(ymd); m != nil {
 		ymd = m[1] + minTwoDigit(m[2])
 	}
 

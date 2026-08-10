@@ -46,6 +46,17 @@ type handlerImpl struct {
 	reader Reader
 }
 
+type writableFile interface {
+	Write([]byte) (int, error)
+	Close() error
+}
+
+var openWritableFile = openFileForWrite
+
+func openFileForWrite(filepath string, perm os.FileMode) (writableFile, error) {
+	return os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+}
+
 type Reader interface {
 	ReadFile(path string) ([]byte, error)
 	Exists(path string) (bool, error)
@@ -85,7 +96,7 @@ func (h *handlerImpl) Copy(source, target string, targetPerm os.FileMode) error 
 		return err
 	}
 	defer src.Close()
-	if dst, err = os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_EXCL, 0666); err != nil {
+	if dst, err = os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_EXCL, targetPerm); err != nil {
 		_ = src.Close()
 		return err
 	}
@@ -194,7 +205,7 @@ func (h *handlerImpl) getDecodedChecksum(checksum string) ([]byte, error) {
 }
 
 func (h *handlerImpl) Write(filepath string, content []byte, perm os.FileMode) error {
-	f, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	f, err := openWritableFile(filepath, perm)
 	if err != nil {
 		return err
 	}
