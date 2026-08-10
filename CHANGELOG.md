@@ -1,5 +1,56 @@
 # Changelog
 
+## [3.0.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.1.0...v3.0.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* unify runtime options and environment variables
+
+### Features
+
+* add entity-safe idempotent imports ([#36](https://github.com/dsub-io/go-open-discogs-batch/issues/36)) ([22d0751](https://github.com/dsub-io/go-open-discogs-batch/commit/22d0751d510b07b5b2ffee813032824d08c9e61a))
+* bound concurrent import workers ([b7087e6](https://github.com/dsub-io/go-open-discogs-batch/commit/b7087e664ef969734cff6d27c7e4e530bc13fb09))
+* initial implementation ([947c3dd](https://github.com/dsub-io/go-open-discogs-batch/commit/947c3ddfc70d35a0fc6bf9dc6099a48d77e20d0e))
+* initial implementation ([c6707c9](https://github.com/dsub-io/go-open-discogs-batch/commit/c6707c9b8e4e6f5e242d9f06edcbbbba50087e6f))
+* make snapshot imports durable and convergent ([2a1ddbd](https://github.com/dsub-io/go-open-discogs-batch/commit/2a1ddbd20dca4fc2b2301994d0b12c66379e16b7))
+* simplifies master and release step ([a261746](https://github.com/dsub-io/go-open-discogs-batch/commit/a261746e0026f1f90c10711e99276f07994f7447))
+* simplifies master and release step ([c40e958](https://github.com/dsub-io/go-open-discogs-batch/commit/c40e958e7bdefc72a94922338bccee5bcad7d772))
+* unify runtime options and environment variables ([4783137](https://github.com/dsub-io/go-open-discogs-batch/commit/47831370f9712b6b68a76bc7a6ed7515a9b7ca0e))
+
+
+### Bug Fixes
+
+* adds composite wait strategy for postgres tc ([8e27803](https://github.com/dsub-io/go-open-discogs-batch/commit/8e278038fc70f78f0266ecfb3e5edcb3779d3f5b))
+* adds tests and housekeeping src ([ab808d2](https://github.com/dsub-io/go-open-discogs-batch/commit/ab808d247be67ccacf620e44a48d5168d32a1fbd))
+* adds tests and housekeeping src ([23cfcfc](https://github.com/dsub-io/go-open-discogs-batch/commit/23cfcfc3ed63d8d472cf2250dd74a2e0e68e7154))
+* close Go batch correctness and coverage gaps ([c6da0ce](https://github.com/dsub-io/go-open-discogs-batch/commit/c6da0ce7b3732c44e7afa65181ee274a607c417e))
+* **dep:** replace to new checksum ([8251672](https://github.com/dsub-io/go-open-discogs-batch/commit/825167271dc7500a9e5bf4246bcbcc58acd7f400))
+* fence durable import recovery ([f18b42b](https://github.com/dsub-io/go-open-discogs-batch/commit/f18b42b0ea477189ffd14b06b92d709281c255ef))
+* gofmt linting ([779d267](https://github.com/dsub-io/go-open-discogs-batch/commit/779d26760dec6409938c90f3116d4cebc661695d))
+* gofmt linting ([524cddb](https://github.com/dsub-io/go-open-discogs-batch/commit/524cddb60be16e9972b4000025112905b9373256))
+* lock import reference dependencies ([c325747](https://github.com/dsub-io/go-open-discogs-batch/commit/c3257475defa6162a91c746d6ac534eee7cad420))
+* make snapshot imports durable and convergent ([0217cac](https://github.com/dsub-io/go-open-discogs-batch/commit/0217cac39e58d6378ff91c7a5fddd58676e7a3e4))
+* normalize model dependency metadata ([5632a98](https://github.com/dsub-io/go-open-discogs-batch/commit/5632a98294a0a9f14f6066a088fb43399b0999ad))
+* release item not to contain an empty str field ([8f91201](https://github.com/dsub-io/go-open-discogs-batch/commit/8f91201127268486c2a1542483c1ff9fa6d7811c))
+* release item not to contain an empty str field ([72cbcfb](https://github.com/dsub-io/go-open-discogs-batch/commit/72cbcfb81a67b801f8667372ee8816a48f91a7b5))
+* releases and masters will not contain empty genre, style entry ([60c59b5](https://github.com/dsub-io/go-open-discogs-batch/commit/60c59b5e4d4814c015e6c71087ee5fec2125bfeb))
+* removes line where genre being printed from release step ([c855000](https://github.com/dsub-io/go-open-discogs-batch/commit/c855000e97c0baaed90d016d175e03b6c23d3aa6))
+* removes line where genre being printed from release step ([149731b](https://github.com/dsub-io/go-open-discogs-batch/commit/149731b71beff925592d9b0e053a1b022d4dafb9))
+* removes redundant ctx reference ([b823bcc](https://github.com/dsub-io/go-open-discogs-batch/commit/b823bcc976f432f76ce64a7d5de04c3d0001a19b))
+* removes redundant regexp ([9b1ded4](https://github.com/dsub-io/go-open-discogs-batch/commit/9b1ded4731ccde7d3ecd09bc975a8e7c80d190ae))
+* restore unreleased 2.1.0 metadata ([2af5392](https://github.com/dsub-io/go-open-discogs-batch/commit/2af5392e61693a321ba8dec73b2944f332e49639))
+* restore unreleased 2.1.0 metadata ([58188f8](https://github.com/dsub-io/go-open-discogs-batch/commit/58188f870dea6059029bd3e1e6e45d6760274cb8))
+* tidy mod ([3ed6683](https://github.com/dsub-io/go-open-discogs-batch/commit/3ed668325422a45f3a2a9a0b0a470279d639a4e0))
+* tidy mod ([da71716](https://github.com/dsub-io/go-open-discogs-batch/commit/da717161219412bbc24c2978a0d37804e6943937))
+* trim spaces for artist rols on releases ([f2dff81](https://github.com/dsub-io/go-open-discogs-batch/commit/f2dff810532b6c5ae91514d3f65ff373a9445120))
+* updates wait strategy for testcontainers ([d611412](https://github.com/dsub-io/go-open-discogs-batch/commit/d6114129140ccbf01df67d447454175182bd6520))
+
+
+### Performance Improvements
+
+* reduce large-import memory and database overhead ([37255eb](https://github.com/dsub-io/go-open-discogs-batch/commit/37255eb262d1f573572c4bdb10a692559f7742f7))
+
 ## [2.1.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.0.0...v2.1.0) (2026-08-10)
 
 
