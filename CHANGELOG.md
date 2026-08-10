@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.1.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.0.0...v2.1.0) (2026-08-10)
+
+
+### Durability and Idempotency
+
+* persist immutable import manifests, per-entity progress, and exact committed source-chunk ledgers; resume only compatible failed runs and skip only currently clean successful manifests
+* reconcile owned relations exactly, fence delayed workers after abandonment, and lock selected entities with their Artist, Label, and Master reference dependencies
+* retain downloads and valid ledgers after failure, clean selected files only after durable success, and keep peak work bounded by `chunk-size × max-workers × relation fan-out`
+
+### Correctness
+
+* return dump-listing and payload failures without panicking, make XML cancellation and close ordering race-free, and preserve requested file-copy permissions
+* validate rollback, lock release, resumed ledgers, completion fencing, timeout, cancellation, and cleanup paths with real PostgreSQL integration coverage
+
+### Measured Impact
+
+* completed-manifest preflight p50/p95/p99 fell from `38.917/50.768/58.719 ms` to `1.776/2.728/3.038 ms` (`95.4%/94.6%/94.8%` lower), a `21.9x` median speedup that avoids 64 MiB of file I/O per skipped invocation
+* median allocations on that path fell from `40,008` to `6,800 B/op` (`83.0%` lower) and from `113` to `106 allocs/op` (`6.2%` lower)
+* durable initial-import p50 changed from `48.509` to `73.922 ms` (`+52.4%`) and forced-repeat p50 from `38.864` to `72.822 ms` (`+87.4%`); this is the measured fixed cost of checkpoint validation and active-run fencing on a 12-record fixture, not a full-dataset estimate
+* whole-suite statement coverage increased from `79.0%` to `100.0%` (`+21.0` percentage points), including race detection and tagged PostgreSQL E2E paths
+
+### Distribution
+
+* publish GoReleaser artifacts and non-root `linux/amd64` and `linux/arm64` GHCR images through the protected release workflow, including a post-publish architecture check
+
 ## [2.0.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v1.2.0...v2.0.0) (2026-08-09)
 
 
