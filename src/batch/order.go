@@ -13,6 +13,7 @@ type Order interface {
 	getMaxWorkers() int
 	getFilePath() string
 	getRunID() int64
+	shouldResumeProgress() bool
 	getDB() *gorm.DB
 	submitWorker(context.Context, func()) bool
 	withDB(*gorm.DB) Order
@@ -25,6 +26,7 @@ type orderImpl struct {
 	maxWorkers int
 	filepath   string
 	runID      int64
+	resume     bool
 	db         *gorm.DB
 	workers    chan struct{}
 }
@@ -51,6 +53,10 @@ func (o *orderImpl) getFilePath() string {
 
 func (o *orderImpl) getRunID() int64 {
 	return o.runID
+}
+
+func (o *orderImpl) shouldResumeProgress() bool {
+	return o.resume
 }
 
 func (o *orderImpl) getDB() *gorm.DB {
@@ -83,7 +89,7 @@ func (o *orderImpl) withDB(db *gorm.DB) Order {
 }
 
 func NewOrder(ctx context.Context, chunkSize, maxWorkers int, filepath string, db *gorm.DB) Order {
-	return newOrder(ctx, chunkSize, maxWorkers, filepath, db, 0, "")
+	return newOrder(ctx, chunkSize, maxWorkers, filepath, db, 0, "", false)
 }
 
 func NewTrackedOrder(
@@ -94,6 +100,7 @@ func NewTrackedOrder(
 	db *gorm.DB,
 	runID int64,
 	entityType string,
+	resume bool,
 ) Order {
 	if runID <= 0 {
 		panic("runID must be a positive integer")
@@ -101,7 +108,7 @@ func NewTrackedOrder(
 	if entityType == "" {
 		panic("entityType must not be empty")
 	}
-	return newOrder(ctx, chunkSize, maxWorkers, filepath, db, runID, entityType)
+	return newOrder(ctx, chunkSize, maxWorkers, filepath, db, runID, entityType, resume)
 }
 
 func newOrder(
@@ -112,6 +119,7 @@ func newOrder(
 	db *gorm.DB,
 	runID int64,
 	entityType string,
+	resume bool,
 ) Order {
 	if chunkSize <= 0 {
 		panic("chunkSize must be a positive integer")
@@ -129,6 +137,7 @@ func newOrder(
 		maxWorkers: maxWorkers,
 		filepath:   filepath,
 		runID:      runID,
+		resume:     resume,
 		db:         db,
 		workers:    make(chan struct{}, maxWorkers),
 	}

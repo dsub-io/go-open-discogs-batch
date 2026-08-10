@@ -38,7 +38,12 @@ func InsertSimple[F, T any](order Order, topic string, localName string) result.
 
 func insertBySlice[T any](order Order) func(_ context.Context, i interface{}) (interface{}, error) {
 	return func(_ context.Context, i interface{}) (interface{}, error) {
-		res := NewWriter(order.getDB()).Write(order.getChunkSize(), i.([]T))
+		res := executeActiveRunTransaction(order, func(transactionOrder Order) result.Result {
+			return NewWriter(transactionOrder.getDB()).Write(
+				transactionOrder.getChunkSize(),
+				i.([]T),
+			)
+		})
 		return res.Count(), res.Err()
 	}
 }

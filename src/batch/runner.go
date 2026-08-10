@@ -111,6 +111,7 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		maxWorkers,
 		database.DB,
 		preparation.RunID,
+		preparation.ResumedFromRunID != 0,
 	)
 
 	for i := range steps {
@@ -208,6 +209,7 @@ func buildImportSteps(
 	maxWorkers int,
 	db *gorm.DB,
 	runID int64,
+	resume bool,
 ) []Step {
 	definitions := []struct {
 		enabled     bool
@@ -233,6 +235,7 @@ func buildImportSteps(
 			db,
 			runID,
 			definition.entityType,
+			resume,
 		)
 		steps = append(steps, definition.build(order))
 	}

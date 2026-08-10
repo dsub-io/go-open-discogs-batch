@@ -211,12 +211,6 @@ func (c *ImportExecutionCoordinator) Prepare(
 			return nil, err
 		}
 	}
-	if err := pruneObsoleteFailedProgress(ctx, tx, orderedTypes); err != nil {
-		_ = tx.Rollback()
-		c.release(ctx)
-		return nil, err
-	}
-
 	if err := tx.Commit(); err != nil {
 		_ = tx.Rollback()
 		c.release(ctx)
@@ -304,6 +298,10 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 		return fmt.Errorf("import run %d was not running", c.runID)
 	}
 	if statusReason == nil {
+		if err := pruneSupersededFailedProgress(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 		if _, err := tx.ExecContext(
 			ctx,
 			"delete from public.discogs_import_run_chunk where import_run_id = $1",
@@ -431,11 +429,37 @@ func findSuccessfulRun(
 	var runID int64
 	err := tx.QueryRowContext(
 		ctx,
-		`select id
-		   from public.discogs_import_run
-		  where manifest_sha256 = $1
-		    and status = 'success'
-		  order by completed_at desc, id desc
+		`select candidate_run.id
+		   from public.discogs_import_run candidate_run
+		  where candidate_run.manifest_sha256 = $1
+		    and candidate_run.status = 'success'
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump candidate_dump
+		          left join public.discogs_import_checkpoint checkpoint
+		            on checkpoint.entity_type = candidate_dump.entity_type
+		          left join public.discogs_import_run_dump current_dump
+		            on current_dump.import_run_id = checkpoint.import_run_id
+		           and current_dump.entity_type = checkpoint.entity_type
+		         where candidate_dump.import_run_id = candidate_run.id
+		           and current_dump.dump_id is distinct from candidate_dump.dump_id
+		    )
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump candidate_dump
+		          join public.discogs_import_checkpoint checkpoint
+		            on checkpoint.entity_type = candidate_dump.entity_type
+		          join public.discogs_import_run_dump failed_dump
+		            on failed_dump.entity_type = candidate_dump.entity_type
+		          join public.discogs_import_run failed_run
+		            on failed_run.id = failed_dump.import_run_id
+		         where candidate_dump.import_run_id = candidate_run.id
+		           and failed_run.status = 'failed'
+		           and (failed_run.completed_at > checkpoint.applied_at
+		                or (failed_run.completed_at = checkpoint.applied_at
+		                    and failed_run.id > checkpoint.import_run_id))
+		    )
+		  order by candidate_run.completed_at desc, candidate_run.id desc
 		  limit 1`,
 		fingerprint,
 	).Scan(&runID)
@@ -495,6 +519,24 @@ func findResumableRun(
 		         where run_chunk.import_run_id = import_run.id
 		           and (run_chunk.first_item_index <> run_chunk.chunk_index * run_dump.chunk_size
 		                or run_chunk.item_count > run_dump.chunk_size)
+		    )
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump failed_dump
+		          join public.discogs_import_checkpoint checkpoint
+		            on checkpoint.entity_type = failed_dump.entity_type
+		          join public.discogs_import_run_dump current_dump
+		            on current_dump.import_run_id = checkpoint.import_run_id
+		           and current_dump.entity_type = checkpoint.entity_type
+		          join public.discogs_import_run current_run
+		            on current_run.id = checkpoint.import_run_id
+		         where failed_dump.import_run_id = import_run.id
+		           and (current_dump.dump_id <> failed_dump.dump_id
+		                or current_run.processor <> import_run.processor
+		                or current_run.processor_version <> import_run.processor_version)
+		           and (checkpoint.applied_at > import_run.completed_at
+		                or (checkpoint.applied_at = import_run.completed_at
+		                    and checkpoint.import_run_id > import_run.id))
 		    )
 		  order by import_run.completed_at desc, import_run.id desc
 		  limit 1`,
@@ -593,25 +635,32 @@ func copyResumeProgress(
 	return nil
 }
 
-func pruneObsoleteFailedProgress(
-	ctx context.Context,
-	tx *sql.Tx,
-	entityTypes []string,
-) error {
+func pruneSupersededFailedProgress(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(
 		ctx,
 		`delete from public.discogs_import_run_chunk run_chunk
 		  where run_chunk.import_run_id in (
-		      select distinct import_run.id
-		        from public.discogs_import_run import_run
-		        join public.discogs_import_run_dump run_dump
-		          on run_dump.import_run_id = import_run.id
-		       where import_run.status = 'failed'
-		         and run_dump.entity_type = any($1::text[])
+		      select failed_run.id
+		        from public.discogs_import_run failed_run
+		       where failed_run.status = 'failed'
+		         and not exists (
+		             select 1
+		               from public.discogs_import_run_dump failed_dump
+		               left join public.discogs_import_checkpoint checkpoint
+		                 on checkpoint.entity_type = failed_dump.entity_type
+		               left join public.discogs_import_run current_run
+		                 on current_run.id = checkpoint.import_run_id
+		               left join public.discogs_import_run_dump current_dump
+		                 on current_dump.import_run_id = checkpoint.import_run_id
+		                and current_dump.entity_type = checkpoint.entity_type
+		              where failed_dump.import_run_id = failed_run.id
+		                and (current_dump.dump_id is distinct from failed_dump.dump_id
+		                     or current_run.processor is distinct from failed_run.processor
+		                     or current_run.processor_version is distinct from failed_run.processor_version)
+		         )
 		  )`,
-		postgresArray(entityTypes),
 	); err != nil {
-		return fmt.Errorf("prune obsolete failed import progress: %w", err)
+		return fmt.Errorf("prune superseded failed import progress: %w", err)
 	}
 	return nil
 }

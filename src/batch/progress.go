@@ -13,6 +13,45 @@ type ChunkMetadata struct {
 	ItemCount      int
 }
 
+func executeActiveRunTransaction(
+	order Order,
+	write func(Order) result.Result,
+) result.Result {
+	if order.getRunID() == 0 {
+		return write(order)
+	}
+	written := result.NewResult(0, nil)
+	err := order.getDB().WithContext(order.getContext()).Transaction(func(tx *gorm.DB) error {
+		written = write(order.withDB(tx))
+		if written.IsErr() {
+			return written.Err()
+		}
+		type activeImportRun struct {
+			ID int64
+		}
+		var active activeImportRun
+		fenced := tx.Raw(
+			`select id
+			   from public.discogs_import_run
+			  where id = ?
+			    and status = 'running'
+			  for update`,
+			order.getRunID(),
+		).Scan(&active)
+		if fenced.Error != nil {
+			return fmt.Errorf("fence active import run %d: %w", order.getRunID(), fenced.Error)
+		}
+		if fenced.RowsAffected != 1 || active.ID != order.getRunID() {
+			return fmt.Errorf("fence active import run %d: run is not active", order.getRunID())
+		}
+		return nil
+	})
+	if err != nil {
+		return result.NewResult(0, err)
+	}
+	return written
+}
+
 func executeChunk(
 	order Order,
 	chunk ChunkMetadata,
@@ -21,7 +60,7 @@ func executeChunk(
 	db := order.getDB().WithContext(order.getContext())
 	written := result.NewResult(0, nil)
 	err := db.Transaction(func(tx *gorm.DB) error {
-		if order.getRunID() != 0 {
+		if order.shouldResumeProgress() {
 			completed, checkErr := chunkAlreadyCompleted(tx, order, chunk)
 			if checkErr != nil {
 				return checkErr
@@ -96,41 +135,34 @@ func recordCompletedChunk(
 	order Order,
 	chunk ChunkMetadata,
 ) error {
-	inserted := tx.Exec(
-		`insert into public.discogs_import_run_chunk
-		    (import_run_id, entity_type, chunk_index, first_item_index, item_count)
-		 values (?, ?, ?, ?, ?)
-		 on conflict do nothing`,
+	updated := tx.Exec(
+		`with active_run as (
+		    select id
+		      from public.discogs_import_run
+		     where id = ?
+		       and status = 'running'
+		     for update
+		),
+		inserted as (
+		    insert into public.discogs_import_run_chunk
+		        (import_run_id, entity_type, chunk_index, first_item_index, item_count)
+		    select active_run.id, ?, ?, ?, ?
+		      from active_run
+		    on conflict do nothing
+		    returning item_count
+		)
+		update public.discogs_import_run_dump run_dump
+		   set processed_items = run_dump.processed_items + inserted.item_count,
+		       last_progress_at = now()
+		  from inserted
+		 where run_dump.import_run_id = ?
+		   and run_dump.entity_type = ?
+		   and run_dump.chunk_size = ?
+		   and run_dump.completed_at is null`,
 		order.getRunID(),
 		order.getEntityType(),
 		chunk.Index,
 		chunk.FirstItemIndex,
-		chunk.ItemCount,
-	)
-	if inserted.Error != nil {
-		return fmt.Errorf(
-			"record %s chunk %d progress: %w",
-			order.getEntityType(),
-			chunk.Index,
-			inserted.Error,
-		)
-	}
-	if inserted.RowsAffected != 1 {
-		return fmt.Errorf(
-			"record %s chunk %d progress: completion already exists",
-			order.getEntityType(),
-			chunk.Index,
-		)
-	}
-
-	updated := tx.Exec(
-		`update public.discogs_import_run_dump
-		    set processed_items = processed_items + ?,
-		        last_progress_at = now()
-		  where import_run_id = ?
-		    and entity_type = ?
-		    and chunk_size = ?
-		    and completed_at is null`,
 		chunk.ItemCount,
 		order.getRunID(),
 		order.getEntityType(),
@@ -138,7 +170,7 @@ func recordCompletedChunk(
 	)
 	if updated.Error != nil {
 		return fmt.Errorf(
-			"advance %s chunk %d progress: %w",
+			"record %s chunk %d progress: %w",
 			order.getEntityType(),
 			chunk.Index,
 			updated.Error,
@@ -146,7 +178,7 @@ func recordCompletedChunk(
 	}
 	if updated.RowsAffected != 1 {
 		return fmt.Errorf(
-			"advance %s chunk %d progress: run summary is unavailable",
+			"record %s chunk %d progress: run is not active, completion already exists, or run summary is unavailable",
 			order.getEntityType(),
 			chunk.Index,
 		)
@@ -159,11 +191,19 @@ func completeEntityProgress(order Order, totalItems, totalChunks int64) error {
 		return nil
 	}
 	updated := order.getDB().WithContext(order.getContext()).Exec(
-		`with coverage as (
+		`with active_run as (
+		    select id
+		      from public.discogs_import_run
+		     where id = ?
+		       and status = 'running'
+		     for update
+		),
+		coverage as (
 		    select count(*) as completed_chunks,
 		           coalesce(sum(item_count), 0) as completed_items,
 		           count(*) filter (
-		               where first_item_index <> chunk_index * ?
+		               where chunk_index >= ?
+		                  or first_item_index <> chunk_index * ?
 		                  or item_count <> case
 		                      when chunk_index = ? - 1 then ? - first_item_index
 		                      else ?
@@ -178,14 +218,16 @@ func completeEntityProgress(order Order, totalItems, totalChunks int64) error {
 		       total_chunks = ?,
 		       completed_at = now(),
 		       last_progress_at = now()
-		  from coverage
-		 where import_run_id = ?
+		  from coverage, active_run
+		 where import_run_id = active_run.id
 		   and entity_type = ?
 		   and chunk_size = ?
 		   and processed_items = ?
 		   and coverage.completed_chunks = ?
 		   and coverage.completed_items = ?
 		   and coverage.invalid_chunks = 0`,
+		order.getRunID(),
+		totalChunks,
 		order.getChunkSize(),
 		totalChunks,
 		totalItems,
@@ -194,7 +236,6 @@ func completeEntityProgress(order Order, totalItems, totalChunks int64) error {
 		order.getEntityType(),
 		totalItems,
 		totalChunks,
-		order.getRunID(),
 		order.getEntityType(),
 		order.getChunkSize(),
 		totalItems,
