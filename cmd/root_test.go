@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/knadh/koanf"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,4 +93,117 @@ func (failingHomeDirSupplier) HomeUserDir() (string, error) {
 
 func TestGetHomeDirPanics(t *testing.T) {
 	require.Panics(t, func() { getHomeDir(failingHomeDirSupplier{}) })
+}
+
+func TestExecuteUsesProcessArguments(t *testing.T) {
+	originalArgs := os.Args
+	os.Args = []string{"go-open-discogs-batch", "--version"}
+	t.Cleanup(func() { os.Args = originalArgs })
+
+	require.NoError(t, Execute())
+}
+
+func TestMainFunctionValidatesAndDelegates(t *testing.T) {
+	originalRunBatch := runBatch
+	t.Cleanup(func() { runBatch = originalRunBatch })
+	invalidConfig := koanf.New(".")
+	require.NoError(t, invalidConfig.Set("database-url", "://invalid"))
+	require.Error(t, originalRunBatch(context.Background(), invalidConfig, "test"))
+
+	called := false
+	runBatch = func(ctx context.Context, config *koanf.Koanf, releaseVersion string) error {
+		called = true
+		require.NotNil(t, ctx)
+		return nil
+	}
+
+	command := NewRootCommand()
+	command.SetArgs([]string{
+		"--database-url", "postgresql://user:pass@db:5432/discogs",
+		"--entities", "artist",
+	})
+	require.NoError(t, command.Execute())
+	require.True(t, called)
+
+	command = NewRootCommand()
+	command.SetArgs([]string{"--entities", "artist"})
+	require.ErrorContains(t, command.Execute(), "database-url")
+}
+
+func TestPrintableVersion(t *testing.T) {
+	originalVersion := version
+	t.Cleanup(func() { version = originalVersion })
+	version = "  "
+	require.Equal(t, "development", printableVersion())
+	version = "1.2.3"
+	require.Equal(t, "1.2.3", printableVersion())
+}
+
+func TestLoadPropagatesEachStageFailure(t *testing.T) {
+	originalEnvironment := loadEnvironmentConfig
+	originalFlags := loadFlagConfig
+	originalNormalize := normalizeEntityConfig
+	t.Cleanup(func() {
+		loadEnvironmentConfig = originalEnvironment
+		loadFlagConfig = originalFlags
+		normalizeEntityConfig = originalNormalize
+	})
+	flags := pflag.NewFlagSet("fixture", pflag.ContinueOnError)
+	flags.Bool("version", false, "")
+	config := koanf.New(".")
+	expected := errors.New("fixture")
+
+	loadEnvironmentConfig = func(*koanf.Koanf) error { return expected }
+	require.ErrorIs(t, load(flags, config), expected)
+
+	loadEnvironmentConfig = originalEnvironment
+	loadFlagConfig = func(*pflag.FlagSet, *koanf.Koanf) error { return expected }
+	require.ErrorIs(t, load(flags, config), expected)
+
+	loadFlagConfig = originalFlags
+	normalizeEntityConfig = func(*koanf.Koanf) error { return expected }
+	require.ErrorIs(t, load(flags, config), expected)
+}
+
+func TestNormalizeEntitiesPropagatesSetFailures(t *testing.T) {
+	originalList := setEntityListConfig
+	originalSelection := setEntitySelectionConfig
+	t.Cleanup(func() {
+		setEntityListConfig = originalList
+		setEntitySelectionConfig = originalSelection
+	})
+	config := koanf.New(".")
+	require.NoError(t, config.Set("entities", []string{"artist"}))
+	expected := errors.New("set failure")
+
+	setEntityListConfig = func(*koanf.Koanf, []string) error { return expected }
+	require.ErrorIs(t, normalizeEntities(config), expected)
+
+	setEntityListConfig = originalList
+	setEntitySelectionConfig = func(*koanf.Koanf, string, bool) error { return expected }
+	require.ErrorIs(t, normalizeEntities(config), expected)
+}
+
+func TestLoadEnvironmentHandlesUnknownAndBooleanSpellings(t *testing.T) {
+	t.Setenv(Prefix+"UNKNOWN", "ignored")
+	t.Setenv(Prefix+"CLEANUP", "off")
+	t.Setenv(Prefix+"FORCE", "1")
+	t.Setenv(Prefix+"ALLOW_DOWNGRADE", "invalid")
+	config := koanf.New(".")
+
+	require.NoError(t, loadEnvironment(config))
+	require.False(t, config.Exists("unknown"))
+	require.False(t, config.Bool("cleanup"))
+	require.True(t, config.Bool("force"))
+	require.Equal(t, "invalid", config.String("allow-downgrade"))
+}
+
+func TestNormalizeEntitiesDropsBlankAndDuplicateValues(t *testing.T) {
+	config := koanf.New(".")
+	require.NoError(t, config.Set("entities", []string{"", "Artists", "artist", " RELEASES "}))
+
+	require.NoError(t, normalizeEntities(config))
+	require.Equal(t, []string{"artist", "release"}, config.Strings("entities"))
+	require.True(t, config.Bool("artists"))
+	require.True(t, config.Bool("releases"))
 }

@@ -14,10 +14,15 @@ import (
 
 const processorName = "go-open-discogs-batch"
 
+var fingerprintImportManifest = opendiscogsmanifest.Fingerprint
+var orderImportEntityTypes = opendiscogsmanifest.OrderedEntityTypes
+var requiredImportLockTypes = opendiscogsmanifest.RequiredLockEntityTypes
+
 type ImportPreparation struct {
-	ManifestSHA256 string
-	RunID          int64
-	Skipped        bool
+	ManifestSHA256   string
+	RunID            int64
+	ResumedFromRunID int64
+	Skipped          bool
 }
 
 type ImportExecutionCoordinator struct {
@@ -46,6 +51,7 @@ func NewImportExecutionCoordinator(
 func (c *ImportExecutionCoordinator) Prepare(
 	ctx context.Context,
 	dumps []*opendiscogsmodel.DiscogsDump,
+	chunkSize int,
 	force bool,
 	allowDowngrade bool,
 ) (*ImportPreparation, error) {
@@ -57,6 +63,9 @@ func (c *ImportExecutionCoordinator) Prepare(
 	}
 	if len(dumps) == 0 {
 		return nil, errors.New("import plan must contain at least one dump")
+	}
+	if chunkSize <= 0 {
+		return nil, errors.New("chunk size must be a positive integer")
 	}
 
 	manifestDumps := make([]opendiscogsmanifest.Dump, 0, len(dumps))
@@ -73,11 +82,15 @@ func (c *ImportExecutionCoordinator) Prepare(
 		entityTypes = append(entityTypes, dump.EntityType)
 	}
 
-	fingerprint, err := opendiscogsmanifest.Fingerprint(manifestDumps)
+	fingerprint, err := fingerprintImportManifest(manifestDumps)
 	if err != nil {
 		return nil, fmt.Errorf("fingerprint import manifest: %w", err)
 	}
-	orderedTypes, err := opendiscogsmanifest.OrderedEntityTypes(entityTypes)
+	orderedTypes, err := orderImportEntityTypes(entityTypes)
+	if err != nil {
+		return nil, err
+	}
+	lockTypes, err := requiredImportLockTypes(orderedTypes)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +100,7 @@ func (c *ImportExecutionCoordinator) Prepare(
 		return nil, fmt.Errorf("reserve import lock connection: %w", err)
 	}
 	c.conn = conn
-	if err := c.acquireEntityLocks(ctx, orderedTypes); err != nil {
+	if err := c.acquireEntityLocks(ctx, lockTypes); err != nil {
 		c.release(ctx)
 		return nil, err
 	}
@@ -146,6 +159,23 @@ func (c *ImportExecutionCoordinator) Prepare(
 		}
 	}
 
+	resumedFromRunID := int64(0)
+	if !force {
+		resumedFromRunID, err = findResumableRun(
+			ctx,
+			tx,
+			fingerprint,
+			c.processorVersion,
+			chunkSize,
+			len(dumps),
+		)
+		if err != nil {
+			_ = tx.Rollback()
+			c.release(ctx)
+			return nil, err
+		}
+	}
+
 	runID, err := insertImportRun(
 		ctx,
 		tx,
@@ -153,6 +183,7 @@ func (c *ImportExecutionCoordinator) Prepare(
 		force,
 		allowDowngrade,
 		c.processorVersion,
+		resumedFromRunID,
 	)
 	if err != nil {
 		_ = tx.Rollback()
@@ -163,18 +194,31 @@ func (c *ImportExecutionCoordinator) Prepare(
 		if _, err := tx.ExecContext(
 			ctx,
 			`insert into public.discogs_import_run_dump
-			    (import_run_id, entity_type, dump_id)
-			 values ($1, $2, $3)`,
+			    (import_run_id, entity_type, dump_id, chunk_size)
+			 values ($1, $2, $3, $4)`,
 			runID,
 			dump.EntityType,
 			dumpIDs[index],
+			chunkSize,
 		); err != nil {
 			_ = tx.Rollback()
 			c.release(ctx)
 			return nil, fmt.Errorf("record import run dump %s: %w", dump.EntityType, err)
 		}
 	}
-
+	if resumedFromRunID != 0 {
+		if err := copyResumeProgress(
+			ctx,
+			tx,
+			resumedFromRunID,
+			runID,
+			len(dumps),
+		); err != nil {
+			_ = tx.Rollback()
+			c.release(ctx)
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		_ = tx.Rollback()
 		c.release(ctx)
@@ -183,8 +227,9 @@ func (c *ImportExecutionCoordinator) Prepare(
 	committed = true
 	c.runID = runID
 	return &ImportPreparation{
-		ManifestSHA256: fingerprint,
-		RunID:          runID,
+		ManifestSHA256:   fingerprint,
+		RunID:            runID,
+		ResumedFromRunID: resumedFromRunID,
 	}, nil
 }
 
@@ -201,11 +246,39 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 	if err != nil {
 		return fmt.Errorf("begin import completion transaction: %w", err)
 	}
+	statusReason := runErr
+	var completionErr error
+	if statusReason == nil {
+		var incompleteEntities int64
+		if scanErr := tx.QueryRowContext(
+			ctx,
+			`select count(*)
+			   from public.discogs_import_run_dump
+			  where import_run_id = $1
+			    and (completed_at is null
+			         or total_items is null
+			         or total_chunks is null
+			         or processed_items <> total_items)`,
+			c.runID,
+		).Scan(&incompleteEntities); scanErr != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("validate import run %d completion: %w", c.runID, scanErr)
+		}
+		if incompleteEntities != 0 {
+			completionErr = fmt.Errorf(
+				"import run %d has %d incomplete entities",
+				c.runID,
+				incompleteEntities,
+			)
+			statusReason = completionErr
+		}
+	}
+
 	status := "success"
-	var failure any
-	if runErr != nil {
+	failure := sql.NullString{}
+	if statusReason != nil {
 		status = "failed"
-		failure = runErr.Error()
+		failure = sql.NullString{String: statusReason.Error(), Valid: true}
 	}
 	result, err := tx.ExecContext(
 		ctx,
@@ -232,11 +305,25 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 		_ = tx.Rollback()
 		return fmt.Errorf("import run %d was not running", c.runID)
 	}
+	if statusReason == nil {
+		if err := pruneSupersededFailedProgress(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			"delete from public.discogs_import_run_chunk where import_run_id = $1",
+			c.runID,
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("prune completed import run %d chunks: %w", c.runID, err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit import completion: %w", err)
 	}
 	c.runID = 0
-	return nil
+	return completionErr
 }
 
 func (c *ImportExecutionCoordinator) acquireEntityLocks(
@@ -288,13 +375,7 @@ func markAbandonedRuns(
 	tx *sql.Tx,
 	entityTypes []string,
 ) error {
-	placeholders := make([]string, len(entityTypes))
-	args := make([]any, len(entityTypes))
-	for index, entityType := range entityTypes {
-		placeholders[index] = fmt.Sprintf("$%d", index+1)
-		args[index] = entityType
-	}
-	query := fmt.Sprintf(`
+	if _, err := tx.ExecContext(ctx, `
 		update public.discogs_import_run import_run
 		   set status = 'failed',
 		       completed_at = now(),
@@ -304,9 +385,8 @@ func markAbandonedRuns(
 		       select 1
 		         from public.discogs_import_run_dump run_dump
 		        where run_dump.import_run_id = import_run.id
-		          and run_dump.entity_type in (%s)
-		   )`, strings.Join(placeholders, ", "))
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		          and run_dump.entity_type = any($1::text[])
+		   )`, postgresArray(entityTypes)); err != nil {
 		return fmt.Errorf("recover abandoned import runs: %w", err)
 	}
 	return nil
@@ -357,11 +437,37 @@ func findSuccessfulRun(
 	var runID int64
 	err := tx.QueryRowContext(
 		ctx,
-		`select id
-		   from public.discogs_import_run
-		  where manifest_sha256 = $1
-		    and status = 'success'
-		  order by completed_at desc, id desc
+		`select candidate_run.id
+		   from public.discogs_import_run candidate_run
+		  where candidate_run.manifest_sha256 = $1
+		    and candidate_run.status = 'success'
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump candidate_dump
+		          left join public.discogs_import_checkpoint checkpoint
+		            on checkpoint.entity_type = candidate_dump.entity_type
+		          left join public.discogs_import_run_dump current_dump
+		            on current_dump.import_run_id = checkpoint.import_run_id
+		           and current_dump.entity_type = checkpoint.entity_type
+		         where candidate_dump.import_run_id = candidate_run.id
+		           and current_dump.dump_id is distinct from candidate_dump.dump_id
+		    )
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump candidate_dump
+		          join public.discogs_import_checkpoint checkpoint
+		            on checkpoint.entity_type = candidate_dump.entity_type
+		          join public.discogs_import_run_dump failed_dump
+		            on failed_dump.entity_type = candidate_dump.entity_type
+		          join public.discogs_import_run failed_run
+		            on failed_run.id = failed_dump.import_run_id
+		         where candidate_dump.import_run_id = candidate_run.id
+		           and failed_run.status = 'failed'
+		           and (failed_run.completed_at > checkpoint.applied_at
+		                or (failed_run.completed_at = checkpoint.applied_at
+		                    and failed_run.id > checkpoint.import_run_id))
+		    )
+		  order by candidate_run.completed_at desc, candidate_run.id desc
 		  limit 1`,
 		fingerprint,
 	).Scan(&runID)
@@ -372,6 +478,199 @@ func findSuccessfulRun(
 		return 0, fmt.Errorf("find successful import manifest: %w", err)
 	}
 	return runID, nil
+}
+
+func findResumableRun(
+	ctx context.Context,
+	tx *sql.Tx,
+	fingerprint string,
+	processorVersion string,
+	chunkSize int,
+	entityCount int,
+) (int64, error) {
+	var runID int64
+	err := tx.QueryRowContext(
+		ctx,
+		`select import_run.id
+		   from public.discogs_import_run import_run
+		  where import_run.manifest_sha256 = $1
+		    and import_run.status = 'failed'
+		    and import_run.processor = $2
+		    and import_run.processor_version = $3
+		    and not import_run.force_requested
+		    and (select count(*)
+		           from public.discogs_import_run_dump run_dump
+		          where run_dump.import_run_id = import_run.id) = $4
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump run_dump
+		         where run_dump.import_run_id = import_run.id
+		           and run_dump.chunk_size is distinct from $5
+		    )
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump run_dump
+		         where run_dump.import_run_id = import_run.id
+		           and run_dump.processed_items <> (
+		               select coalesce(sum(run_chunk.item_count), 0)
+		                 from public.discogs_import_run_chunk run_chunk
+		                where run_chunk.import_run_id = run_dump.import_run_id
+		                  and run_chunk.entity_type = run_dump.entity_type
+		           )
+		    )
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_chunk run_chunk
+		          join public.discogs_import_run_dump run_dump
+		            on run_dump.import_run_id = run_chunk.import_run_id
+		           and run_dump.entity_type = run_chunk.entity_type
+		         where run_chunk.import_run_id = import_run.id
+		           and (run_chunk.first_item_index <> run_chunk.chunk_index * run_dump.chunk_size
+		                or run_chunk.item_count > run_dump.chunk_size)
+		    )
+		    and not exists (
+		        select 1
+		          from public.discogs_import_run_dump failed_dump
+		          join public.discogs_import_checkpoint checkpoint
+		            on checkpoint.entity_type = failed_dump.entity_type
+		          join public.discogs_import_run_dump current_dump
+		            on current_dump.import_run_id = checkpoint.import_run_id
+		           and current_dump.entity_type = checkpoint.entity_type
+		          join public.discogs_import_run current_run
+		            on current_run.id = checkpoint.import_run_id
+		         where failed_dump.import_run_id = import_run.id
+		           and (current_dump.dump_id <> failed_dump.dump_id
+		                or current_run.processor <> import_run.processor
+		                or current_run.processor_version <> import_run.processor_version)
+		           and (checkpoint.applied_at > import_run.completed_at
+		                or (checkpoint.applied_at = import_run.completed_at
+		                    and checkpoint.import_run_id > import_run.id))
+		    )
+		  order by import_run.completed_at desc, import_run.id desc
+		  limit 1`,
+		fingerprint,
+		processorName,
+		processorVersion,
+		entityCount,
+		chunkSize,
+	).Scan(&runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("find resumable import run: %w", err)
+	}
+	return runID, nil
+}
+
+func copyResumeProgress(
+	ctx context.Context,
+	tx *sql.Tx,
+	fromRunID int64,
+	toRunID int64,
+	expectedEntityCount int,
+) error {
+	summaryResult, err := tx.ExecContext(
+		ctx,
+		`update public.discogs_import_run_dump target
+		    set processed_items = source.processed_items,
+		        total_items = source.total_items,
+		        total_chunks = source.total_chunks,
+		        last_progress_at = source.last_progress_at,
+		        completed_at = source.completed_at
+		   from public.discogs_import_run_dump source
+		  where target.import_run_id = $1
+		    and source.import_run_id = $2
+		    and target.entity_type = source.entity_type
+		    and target.dump_id = source.dump_id
+		    and target.chunk_size = source.chunk_size`,
+		toRunID,
+		fromRunID,
+	)
+	if err != nil {
+		return fmt.Errorf("copy import run %d summaries: %w", fromRunID, err)
+	}
+	copiedSummaries, err := summaryResult.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count copied import run %d summaries: %w", fromRunID, err)
+	}
+	if copiedSummaries != int64(expectedEntityCount) {
+		return fmt.Errorf(
+			"copy import run %d summaries: copied %d of %d entities",
+			fromRunID,
+			copiedSummaries,
+			expectedEntityCount,
+		)
+	}
+
+	chunkResult, err := tx.ExecContext(
+		ctx,
+		`insert into public.discogs_import_run_chunk
+		    (import_run_id, entity_type, chunk_index, first_item_index, item_count, completed_at)
+		 select $1, entity_type, chunk_index, first_item_index, item_count, completed_at
+		   from public.discogs_import_run_chunk
+		  where import_run_id = $2`,
+		toRunID,
+		fromRunID,
+	)
+	if err != nil {
+		return fmt.Errorf("copy import run %d chunks: %w", fromRunID, err)
+	}
+	copiedChunks, err := chunkResult.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count copied import run %d chunks: %w", fromRunID, err)
+	}
+	deleteResult, err := tx.ExecContext(
+		ctx,
+		"delete from public.discogs_import_run_chunk where import_run_id = $1",
+		fromRunID,
+	)
+	if err != nil {
+		return fmt.Errorf("prune resumed import run %d chunks: %w", fromRunID, err)
+	}
+	deletedChunks, err := deleteResult.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count pruned import run %d chunks: %w", fromRunID, err)
+	}
+	if deletedChunks != copiedChunks {
+		return fmt.Errorf(
+			"transfer import run %d chunks: copied %d but pruned %d",
+			fromRunID,
+			copiedChunks,
+			deletedChunks,
+		)
+	}
+	return nil
+}
+
+func pruneSupersededFailedProgress(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(
+		ctx,
+		`delete from public.discogs_import_run_chunk run_chunk
+		  where run_chunk.import_run_id in (
+		      select failed_run.id
+		        from public.discogs_import_run failed_run
+		       where failed_run.status = 'failed'
+		         and not exists (
+		             select 1
+		               from public.discogs_import_run_dump failed_dump
+		               left join public.discogs_import_checkpoint checkpoint
+		                 on checkpoint.entity_type = failed_dump.entity_type
+		               left join public.discogs_import_run current_run
+		                 on current_run.id = checkpoint.import_run_id
+		               left join public.discogs_import_run_dump current_dump
+		                 on current_dump.import_run_id = checkpoint.import_run_id
+		                and current_dump.entity_type = checkpoint.entity_type
+		              where failed_dump.import_run_id = failed_run.id
+		                and (current_dump.dump_id is distinct from failed_dump.dump_id
+		                     or current_run.processor is distinct from failed_run.processor
+		                     or current_run.processor_version is distinct from failed_run.processor_version)
+		         )
+		  )`,
+	); err != nil {
+		return fmt.Errorf("prune superseded failed import progress: %w", err)
+	}
+	return nil
 }
 
 func findOrInsertDump(
@@ -424,20 +723,26 @@ func insertImportRun(
 	force bool,
 	allowDowngrade bool,
 	processorVersion string,
+	resumedFromRunID int64,
 ) (int64, error) {
 	var runID int64
+	resumedFrom := sql.NullInt64{}
+	if resumedFromRunID != 0 {
+		resumedFrom = sql.NullInt64{Int64: resumedFromRunID, Valid: true}
+	}
 	err := tx.QueryRowContext(
 		ctx,
 		`insert into public.discogs_import_run
 		    (manifest_sha256, status, force_requested,
-		     allow_downgrade_requested, processor, processor_version)
-		 values ($1, 'running', $2, $3, $4, $5)
+		     allow_downgrade_requested, processor, processor_version, resumed_from_run_id)
+		 values ($1, 'running', $2, $3, $4, $5, $6)
 		 returning id`,
 		fingerprint,
 		force,
 		allowDowngrade,
 		processorName,
 		processorVersion,
+		resumedFrom,
 	).Scan(&runID)
 	if err != nil {
 		return 0, fmt.Errorf("start import run: %w", err)

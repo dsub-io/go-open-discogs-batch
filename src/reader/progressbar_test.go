@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"os"
 	"path"
+	"path/filepath"
 	"testing"
 )
 
@@ -27,4 +28,17 @@ func TestNewProgressBarGzipReadCloser(t *testing.T) {
 
 	require.NoError(t, r.Close())
 	require.Error(t, f.Close())
+}
+
+func TestNewProgressBarGzipReadCloserRejectsInvalidGzip(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "invalid.gz")
+	require.NoError(t, os.WriteFile(filePath, []byte("not gzip"), 0o600))
+	f, err := os.Open(filePath)
+	require.NoError(t, err)
+
+	reader, err := NewProgressBarGzipReadCloser(f, filePath)
+
+	require.Error(t, err)
+	require.Nil(t, reader)
+	require.NoError(t, f.Close())
 }

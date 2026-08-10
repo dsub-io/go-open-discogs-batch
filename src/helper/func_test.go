@@ -72,6 +72,17 @@ func TestMapWindowedSlice(t *testing.T) {
 			require.NotEmpty(t, values)
 		}
 	})
+
+	t.Run("mapper ignores nil items", func(t *testing.T) {
+		items := make(chan rxgo.Item, 2)
+		items <- rxgo.Item{}
+		items <- rxgo.Of(1)
+		close(items)
+		observable := rxgo.FromChannel(items)
+		value, err := f(nil, observable)
+		require.NoError(t, err)
+		require.Equal(t, []int{1}, value)
+	})
 }
 
 func TestFilterStr(t *testing.T) {

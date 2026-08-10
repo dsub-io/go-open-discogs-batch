@@ -14,18 +14,20 @@ import (
 
 const migrationTable = "open_discogs_schema_migration"
 
+var loadSchemaMigrations = opendiscogsschema.Migrations
+
 // RunDDL applies the versioned PostgreSQL migrations embedded in open-discogs-model.
 // Applied checksums are persisted so a released migration can never change silently.
 func RunDDL(db *gorm.DB) error {
-	migrations, err := opendiscogsschema.Migrations()
+	migrations, err := loadSchemaMigrations()
 	if err != nil {
 		return fmt.Errorf("load shared schema migrations: %w", err)
 	}
+	return runDDL(db, migrations)
+}
 
-	names, err := fs.Glob(migrations, "*.sql")
-	if err != nil {
-		return fmt.Errorf("list shared schema migrations: %w", err)
-	}
+func runDDL(db *gorm.DB, migrations fs.FS) error {
+	names, _ := fs.Glob(migrations, "*.sql")
 	sort.Strings(names)
 
 	if err := db.Exec(`

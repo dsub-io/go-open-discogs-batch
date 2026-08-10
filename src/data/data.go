@@ -137,6 +137,9 @@ func isKnownType(typeStr string) bool {
 func DispatchChecksumFetch(store *checksumStore) func(context.Context, interface{}) (interface{}, error) {
 	return func(ctx context.Context, i interface{}) (interface{}, error) {
 		if dump := i.(*Data); dump.TargetType == "checksum" {
+			if err := ctx.Err(); err != nil {
+				return i, err
+			}
 			select {
 			case v, ok := <-getClient().Get(ctx, checksumDownloadURL(dump.Uri)).Observe():
 				if !ok {
@@ -190,8 +193,15 @@ type chkSumP struct {
 
 func ParseDumpModel(ctx context.Context) func(item rxgo.Item) rxgo.Observable {
 	return func(item rxgo.Item) rxgo.Observable {
+		if item.Error() {
+			return rxgo.Thrown(item.E)
+		}
+		body, ok := item.V.([]byte)
+		if !ok {
+			return rxgo.Thrown(fmt.Errorf("dump listing response was not a byte payload"))
+		}
 		p := xmlparser.NewParser[Data]()
-		buf := bytes.NewBuffer(item.V.([]byte))
+		buf := bytes.NewBuffer(body)
 		return p.Parse(ctx, xmlparser.SimpleTokenOrder(io.NopCloser(buf), "Contents"))
 	}
 }
@@ -222,6 +232,10 @@ func UpdateData(ctx context.Context, repo Repository, maxWorkers int) (int, erro
 		Reduce(helper.SliceReducer[*Data]()).
 		Map(BatchInsertItems(repo)).
 		Observe()
+	return catalogUpdateCount(res)
+}
+
+func catalogUpdateCount(res rxgo.Item) (int, error) {
 	if res.E != nil {
 		return 0, res.E
 	}
@@ -353,16 +367,23 @@ type ImportPlan struct {
 }
 
 func FetchImportPlan(k *koanf.Koanf, dataRepo Repository) (*ImportPlan, error) {
+	plan, err := ResolveImportPlan(k, dataRepo)
+	if err != nil {
+		return nil, err
+	}
+	if err := FetchImportResources(context.Background(), plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func ResolveImportPlan(k *koanf.Koanf, dataRepo Repository) (*ImportPlan, error) {
 	plan := &ImportPlan{
 		Resources: make(map[string]string),
 		Dumps:     make([]*opendiscogsmodel.DiscogsDump, 0, len(k.Strings("entities"))),
 	}
 	dumpMonth := k.String("dump-month")
 	dataRootDir := k.String("data-dir")
-	if err := os.MkdirAll(dataRootDir, 0755); err != nil {
-		return nil, err
-	}
-	handler := file.NewHandler()
 	for _, entity := range k.Strings("entities") {
 		var (
 			d   *opendiscogsmodel.DiscogsDump
@@ -378,18 +399,37 @@ func FetchImportPlan(k *koanf.Koanf, dataRepo Repository) (*ImportPlan, error) {
 			return nil, err
 		}
 		var (
-			resourceURI = DiscogsS3BaseUrl + d.URI
 			targetPath  = filepath.Join(dataRootDir, helper.GetLastUriSegment(d.URI))
 			resourceKey = strings.TrimSuffix(entity, "s") + "s"
 		)
-		err = handler.FetchAndCheck(resourceURI, targetPath, d.ChecksumSHA256)
-		if err != nil {
-			return nil, err
-		}
 		plan.Resources[resourceKey] = targetPath
 		plan.Dumps = append(plan.Dumps, d)
 	}
 	return plan, nil
+}
+
+func FetchImportResources(ctx context.Context, plan *ImportPlan) error {
+	handler := file.NewHandler()
+	for _, dump := range plan.Dumps {
+		resourceKey := strings.TrimSuffix(dump.EntityType, "s") + "s"
+		targetPath, found := plan.Resources[resourceKey]
+		if !found {
+			return fmt.Errorf("missing %s import resource path", dump.EntityType)
+		}
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return fmt.Errorf("create %s import directory: %w", dump.EntityType, err)
+		}
+		resourceURI := DiscogsS3BaseUrl + dump.URI
+		if err := handler.FetchAndCheckContext(
+			ctx,
+			resourceURI,
+			targetPath,
+			dump.ChecksumSHA256,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func FetchFiles(k *koanf.Koanf, dataRepo Repository) (map[string]string, error) {

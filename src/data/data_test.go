@@ -1,6 +1,7 @@
 package data
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -124,6 +126,12 @@ func TestPopulateFromUri(t *testing.T) {
 		_, err := PopulateFromUri()(context.Background(), &Data{Uri: "invalid"})
 		require.Error(t, err)
 	})
+	t.Run("must reject invalid date", func(t *testing.T) {
+		_, err := PopulateFromUri()(context.Background(), &Data{
+			Uri: "data/2008/discogs_20081409_releases.xml.gz",
+		})
+		require.ErrorContains(t, err, "invalid dump date")
+	})
 }
 
 func TestNotNilFilter(t *testing.T) {
@@ -139,6 +147,23 @@ func TestNotNilFilter(t *testing.T) {
 type clientStub struct {
 	pl  []byte
 	err error
+}
+
+type observableClientStub struct {
+	observable rxgo.Observable
+}
+
+func (c observableClientStub) Get(context.Context, string) rxgo.Observable {
+	return c.observable
+}
+
+type signalingClientStub struct {
+	called chan<- struct{}
+}
+
+func (c signalingClientStub) Get(context.Context, string) rxgo.Observable {
+	close(c.called)
+	return rxgo.Never()
 }
 
 func (c clientStub) Get(_ context.Context, _ string) rxgo.Observable {
@@ -179,6 +204,39 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 		dump := &Data{TargetType: "checksum", Uri: "checksum.txt"}
 		_, err := DispatchChecksumFetch(newChecksumStore())(context.Background(), dump)
 		require.ErrorIs(t, err, fetchErr)
+	})
+	t.Run("must reject an empty response", func(t *testing.T) {
+		getClient = func() client.Client { return observableClientStub{observable: rxgo.Empty()} }
+		dump := &Data{TargetType: "checksum", Uri: "checksum.txt"}
+		_, err := DispatchChecksumFetch(newChecksumStore())(context.Background(), dump)
+		require.ErrorContains(t, err, "response closed")
+	})
+	t.Run("must reject a non-byte response", func(t *testing.T) {
+		getClient = func() client.Client {
+			return observableClientStub{observable: rxgo.Just("invalid")()}
+		}
+		dump := &Data{TargetType: "checksum", Uri: "checksum.txt"}
+		_, err := DispatchChecksumFetch(newChecksumStore())(context.Background(), dump)
+		require.ErrorContains(t, err, "not a byte payload")
+	})
+	t.Run("must honor cancellation before requesting", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		dump := &Data{TargetType: "checksum", Uri: "checksum.txt"}
+		_, err := DispatchChecksumFetch(newChecksumStore())(ctx, dump)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+	t.Run("must honor cancellation while awaiting response", func(t *testing.T) {
+		called := make(chan struct{})
+		getClient = func() client.Client { return signalingClientStub{called: called} }
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-called
+			cancel()
+		}()
+		dump := &Data{TargetType: "checksum", Uri: "checksum.txt"}
+		_, err := DispatchChecksumFetch(newChecksumStore())(ctx, dump)
+		require.ErrorIs(t, err, context.Canceled)
 	})
 }
 
@@ -230,13 +288,25 @@ func TestParseDataModel(t *testing.T) {
 			assert.NotEmpty(t, v.Uri)
 		}
 	})
+	t.Run("propagates source and payload errors", func(t *testing.T) {
+		expected := errors.New("fixture")
+		result := <-ParseDumpModel(context.Background())(rxgo.Error(expected)).Observe()
+		require.ErrorIs(t, result.E, expected)
+
+		result = <-ParseDumpModel(context.Background())(rxgo.Of("invalid")).Observe()
+		require.ErrorContains(t, result.E, "not a byte payload")
+	})
 }
 
 type RepositoryStub struct {
-	items []*Data
+	items    []*Data
+	batchErr error
 }
 
 func (r *RepositoryStub) BatchInsert(data []*Data) (int, error) {
+	if r.batchErr != nil {
+		return 0, r.batchErr
+	}
 	r.items = data
 	return len(data), nil
 }
@@ -321,6 +391,39 @@ func TestUpdateDataRejectsNonPositiveMaxWorkers(t *testing.T) {
 	require.ErrorContains(t, err, "max-workers must be a positive integer")
 }
 
+func TestUpdateDataPropagatesListingFailure(t *testing.T) {
+	server := testserver.NewServer(func(
+		requests []*testserver.HttpRequest,
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		http.Error(w, "fixture", http.StatusInternalServerError)
+	})
+	defer server.Close()
+	originalURL := DiscogsS3BaseUrl
+	t.Cleanup(func() { DiscogsS3BaseUrl = originalURL })
+	DiscogsS3BaseUrl = server.URL
+
+	updated, err := UpdateData(context.Background(), &RepositoryStub{}, 1)
+	require.Equal(t, -1, updated)
+	require.Error(t, err)
+}
+
+func TestCatalogUpdateCount(t *testing.T) {
+	expected := errors.New("fixture")
+	updated, err := catalogUpdateCount(rxgo.Error(expected))
+	require.Zero(t, updated)
+	require.ErrorIs(t, err, expected)
+
+	updated, err = catalogUpdateCount(rxgo.Of("not-a-count"))
+	require.Zero(t, updated)
+	require.ErrorContains(t, err, "did not contain a count")
+
+	updated, err = catalogUpdateCount(rxgo.Of(7))
+	require.NoError(t, err)
+	require.Equal(t, 7, updated)
+}
+
 func TestUpdateSelectedDataBoundsChecksumRequests(t *testing.T) {
 	listing := resource.Read("testdata/update-data-test.xml")
 	server := testserver.NewServer(func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
@@ -355,6 +458,131 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 	require.Equal(t, 3, updated)
 	require.Len(t, repo.items, 3)
 	require.Len(t, server.Requests(), 2, "one listing plus one shared-date checksum request")
+}
+
+func TestUpdateSelectedDataErrorBoundaries(t *testing.T) {
+	listing := resource.Read("testdata/update-data-test.xml")
+	tests := []struct {
+		name            string
+		listingResponse []byte
+		checksumStatus  int
+		checksumBody    string
+		want            string
+	}{
+		{
+			name:            "missing checksum manifest",
+			listingResponse: bytes.Replace(listing, checksumContents(listing), nil, 1),
+			checksumStatus:  http.StatusOK,
+			want:            "checksum manifest not found",
+		},
+		{
+			name:            "checksum fetch failure",
+			listingResponse: listing,
+			checksumStatus:  http.StatusInternalServerError,
+			want:            "returned 500",
+		},
+		{
+			name:            "missing entity checksum",
+			listingResponse: listing,
+			checksumStatus:  http.StatusOK,
+			checksumBody:    validChecksumTextSliceSample[1],
+			want:            "checksum not found",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := testserver.NewServer(func(
+				requests []*testserver.HttpRequest,
+				w http.ResponseWriter,
+				r *http.Request,
+			) {
+				if r.URL.Query().Has("download") {
+					w.WriteHeader(test.checksumStatus)
+					_, _ = w.Write([]byte(test.checksumBody))
+					return
+				}
+				_, _ = w.Write(test.listingResponse)
+			})
+			defer server.Close()
+			originalS3URL, originalDataURL := DiscogsS3BaseUrl, DiscogsDataBaseURL
+			t.Cleanup(func() {
+				DiscogsS3BaseUrl = originalS3URL
+				DiscogsDataBaseURL = originalDataURL
+			})
+			DiscogsS3BaseUrl = server.URL
+			DiscogsDataBaseURL = server.URL
+
+			updated, err := UpdateSelectedData(
+				context.Background(),
+				&RepositoryStub{},
+				[]string{"artist"},
+				"",
+			)
+			require.Equal(t, -1, updated)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
+}
+
+func checksumContents(listing []byte) []byte {
+	start := bytes.Index(listing, []byte("    <Contents>"))
+	if start < 0 {
+		return nil
+	}
+	end := bytes.Index(listing[start:], []byte("    </Contents>"))
+	if end < 0 {
+		return nil
+	}
+	return listing[start : start+end+len("    </Contents>")]
+}
+
+func TestUpdateSelectedDataPropagatesListingFailure(t *testing.T) {
+	server := testserver.NewServer(func(
+		requests []*testserver.HttpRequest,
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		http.Error(w, "fixture", http.StatusInternalServerError)
+	})
+	defer server.Close()
+	originalURL := DiscogsS3BaseUrl
+	t.Cleanup(func() { DiscogsS3BaseUrl = originalURL })
+	DiscogsS3BaseUrl = server.URL
+
+	updated, err := UpdateSelectedData(context.Background(), &RepositoryStub{}, []string{"artist"}, "")
+	require.Equal(t, -1, updated)
+	require.Error(t, err)
+}
+
+func TestSelectRefreshCandidatesHonorsMonthAndLatest(t *testing.T) {
+	items := []*Data{
+		{TargetType: "artists", GeneratedAt: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+		{TargetType: "artists", GeneratedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{TargetType: "labels", GeneratedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	candidates := selectRefreshCandidates(items, []string{"artist"}, "2026-06")
+	require.Len(t, candidates, 1)
+	require.Equal(t, time.June, candidates[0].GeneratedAt.Month())
+}
+
+func TestFetchBytesErrorBoundaries(t *testing.T) {
+	originalClient := getClient
+	t.Cleanup(func() { getClient = originalClient })
+	expected := errors.New("fixture")
+
+	getClient = getClientStub(nil, expected)
+	_, err := fetchBytes(context.Background(), "fixture")
+	require.ErrorIs(t, err, expected)
+
+	getClient = func() client.Client {
+		return observableClientStub{observable: rxgo.Just("invalid")()}
+	}
+	_, err = fetchBytes(context.Background(), "fixture")
+	require.ErrorContains(t, err, "unexpected response body")
+
+	getClient = func() client.Client { return observableClientStub{observable: rxgo.Empty()} }
+	_, err = fetchBytes(context.Background(), "fixture")
+	require.ErrorContains(t, err, "empty response")
 }
 
 func TestFetchFiles(t *testing.T) {
@@ -467,4 +695,82 @@ data-dir: testdata/
 		require.ErrorContains(t, err, "checksum")
 		require.Nil(t, result)
 	})
+}
+
+func TestResolveImportPlanDoesNotDownload(t *testing.T) {
+	server := testserver.NewServer(func(
+		requests []*testserver.HttpRequest,
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		t.Fatalf("resolve import plan must not request %s", r.URL.String())
+	})
+	defer server.Close()
+	origin := DiscogsS3BaseUrl
+	defer func() { DiscogsS3BaseUrl = origin }()
+	DiscogsS3BaseUrl = server.URL + "/"
+
+	dataDirectory := filepath.Join(t.TempDir(), "not-created")
+	config := koanf.New(".")
+	require.NoError(t, config.Set("entities", []string{"artist"}))
+	require.NoError(t, config.Set("dump-month", "2010-10"))
+	require.NoError(t, config.Set("data-dir", dataDirectory))
+	repository := &RepositoryStub{}
+	_, err := repository.BatchInsert([]*Data{
+		{
+			ETag:        "artist-2010-10",
+			GeneratedAt: time.Date(2010, 10, 1, 0, 0, 0, 0, time.UTC),
+			Checksum:    strings.Repeat("a", 64),
+			TargetType:  "artist",
+			Uri:         "data/2010/discogs_20101001_artists.xml.gz",
+		},
+	})
+	require.NoError(t, err)
+
+	plan, err := ResolveImportPlan(config, repository)
+
+	require.NoError(t, err)
+	require.Len(t, plan.Dumps, 1)
+	require.Contains(t, plan.Resources["artists"], "discogs_20101001_artists.xml.gz")
+	require.NoDirExists(t, dataDirectory)
+	require.Empty(t, server.Requests())
+}
+
+func TestResolveImportPlanUsesLatestDump(t *testing.T) {
+	config := koanf.New(".")
+	require.NoError(t, config.Set("entities", []string{"artist"}))
+	require.NoError(t, config.Set("data-dir", t.TempDir()))
+	repository := &RepositoryStub{items: []*Data{
+		{
+			GeneratedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+			TargetType:  "artists",
+			Uri:         "data/2026/discogs_20260701_artists.xml.gz",
+		},
+	}}
+
+	plan, err := ResolveImportPlan(config, repository)
+	require.NoError(t, err)
+	require.Len(t, plan.Dumps, 1)
+	require.Contains(t, plan.Resources["artists"], "discogs_20260701_artists.xml.gz")
+}
+
+func TestFetchImportResourcesRejectsInvalidPlanAndDirectory(t *testing.T) {
+	dump := &opendiscogsmodel.DiscogsDump{
+		EntityType:     "artist",
+		URI:            "data/2026/discogs_20260701_artists.xml.gz",
+		ChecksumSHA256: strings.Repeat("0", 64),
+	}
+	require.ErrorContains(t, FetchImportResources(context.Background(), &ImportPlan{
+		Resources: map[string]string{},
+		Dumps:     []*opendiscogsmodel.DiscogsDump{dump},
+	}), "missing artist import resource path")
+
+	blockingFile := filepath.Join(t.TempDir(), "blocking-file")
+	require.NoError(t, os.WriteFile(blockingFile, []byte("fixture"), 0600))
+	require.ErrorContains(t, FetchImportResources(context.Background(), &ImportPlan{
+		Resources: map[string]string{
+			"artists": filepath.Join(blockingFile, "child", "artists.xml.gz"),
+		},
+		Dumps: []*opendiscogsmodel.DiscogsDump{dump},
+	}), "create artist import directory")
 }

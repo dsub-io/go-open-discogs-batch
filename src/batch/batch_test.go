@@ -13,10 +13,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBatch(t *testing.T) {
-	pg := testutils.GetDatabase(testutils.Postgres)
+	pg := testutils.GetDatabase(t, testutils.Postgres)
 	dsn := testutils.GetDsn(testutils.Postgres, pg)
 	db, err := database.GetConnect(dsn)
 	require.NoError(t, err)
@@ -100,16 +101,57 @@ func TestBatch(t *testing.T) {
 	after := snapshotBusinessTables(t, db)
 	require.Equal(t, before, after)
 
-	normalized := normalizedBusinessState(t, db)
+	canonical := normalizedBusinessState(t, db)
+	var preservedURL model.ArtistURL
+	require.NoError(t, db.Where("artist_id = ?", 1).First(&preservedURL).Error)
+	const staleArtistURLHash int32 = 2_147_483_000
+	now := time.Now().UTC()
+	require.NoError(t, db.Create(&model.ArtistURL{
+		ArtistID:       1,
+		Hash:           staleArtistURLHash,
+		URL:            "https://stale.invalid/artist",
+		CreatedAt:      now,
+		LastModifiedAt: now,
+	}).Error)
+	require.NoError(t, db.Model(&model.LabelReleaseItem{}).
+		Where("release_item_id = ? and label_id = ?", 1, 1).
+		Update("category_notation", "stale-category").Error)
+
+	for _, fixture := range []struct {
+		path string
+		step func(Order) Step
+	}{
+		{"testdata/artist.xml.gz", newBatch().UpdateArtist},
+		{"testdata/label.xml.gz", newBatch().UpdateLabel},
+		{"testdata/master.xml.gz", newBatch().UpdateMaster},
+		{"testdata/release.xml.gz", newBatch().UpdateRelease},
+	} {
+		converged := fixture.step(NewOrder(ctx, chunk, maxWorkers, fixture.path, db))()
+		require.NoError(t, converged.Err())
+	}
+	var staleURLCount int64
+	require.NoError(t, db.Model(&model.ArtistURL{}).
+		Where("artist_id = ? and hash = ?", 1, staleArtistURLHash).
+		Count(&staleURLCount).Error)
+	require.Zero(t, staleURLCount)
+	var retainedURL model.ArtistURL
+	require.NoError(t, db.Where(
+		"artist_id = ? and hash = ?",
+		preservedURL.ArtistID,
+		preservedURL.Hash,
+	).First(&retainedURL).Error)
+	require.Equal(t, preservedURL.ID, retainedURL.ID)
+	require.Equal(t, canonical, normalizedBusinessState(t, db))
+
 	goldenPath := filepath.Join("testdata", "cross-language-state.json")
 	if os.Getenv("UPDATE_CROSS_LANGUAGE_GOLDEN") == "1" {
-		encoded, err := json.MarshalIndent(normalized, "", "  ")
+		encoded, err := json.MarshalIndent(canonical, "", "  ")
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(goldenPath, append(encoded, '\n'), 0o644))
 	}
 	expected, err := os.ReadFile(goldenPath)
 	require.NoError(t, err)
-	actual, err := json.Marshal(normalized)
+	actual, err := json.Marshal(canonical)
 	require.NoError(t, err)
 	require.JSONEq(t, string(expected), string(actual))
 }

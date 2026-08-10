@@ -2,6 +2,7 @@ package file
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -27,6 +28,8 @@ type Handler interface {
 	// FetchAndCheck calls Fetch to retrieve file, while checking the checksum to validate incoming file.
 	// The file will be deleted if checksum fails.
 	FetchAndCheck(uri string, filepath string, checksum string) error
+	// FetchAndCheckContext is FetchAndCheck with cancellation support.
+	FetchAndCheckContext(context.Context, string, string, string) error
 	// Write writes byte array content to given filepath and permission.
 	Write(filepath string, content []byte, perm os.FileMode) error
 	// Read reads byte array content from given filepath. This works as identical delegation to os.ReadFile.
@@ -41,6 +44,17 @@ func NewHandler() Handler {
 
 type handlerImpl struct {
 	reader Reader
+}
+
+type writableFile interface {
+	Write([]byte) (int, error)
+	Close() error
+}
+
+var openWritableFile = openFileForWrite
+
+func openFileForWrite(filepath string, perm os.FileMode) (writableFile, error) {
+	return os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 }
 
 type Reader interface {
@@ -82,7 +96,7 @@ func (h *handlerImpl) Copy(source, target string, targetPerm os.FileMode) error 
 		return err
 	}
 	defer src.Close()
-	if dst, err = os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_EXCL, 0666); err != nil {
+	if dst, err = os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_EXCL, targetPerm); err != nil {
 		_ = src.Close()
 		return err
 	}
@@ -128,13 +142,23 @@ func (h *handlerImpl) Checksum(filepath string, checksum string) error {
 }
 
 func (h *handlerImpl) Fetch(uri string, filepath string) error {
-	// grab request
-	req := h.newRequest(uri, filepath)
-	// request
+	req, err := h.newRequest(uri, filepath)
+	if err != nil {
+		return err
+	}
 	return h.execGrabReq(req)
 }
 
 func (h *handlerImpl) FetchAndCheck(uri string, filepath string, checksum string) error {
+	return h.FetchAndCheckContext(context.Background(), uri, filepath, checksum)
+}
+
+func (h *handlerImpl) FetchAndCheckContext(
+	ctx context.Context,
+	uri string,
+	filepath string,
+	checksum string,
+) error {
 	var (
 		sum      []byte
 		err      error
@@ -163,7 +187,11 @@ func (h *handlerImpl) FetchAndCheck(uri string, filepath string, checksum string
 		return err
 	}
 	// grab request with checksum
-	req := h.newRequestWithChecksum(uri, filepath, sum)
+	req, err := h.newRequestWithChecksum(uri, filepath, sum)
+	if err != nil {
+		return err
+	}
+	req = req.WithContext(ctx)
 	// request
 	return h.execGrabReq(req)
 }
@@ -177,7 +205,7 @@ func (h *handlerImpl) getDecodedChecksum(checksum string) ([]byte, error) {
 }
 
 func (h *handlerImpl) Write(filepath string, content []byte, perm os.FileMode) error {
-	f, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	f, err := openWritableFile(filepath, perm)
 	if err != nil {
 		return err
 	}
@@ -188,15 +216,25 @@ func (h *handlerImpl) Write(filepath string, content []byte, perm os.FileMode) e
 	return err
 }
 
-func (h *handlerImpl) newRequest(uri, filepath string) *grab.Request {
-	req, _ := grab.NewRequest(filepath, uri)
-	return req
+func (h *handlerImpl) newRequest(uri, filepath string) (*grab.Request, error) {
+	req, err := grab.NewRequest(filepath, uri)
+	if err != nil {
+		return nil, fmt.Errorf("create download request: %w", err)
+	}
+	return req, nil
 }
 
-func (h *handlerImpl) newRequestWithChecksum(uri, filepath string, checksum []byte) *grab.Request {
-	req := h.newRequest(uri, filepath)
+func (h *handlerImpl) newRequestWithChecksum(
+	uri string,
+	filepath string,
+	checksum []byte,
+) (*grab.Request, error) {
+	req, err := h.newRequest(uri, filepath)
+	if err != nil {
+		return nil, err
+	}
 	req.SetChecksum(sha256.New(), checksum, true)
-	return req
+	return req, nil
 }
 
 func (h *handlerImpl) execGrabReq(req *grab.Request) error {

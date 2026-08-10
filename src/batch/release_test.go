@@ -9,11 +9,10 @@ import (
 )
 
 func TestReleaseRead(t *testing.T) {
-	var (
-		c = context.Background()
-		r = newReadCloser("testdata/release.xml.gz", "test-read-release")
-		n = "release"
-	)
+	c := context.Background()
+	r, err := newReadCloser("testdata/release.xml.gz", "test-read-release")
+	require.NoError(t, err)
+	n := "release"
 	obs := reader.NewReader[XmlRelease](c, r, n)
 
 	s := make([]*XmlRelease, 0)
@@ -48,11 +47,10 @@ func TestMasterMainReleaseUpdateStatementBatchesMappings(t *testing.T) {
 }
 
 func TestReleaseRelationRead(t *testing.T) {
-	var (
-		c = context.Background()
-		r = newReadCloser("testdata/release.xml.gz", "test-read-release")
-		n = "release"
-	)
+	c := context.Background()
+	r, err := newReadCloser("testdata/release.xml.gz", "test-read-release")
+	require.NoError(t, err)
+	n := "release"
 	obs := reader.NewReader[XmlReleaseRelation](c, r, n)
 	s := make([]*XmlReleaseRelation, 0)
 	for r := range obs.Observe() {

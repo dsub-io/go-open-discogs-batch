@@ -51,24 +51,9 @@
       "name_variation": "J. Winkelman"
     },
     {
-      "hash": 1103154064,
-      "artist_id": 3,
-      "name_variation": "Josh Wink \"DJ Wink\""
-    },
-    {
-      "hash": 110708147,
-      "artist_id": 3,
-      "name_variation": "J. Wink (DJ Wink)"
-    },
-    {
       "hash": -1151638115,
       "artist_id": 3,
       "name_variation": "Josh Wink (DJ Wink)"
-    },
-    {
-      "hash": 1244431614,
-      "artist_id": 3,
-      "name_variation": "Josh Winks"
     },
     {
       "hash": -1275716287,
@@ -76,19 +61,9 @@
       "name_variation": "Mr. Barth \u0026 A.D."
     },
     {
-      "hash": 1276483187,
-      "artist_id": 2,
-      "name_variation": "MR JAMES BARTH \u0026 A. D."
-    },
-    {
       "hash": -1432653649,
       "artist_id": 1,
       "name_variation": "Persuader"
-    },
-    {
-      "hash": 1478676304,
-      "artist_id": 3,
-      "name_variation": "Josh Wink (Dj Winx)"
     },
     {
       "hash": -1514976674,
@@ -96,19 +71,9 @@
       "name_variation": "Josh Winkelman"
     },
     {
-      "hash": 1564163618,
-      "artist_id": 3,
-      "name_variation": "Josh Winx"
-    },
-    {
       "hash": -1695014485,
       "artist_id": 3,
       "name_variation": "J. Wink"
-    },
-    {
-      "hash": 1697719264,
-      "artist_id": 3,
-      "name_variation": "J.Winkelman"
     },
     {
       "hash": -1923453047,
@@ -129,6 +94,66 @@
       "hash": -2144161211,
       "artist_id": 3,
       "name_variation": "J Wink"
+    },
+    {
+      "hash": -336875354,
+      "artist_id": 1,
+      "name_variation": "The Presuader"
+    },
+    {
+      "hash": -476011505,
+      "artist_id": 3,
+      "name_variation": "Dosh Wink"
+    },
+    {
+      "hash": -520191267,
+      "artist_id": 3,
+      "name_variation": "Wink, Josh"
+    },
+    {
+      "hash": -582380539,
+      "artist_id": 2,
+      "name_variation": "Mr Barth \u0026 A.D."
+    },
+    {
+      "hash": -72025349,
+      "artist_id": 3,
+      "name_variation": "DJ Josh Wink"
+    },
+    {
+      "hash": 1103154064,
+      "artist_id": 3,
+      "name_variation": "Josh Wink \"DJ Wink\""
+    },
+    {
+      "hash": 110708147,
+      "artist_id": 3,
+      "name_variation": "J. Wink (DJ Wink)"
+    },
+    {
+      "hash": 1244431614,
+      "artist_id": 3,
+      "name_variation": "Josh Winks"
+    },
+    {
+      "hash": 1276483187,
+      "artist_id": 2,
+      "name_variation": "MR JAMES BARTH \u0026 A. D."
+    },
+    {
+      "hash": 1478676304,
+      "artist_id": 3,
+      "name_variation": "Josh Wink (Dj Winx)"
+    },
+    {
+      "hash": 1564163618,
+      "artist_id": 3,
+      "name_variation": "Josh Winx"
+    },
+    {
+      "hash": 1697719264,
+      "artist_id": 3,
+      "name_variation": "J.Winkelman"
     },
     {
       "hash": 2314874,
@@ -171,34 +196,9 @@
       "name_variation": "Josh Winkelmann"
     },
     {
-      "hash": -336875354,
-      "artist_id": 1,
-      "name_variation": "The Presuader"
-    },
-    {
       "hash": 41562583,
       "artist_id": 2,
       "name_variation": "Mr. James Barth \u0026 A. D."
-    },
-    {
-      "hash": -476011505,
-      "artist_id": 3,
-      "name_variation": "Dosh Wink"
-    },
-    {
-      "hash": -520191267,
-      "artist_id": 3,
-      "name_variation": "Wink, Josh"
-    },
-    {
-      "hash": -582380539,
-      "artist_id": 2,
-      "name_variation": "Mr Barth \u0026 A.D."
-    },
-    {
-      "hash": -72025349,
-      "artist_id": 3,
-      "name_variation": "DJ Josh Wink"
     },
     {
       "hash": 83581172,
@@ -248,16 +248,6 @@
       "artist_id": 3
     },
     {
-      "url": "https://en.wikipedia.org/wiki/Jesper_Dahlbäck",
-      "hash": 877791006,
-      "artist_id": 1
-    },
-    {
-      "url": "https://joshwink.bandcamp.com",
-      "hash": 2044061375,
-      "artist_id": 3
-    },
-    {
       "url": "http://soundcloud.com/joshwinkofficial",
       "hash": 1522532408,
       "artist_id": 3
@@ -300,6 +290,16 @@
     {
       "url": "http://www.youtube.com/user/JoshWinkVEVO",
       "hash": 230796051,
+      "artist_id": 3
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Jesper_Dahlbäck",
+      "hash": 877791006,
+      "artist_id": 1
+    },
+    {
+      "url": "https://joshwink.bandcamp.com",
+      "hash": 2044061375,
       "artist_id": 3
     }
   ],
@@ -380,13 +380,13 @@
       "label_id": 1
     },
     {
-      "url": "http://planetecommunications.bandcamp.com",
-      "hash": 1685522527,
+      "url": "http://planet-e.net",
+      "hash": 866183985,
       "label_id": 1
     },
     {
-      "url": "http://planet-e.net",
-      "hash": 866183985,
+      "url": "http://planetecommunications.bandcamp.com",
+      "hash": 1685522527,
       "label_id": 1
     },
     {
@@ -403,36 +403,6 @@
       "url": "http://soundcloud.com/siestarecords",
       "hash": 1622163405,
       "label_id": 4
-    },
-    {
-      "url": "https://seasonsrecordings.bigcartel.com/",
-      "hash": -2104698560,
-      "label_id": 3
-    },
-    {
-      "url": "https://soundcloud.com/seasonsrecords",
-      "hash": -1391605607,
-      "label_id": 3
-    },
-    {
-      "url": "https://twitter.com/SeasonsRecords",
-      "hash": 20437514,
-      "label_id": 3
-    },
-    {
-      "url": "https://twitter.com/siestarecords",
-      "hash": 1362842489,
-      "label_id": 4
-    },
-    {
-      "url": "https://www.facebook.com/SEASONS-RECORDINGS-160164731945/",
-      "hash": -2085178872,
-      "label_id": 3
-    },
-    {
-      "url": "https://www.youtube.com/channel/UClv7-8Gfk2Uc47ly6fTWmvQ",
-      "hash": -1339245870,
-      "label_id": 3
     },
     {
       "url": "http://twitter.com/planetedetroit",
@@ -483,6 +453,36 @@
       "url": "http://www.youtube.com/user/planetedetroit",
       "hash": 272605200,
       "label_id": 1
+    },
+    {
+      "url": "https://seasonsrecordings.bigcartel.com/",
+      "hash": -2104698560,
+      "label_id": 3
+    },
+    {
+      "url": "https://soundcloud.com/seasonsrecords",
+      "hash": -1391605607,
+      "label_id": 3
+    },
+    {
+      "url": "https://twitter.com/SeasonsRecords",
+      "hash": 20437514,
+      "label_id": 3
+    },
+    {
+      "url": "https://twitter.com/siestarecords",
+      "hash": 1362842489,
+      "label_id": 4
+    },
+    {
+      "url": "https://www.facebook.com/SEASONS-RECORDINGS-160164731945/",
+      "hash": -2085178872,
+      "label_id": 3
+    },
+    {
+      "url": "https://www.youtube.com/channel/UClv7-8Gfk2Uc47ly6fTWmvQ",
+      "hash": -1339245870,
+      "label_id": 3
     },
     {
       "url": "www.siestarecords.com",
@@ -577,6 +577,13 @@
   ],
   "master_video": [
     {
+      "url": "https://www.youtube.com/watch?v=-CDArPhGJwE",
+      "hash": -1962557807,
+      "title": "Mystical Rhythm (Lush Mix)",
+      "master_id": 1,
+      "description": "Provided to YouTube by EPM Online\n\n          Mystical Rhythm (Lush Mix) · Vince Watson · Vince Watson\n\n          Alola Vol 2\n\n          ℗ Westbury Music Ltd / Spherecom Music\n\n          Released on: 2001-07-02\n\n          Mixer: Vince Watson\n\n          Auto-generated by YouTube."
+    },
+    {
       "url": "https://www.youtube.com/watch?v=1ZW_Aw124dc",
       "hash": -1406228927,
       "title": "Vince Watson : Bubbles",
@@ -626,20 +633,6 @@
       "description": "vince watson - biologique (1999)"
     },
     {
-      "url": "https://www.youtube.com/watch?v=-CDArPhGJwE",
-      "hash": -1962557807,
-      "title": "Mystical Rhythm (Lush Mix)",
-      "master_id": 1,
-      "description": "Provided to YouTube by EPM Online\n\n          Mystical Rhythm (Lush Mix) · Vince Watson · Vince Watson\n\n          Alola Vol 2\n\n          ℗ Westbury Music Ltd / Spherecom Music\n\n          Released on: 2001-07-02\n\n          Mixer: Vince Watson\n\n          Auto-generated by YouTube."
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=cjlHl664I9U",
-      "hash": 761424899,
-      "title": "Vince Watson - Rainbow Funk (Music Video)",
-      "master_id": 2,
-      "description": "Buy here: http://www.juno.co.uk/products/biologique/48291-01/\n\n          Vince Watson - Biologique LP\n\n          Label: Alola\n\n          Released: 18/10/1999a\n\n          Genre: Techno"
-    },
-    {
       "url": "https://www.youtube.com/watch?v=CYvoQdT0oQQ",
       "hash": -388188766,
       "title": "Rephlexions",
@@ -652,13 +645,6 @@
       "title": "vince watson - euphorate",
       "master_id": 2,
       "description": "vince watson - biologique ( 1999 )\n          \r\n          \r-uploaded in HD at http://www.TunesToTube.com"
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=fYMa0n5-99A",
-      "hash": -96398355,
-      "title": "Depth Soul",
-      "master_id": 1,
-      "description": "Provided to YouTube by EPM Online\n\n          Depth Soul · Vince Watson · Ben Sims\n\n          Alola Vol 2\n\n          ℗ Westbury Music Ltd / Spherecom Music\n\n          Released on: 2001-07-02\n\n          Mixer: Ben Sims\n\n          Auto-generated by YouTube."
     },
     {
       "url": "https://www.youtube.com/watch?v=GOffv3rh1cU",
@@ -682,34 +668,6 @@
       "description": "Provided to YouTube by EPM Online\n\n          Simplicity · Vince Watson\n\n          Alola Vol 2\n\n          ℗ Westbury Music Ltd / Spherecom Music\n\n          Released on: 2001-07-02\n\n          Auto-generated by YouTube."
     },
     {
-      "url": "https://www.youtube.com/watch?v=lmYrZZ97w58",
-      "hash": -1743126957,
-      "title": "Blue Arsed Fly - Bucket (A1)",
-      "master_id": 3,
-      "description": "Blue Arsed Fly ‎– Knackered EP\n          Label: Tresor ‎– Tresor 60\n          Format: Vinyl, 12, EP, 33 ⅓ RPM\n          Country: Germany\n          Released: 13 Jan 1997\n          Genre: Electronic\n          Style: Techno\n\n          https://www.discogs.com/Blue-Arsed-Fly-Knackered-EP/release/5415"
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=_M20bObcvXo",
-      "hash": 1925484139,
-      "title": "Vince Watson - My Subconscious",
-      "master_id": 1,
-      "description": "http://www.discogs.com/Vince-Watson-Moments-In-Time/master/113"
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=ndrHFMbEr7k",
-      "hash": -617363659,
-      "title": "Vince Watson - Into Beyond",
-      "master_id": 1,
-      "description": "Label: Alola\r\n          \r\n          Released: 2002\r\n          Genre: Electronic"
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=o3FI1qAOCwE",
-      "hash": 747765467,
-      "title": "Vince Watson - Into The Deep",
-      "master_id": 2,
-      "description": "Track from Alola"
-    },
-    {
       "url": "https://www.youtube.com/watch?v=QbqM-ty0gTE",
       "hash": 343075263,
       "title": "Vince Watson - Inertia",
@@ -724,18 +682,18 @@
       "description": "Provided to YouTube by EPM Online\n\n          Beneath the Sound · Vince Watson\n\n          Alola Vol 2\n\n          ℗ Westbury Music Ltd / Spherecom Music\n\n          Released on: 2001-07-02\n\n          Auto-generated by YouTube."
     },
     {
-      "url": "https://www.youtube.com/watch?v=Rs6111Vf91Y",
-      "hash": 2142264979,
-      "title": "Vince Watson - Jazz Satelite [Alola]",
-      "master_id": 2,
-      "description": "http://www.discogs.com/Vince-Watson-Biologique/release/42056\n          Artist:Vince Watson\n          Album: Biologique\n          Label: Alola\n          Cat.No: ALOCD004\n          year:1999\n          Genre: Deep House, House\n          SUPPORT THE ARTIST AND BUY THIS TRACK"
-    },
-    {
       "url": "https://www.youtube.com/watch?v=RVLbjJv-KVI",
       "hash": -630920364,
       "title": "Vince Watson - Moments In Time",
       "master_id": 1,
       "description": "http://www.beatport.com/track/moments-in-time-original-mix/209664"
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=Rs6111Vf91Y",
+      "hash": 2142264979,
+      "title": "Vince Watson - Jazz Satelite [Alola]",
+      "master_id": 2,
+      "description": "http://www.discogs.com/Vince-Watson-Biologique/release/42056\n          Artist:Vince Watson\n          Album: Biologique\n          Label: Alola\n          Cat.No: ALOCD004\n          year:1999\n          Genre: Deep House, House\n          SUPPORT THE ARTIST AND BUY THIS TRACK"
     },
     {
       "url": "https://www.youtube.com/watch?v=ULxN8k8FtW4",
@@ -752,6 +710,55 @@
       "description": "Provided to YouTube by EPM Online\n\n          Silhouettes · Vince Watson\n\n          Alola Vol 2\n\n          ℗ Westbury Music Ltd / Spherecom Music\n\n          Released on: 2001-07-02\n\n          Auto-generated by YouTube."
     },
     {
+      "url": "https://www.youtube.com/watch?v=_M20bObcvXo",
+      "hash": 1925484139,
+      "title": "Vince Watson - My Subconscious",
+      "master_id": 1,
+      "description": "http://www.discogs.com/Vince-Watson-Moments-In-Time/master/113"
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=cjlHl664I9U",
+      "hash": 761424899,
+      "title": "Vince Watson - Rainbow Funk (Music Video)",
+      "master_id": 2,
+      "description": "Buy here: http://www.juno.co.uk/products/biologique/48291-01/\n\n          Vince Watson - Biologique LP\n\n          Label: Alola\n\n          Released: 18/10/1999a\n\n          Genre: Techno"
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=fYMa0n5-99A",
+      "hash": -96398355,
+      "title": "Depth Soul",
+      "master_id": 1,
+      "description": "Provided to YouTube by EPM Online\n\n          Depth Soul · Vince Watson · Ben Sims\n\n          Alola Vol 2\n\n          ℗ Westbury Music Ltd / Spherecom Music\n\n          Released on: 2001-07-02\n\n          Mixer: Ben Sims\n\n          Auto-generated by YouTube."
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=lmYrZZ97w58",
+      "hash": -1743126957,
+      "title": "Blue Arsed Fly - Bucket (A1)",
+      "master_id": 3,
+      "description": "Blue Arsed Fly ‎– Knackered EP\n          Label: Tresor ‎– Tresor 60\n          Format: Vinyl, 12, EP, 33 ⅓ RPM\n          Country: Germany\n          Released: 13 Jan 1997\n          Genre: Electronic\n          Style: Techno\n\n          https://www.discogs.com/Blue-Arsed-Fly-Knackered-EP/release/5415"
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=ndrHFMbEr7k",
+      "hash": -617363659,
+      "title": "Vince Watson - Into Beyond",
+      "master_id": 1,
+      "description": "Label: Alola\r\n          \r\n          Released: 2002\r\n          Genre: Electronic"
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=o3FI1qAOCwE",
+      "hash": 747765467,
+      "title": "Vince Watson - Into The Deep",
+      "master_id": 2,
+      "description": "Track from Alola"
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=yVcm18a2GG8",
+      "hash": -1086311167,
+      "title": "Vince Watson - Spaceclouds",
+      "master_id": 2,
+      "description": "http://www.discogs.com/Vince-Watson-Biologique/release/42056"
+    },
+    {
       "url": "https://www.youtube.com/watch?v=yoraJcl7MzM",
       "hash": 1054888733,
       "title": "Vince Watson - Lunar Visions",
@@ -764,13 +771,6 @@
       "title": "Vince Watson - Mystical Rhythm",
       "master_id": 2,
       "description": "Vince Watson - Mystical Rhythm"
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=yVcm18a2GG8",
-      "hash": -1086311167,
-      "title": "Vince Watson - Spaceclouds",
-      "master_id": 2,
-      "description": "http://www.discogs.com/Vince-Watson-Biologique/release/42056"
     }
   ],
   "release_item": [
@@ -836,6 +836,12 @@
   ],
   "release_item_credited_artist": [
     {
+      "hash": -737072799,
+      "role": "Producer, Recorded By",
+      "artist_id": 3,
+      "release_item_id": 2
+    },
+    {
       "hash": 2016153506,
       "role": "DJ Mix",
       "artist_id": 3,
@@ -846,12 +852,6 @@
       "role": "Music By [All Tracks By]",
       "artist_id": 3,
       "release_item_id": 1
-    },
-    {
-      "hash": -737072799,
-      "role": "Producer, Recorded By",
-      "artist_id": 3,
-      "release_item_id": 2
     }
   ],
   "release_item_format": [
@@ -903,18 +903,32 @@
       "release_item_id": 2
     },
     {
-      "hash": 1324750513,
-      "type": "Matrix / Runout",
-      "value": "MPO SK026-A -J.T.S.-",
-      "description": "Side A Runout Etching",
-      "release_item_id": 2
-    },
-    {
       "hash": -1720426763,
       "type": "Matrix / Runout",
       "value": "G PHRUPMASTERGENERAL T27 LONDON",
       "description": "Only On A-Side Runout",
       "release_item_id": 1
+    },
+    {
+      "hash": -2120356574,
+      "type": "Matrix / Runout",
+      "value": "MPO SK 032 D1",
+      "description": "D-Side Runout",
+      "release_item_id": 1
+    },
+    {
+      "hash": -487978220,
+      "type": "Barcode",
+      "value": "074646362822",
+      "description": null,
+      "release_item_id": 3
+    },
+    {
+      "hash": 1324750513,
+      "type": "Matrix / Runout",
+      "value": "MPO SK026-A -J.T.S.-",
+      "description": "Side A Runout Etching",
+      "release_item_id": 2
     },
     {
       "hash": 2081551208,
@@ -931,25 +945,11 @@
       "release_item_id": 1
     },
     {
-      "hash": -2120356574,
-      "type": "Matrix / Runout",
-      "value": "MPO SK 032 D1",
-      "description": "D-Side Runout",
-      "release_item_id": 1
-    },
-    {
       "hash": 2143590884,
       "type": "Matrix / Runout",
       "value": "MPO SK 032 C1",
       "description": "C-Side Runout",
       "release_item_id": 1
-    },
-    {
-      "hash": -487978220,
-      "type": "Barcode",
-      "value": "074646362822",
-      "description": null,
-      "release_item_id": 3
     }
   ],
   "release_item_image": [],
@@ -980,13 +980,6 @@
     }
   ],
   "release_item_track": [
-    {
-      "hash": 110451457,
-      "title": "K-Mart Shopping (Hi-Fi Mix)",
-      "duration": "5:42",
-      "position": "8",
-      "release_item_id": 3
-    },
     {
       "hash": -1115650372,
       "title": "Political Prisoner",
@@ -1023,6 +1016,55 @@
       "release_item_id": 2
     },
     {
+      "hash": -1568943240,
+      "title": "Pop Kulture",
+      "duration": "5:03",
+      "position": "7",
+      "release_item_id": 3
+    },
+    {
+      "hash": -1969634041,
+      "title": "Track 2",
+      "duration": "3:39",
+      "position": "14",
+      "release_item_id": 3
+    },
+    {
+      "hash": -234383679,
+      "title": "A Sea Apart",
+      "duration": "5:08",
+      "position": "A1",
+      "release_item_id": 2
+    },
+    {
+      "hash": -272633360,
+      "title": "Untitled",
+      "duration": "2:46",
+      "position": "12",
+      "release_item_id": 3
+    },
+    {
+      "hash": -461484647,
+      "title": "Silver",
+      "duration": "3:16",
+      "position": "11",
+      "release_item_id": 3
+    },
+    {
+      "hash": -559822979,
+      "title": "Anjua (Sneaky 3)",
+      "duration": "5:28",
+      "position": "2",
+      "release_item_id": 3
+    },
+    {
+      "hash": 110451457,
+      "title": "K-Mart Shopping (Hi-Fi Mix)",
+      "duration": "5:42",
+      "position": "8",
+      "release_item_id": 3
+    },
+    {
       "hash": 1442435631,
       "title": "Lovelee Dae (Eight Miles High Mix)",
       "duration": "5:47",
@@ -1034,13 +1076,6 @@
       "title": "Untitled 8",
       "duration": "7:00",
       "position": "1",
-      "release_item_id": 3
-    },
-    {
-      "hash": -1568943240,
-      "title": "Pop Kulture",
-      "duration": "5:03",
-      "position": "7",
       "release_item_id": 3
     },
     {
@@ -1072,20 +1107,6 @@
       "release_item_id": 1
     },
     {
-      "hash": -1969634041,
-      "title": "Track 2",
-      "duration": "3:39",
-      "position": "14",
-      "release_item_id": 3
-    },
-    {
-      "hash": -234383679,
-      "title": "A Sea Apart",
-      "duration": "5:08",
-      "position": "A1",
-      "release_item_id": 2
-    },
-    {
       "hash": 240794111,
       "title": "Södermalm",
       "duration": "5:38",
@@ -1093,25 +1114,11 @@
       "release_item_id": 1
     },
     {
-      "hash": -272633360,
-      "title": "Untitled",
-      "duration": "2:46",
-      "position": "12",
-      "release_item_id": 3
-    },
-    {
       "hash": 322531615,
       "title": "Östermalm",
       "duration": "4:45",
       "position": "A",
       "release_item_id": 1
-    },
-    {
-      "hash": -461484647,
-      "title": "Silver",
-      "duration": "3:16",
-      "position": "11",
-      "release_item_id": 3
     },
     {
       "hash": 487606073,
@@ -1126,13 +1133,6 @@
       "duration": "6:11",
       "position": "B1",
       "release_item_id": 1
-    },
-    {
-      "hash": -559822979,
-      "title": "Anjua (Sneaky 3)",
-      "duration": "5:28",
-      "position": "2",
-      "release_item_id": 3
     },
     {
       "hash": 876530911,
@@ -1151,20 +1151,6 @@
   ],
   "release_item_video": [
     {
-      "url": "https://www.youtube.com/watch?v=afMHNll9EVM",
-      "hash": -104566439,
-      "title": "The Persuader - Gamla Stan",
-      "description": "https://www.discogs.com/The-Persuader-Stockholm/release/1\n\n          The Persuader - Gamla Stan",
-      "release_item_id": 1
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=bqUfNGJEKlo",
-      "hash": 854958393,
-      "title": "Profound Sounds Vol. 1 - Josh Wink",
-      "description": "mix 1999",
-      "release_item_id": 3
-    },
-    {
       "url": "https://www.youtube.com/watch?v=Cawyll0pOI4",
       "hash": 2018104738,
       "title": "The Persuader - Vasastaden",
@@ -1172,25 +1158,11 @@
       "release_item_id": 1
     },
     {
-      "url": "https://www.youtube.com/watch?v=cpQWEQjunF4",
-      "hash": -1953029504,
-      "title": "Profound Sounds Track 1....",
-      "description": "How it SHOULD sound......",
-      "release_item_id": 3
-    },
-    {
       "url": "https://www.youtube.com/watch?v=EBBHR3EMN50",
       "hash": -898492251,
       "title": "The Persuader - Norrmalm",
       "description": "https://www.discogs.com/The-Persuader-Stockholm/release/1\n\n          The Persuader - Norrmalm",
       "release_item_id": 1
-    },
-    {
-      "url": "https://www.youtube.com/watch?v=iaqHaULlqqg",
-      "hash": 1951684427,
-      "title": "Mr. James Barth \u0026 A.D. - Inner City Lullaby",
-      "description": "Follow Mr. James Barth: https://www.facebook.com/CariLekebuschOfficial\n          Buy Record: http://www.discogs.com/Mr-James-Barth-AD-Knockin-Boots-Vol-2-Of-2/release/2\n          More Music: https://www.facebook.com/DoFunkk\n\n          Copyright Notice:\n          I do not own the rights of this",
-      "release_item_id": 2
     },
     {
       "url": "https://www.youtube.com/watch?v=LgLchSRehhc",
@@ -1228,6 +1200,34 @@
       "release_item_id": 1
     },
     {
+      "url": "https://www.youtube.com/watch?v=afMHNll9EVM",
+      "hash": -104566439,
+      "title": "The Persuader - Gamla Stan",
+      "description": "https://www.discogs.com/The-Persuader-Stockholm/release/1\n\n          The Persuader - Gamla Stan",
+      "release_item_id": 1
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=bqUfNGJEKlo",
+      "hash": 854958393,
+      "title": "Profound Sounds Vol. 1 - Josh Wink",
+      "description": "mix 1999",
+      "release_item_id": 3
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=cpQWEQjunF4",
+      "hash": -1953029504,
+      "title": "Profound Sounds Track 1....",
+      "description": "How it SHOULD sound......",
+      "release_item_id": 3
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=iaqHaULlqqg",
+      "hash": 1951684427,
+      "title": "Mr. James Barth \u0026 A.D. - Inner City Lullaby",
+      "description": "Follow Mr. James Barth: https://www.facebook.com/CariLekebuschOfficial\n          Buy Record: http://www.discogs.com/Mr-James-Barth-AD-Knockin-Boots-Vol-2-Of-2/release/2\n          More Music: https://www.facebook.com/DoFunkk\n\n          Copyright Notice:\n          I do not own the rights of this",
+      "release_item_id": 2
+    },
+    {
       "url": "https://www.youtube.com/watch?v=x_Os7b-iWKs",
       "hash": 174713691,
       "title": "Mr. James Barth \u0026 A.D. - Yeah Kid!",
@@ -1249,15 +1249,15 @@
       "release_item_id": 2
     },
     {
-      "hash": 351735604,
-      "work": "Distributed By",
-      "label_id": 2,
-      "release_item_id": 3
-    },
-    {
       "hash": -579413548,
       "work": "Manufactured By",
       "label_id": 1,
+      "release_item_id": 3
+    },
+    {
+      "hash": 351735604,
+      "work": "Distributed By",
+      "label_id": 2,
       "release_item_id": 3
     }
   ],

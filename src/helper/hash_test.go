@@ -24,3 +24,9 @@ func TestFnv32Str(t *testing.T) {
 		require.Equal(t, bRes, sRes)
 	})
 }
+
+func TestJavaStringHashMatchesJavaSemantics(t *testing.T) {
+	require.Equal(t, int32(0), JavaStringHash(""))
+	require.Equal(t, int32(65), JavaStringHash("A"))
+	require.Equal(t, int32(1_835_364), JavaStringHash("A😀"))
+}

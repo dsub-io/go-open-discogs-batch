@@ -2,6 +2,7 @@ package reader
 
 import (
 	"compress/gzip"
+	"errors"
 	"github.com/schollz/progressbar/v3"
 	"io"
 	"os"
@@ -17,7 +18,10 @@ func NewProgressBarGzipReadCloser(f *os.File, progressBarText string) (io.ReadCl
 
 	pb := getProgressBar(GetFilename(progressBarText), -1)
 	pbReader := progressbar.NewReader(reader, pb)
-	return &readCloserImpl{&pbReader, f}, nil
+	return &readCloserImpl{
+		readDelegate:   &pbReader,
+		closeDelegates: []io.Closer{reader, f},
+	}, nil
 }
 
 func getProgressBar(text string, size int64) *progressbar.ProgressBar {
@@ -46,8 +50,8 @@ func GetFilename(filepath string) string {
 }
 
 type readCloserImpl struct {
-	readDelegate  io.Reader
-	closeDelegate io.Closer
+	readDelegate   io.Reader
+	closeDelegates []io.Closer
 }
 
 func (r *readCloserImpl) Read(p []byte) (n int, err error) {
@@ -55,5 +59,9 @@ func (r *readCloserImpl) Read(p []byte) (n int, err error) {
 }
 
 func (r *readCloserImpl) Close() error {
-	return r.closeDelegate.Close()
+	var closeErr error
+	for _, delegate := range r.closeDelegates {
+		closeErr = errors.Join(closeErr, delegate.Close())
+	}
+	return closeErr
 }

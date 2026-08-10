@@ -62,14 +62,15 @@ jobs:
 
       - name: Enforce coverage gate
         shell: bash
+        env:
+          MINIMUM_COVERAGE: '100.0'
         run: |
           set -euo pipefail
           total="$(
             go tool cover -func=coverage.out |
               awk '/^total:/ { gsub("%", "", $3); print $3 }'
           )"
-          awk -v total="$total" 'BEGIN {
-            minimum = 65.0
+          awk -v total="$total" -v minimum="$MINIMUM_COVERAGE" 'BEGIN {
             if (total + 0 < minimum) {
               printf "coverage %.1f%% is below %.1f%%\n", total, minimum
               exit 1

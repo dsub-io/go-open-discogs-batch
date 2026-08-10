@@ -13,7 +13,10 @@ import (
 )
 
 func InsertSimple[F, T any](order Order, topic string, localName string) result.Result {
-	r := newReadCloser(order.getFilePath(), fmt.Sprintf("updating %+v...", topic))
+	r, err := newReadCloser(order.getFilePath(), fmt.Sprintf("updating %+v...", topic))
+	if err != nil {
+		return result.NewResult(0, err)
+	}
 	res := <-reader.NewReader[F](order.getContext(), r, localName).
 		FlatMap(Transform).
 		Map(registerCache).
@@ -22,6 +25,10 @@ func InsertSimple[F, T any](order Order, topic string, localName string) result.
 		Map(insertBySlice[*T](order), rxgo.WithPool(order.getMaxWorkers())).
 		Reduce(helper.MergeCount()).
 		Observe()
+	return simpleInsertResult(topic, res)
+}
+
+func simpleInsertResult(topic string, res rxgo.Item) result.Result {
 	if res.E != nil {
 		return result.NewResult(0, res.E)
 	}
@@ -35,7 +42,12 @@ func InsertSimple[F, T any](order Order, topic string, localName string) result.
 
 func insertBySlice[T any](order Order) func(_ context.Context, i interface{}) (interface{}, error) {
 	return func(_ context.Context, i interface{}) (interface{}, error) {
-		res := NewWriter(order.getDB()).Write(order.getChunkSize(), i.([]T))
+		res := executeActiveRunTransaction(order, func(transactionOrder Order) result.Result {
+			return NewWriter(transactionOrder.getDB()).Write(
+				transactionOrder.getChunkSize(),
+				i.([]T),
+			)
+		})
 		return res.Count(), res.Err()
 	}
 }

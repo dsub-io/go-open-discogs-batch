@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/batch"
 	"github.com/knadh/koanf"
@@ -22,6 +24,20 @@ const versionPrintPrefix = "go-open-discogs-batch"
 
 var version string
 var conf = koanf.New(".")
+var runBatch = func(ctx context.Context, config *koanf.Koanf, releaseVersion string) error {
+	return (&batch.Runner{Version: releaseVersion}).Run(ctx, config)
+}
+var loadEnvironmentConfig = loadEnvironment
+var loadFlagConfig = func(flags *pflag.FlagSet, k *koanf.Koanf) error {
+	return k.Load(posflag.Provider(flags, ".", k), nil)
+}
+var normalizeEntityConfig = func(k *koanf.Koanf) error { return normalizeEntities(k) }
+var setEntityListConfig = func(k *koanf.Koanf, entities []string) error {
+	return k.Set("entities", entities)
+}
+var setEntitySelectionConfig = func(k *koanf.Koanf, key string, selected bool) error {
+	return k.Set(key, selected)
+}
 
 var environmentOptionNames = map[string]string{
 	"DATABASE_URL":    "database-url",
@@ -42,7 +58,9 @@ var booleanEnvironmentOptions = map[string]struct{}{
 }
 
 func Execute() error {
-	return NewRootCommand().Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return NewRootCommand().ExecuteContext(ctx)
 }
 
 func NewRootCommand() *cobra.Command {
@@ -83,7 +101,7 @@ var getMainFunc = func() func(cmd *cobra.Command, args []string) error {
 		if err := new(validator).Validate(conf); err != nil {
 			return err
 		}
-		return (&batch.Runner{Version: version}).Run(context.Background(), conf)
+		return runBatch(cmd.Context(), conf, version)
 	}
 }
 
@@ -98,13 +116,13 @@ func load(flags *pflag.FlagSet, k *koanf.Koanf) error {
 	if ok, _ := flags.GetBool("version"); ok {
 		return nil
 	}
-	if err := loadEnvironment(k); err != nil {
+	if err := loadEnvironmentConfig(k); err != nil {
 		return err
 	}
-	if err := k.Load(posflag.Provider(flags, ".", k), nil); err != nil {
+	if err := loadFlagConfig(flags, k); err != nil {
 		return err
 	}
-	return normalizeEntities(k)
+	return normalizeEntityConfig(k)
 }
 
 func loadEnvironment(k *koanf.Koanf) error {
@@ -145,11 +163,11 @@ func normalizeEntities(k *koanf.Koanf) error {
 		selected[normalized] = true
 		entities = append(entities, normalized)
 	}
-	if err := k.Set("entities", entities); err != nil {
+	if err := setEntityListConfig(k, entities); err != nil {
 		return err
 	}
 	for _, entity := range []string{"artist", "label", "master", "release"} {
-		if err := k.Set(entity+"s", selected[entity]); err != nil {
+		if err := setEntitySelectionConfig(k, entity+"s", selected[entity]); err != nil {
 			return err
 		}
 	}

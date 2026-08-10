@@ -3,6 +3,7 @@ package unique
 import (
 	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
@@ -23,4 +24,12 @@ func Test_getUniqueSlice(t *testing.T) {
 		result = Slice(artistUrls)
 	)
 	assert.Len(t, result, 2)
+}
+
+func TestSlicePanicsWhenComparableValueCannotBeHashed(t *testing.T) {
+	type unsupported struct {
+		Channel chan int
+	}
+
+	require.Panics(t, func() { Slice([]unsupported{{Channel: make(chan int)}}) })
 }

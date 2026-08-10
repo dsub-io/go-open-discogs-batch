@@ -15,18 +15,73 @@ Discogs. The Discogs name identifies only the public data source.
   independently unless an exact `--dump-month` is requested.
 - Every run records the selected dump dates, SHA-256 checksums, source URIs,
   sizes, and stable identifiers as one immutable manifest.
-- A manifest that already succeeded is skipped. `--force` reruns that same
-  manifest without changing the idempotent database result.
+- A successful manifest is admitted and skipped before dump files are downloaded
+  or checksummed only while all of its entity dumps are still the current
+  checkpoints and no later failed or abandoned run has dirtied those entities.
+  `--force` reruns that same manifest without changing the normalized database
+  result.
+- A failed or abandoned run resumes only when the manifest, processor name and
+  version, entity/dump identity, and chunk size all match exactly. A different
+  manifest or `--force` starts at zero.
+- Each tracked convergence chunk writes its canonical roots, exact relations,
+  committed-chunk ledger, and item counter in one PostgreSQL transaction. A
+  retry skips only source ranges represented by valid committed chunk rows.
 - An older entity dump is rejected unless `--allow-downgrade` is supplied; the
   override is recorded in import history.
-- PostgreSQL advisory locks prevent concurrent runs from updating an overlapping
-  entity set. Runs with disjoint entity sets may proceed together.
+- PostgreSQL advisory locks cover both selected entities and their reference
+  dependencies. Master locks Artist and Master; Release locks Artist, Label,
+  Master, and Release because it also updates `master.main_release_id`.
+  Independent sets such as Artist and Label may still proceed together.
 - Downloads are retained by default. `--cleanup` deletes only the selected dump
   files after a successful import or successful-manifest skip. Failed imports
   retain their files for retry.
 
 If the upstream catalog refresh fails, the importer tries the catalog already
 stored in PostgreSQL. It fails if that catalog cannot satisfy the request.
+
+### Durability and idempotency boundaries
+
+`SIGINT` and `SIGTERM` cancel download, parsing, and database work. The active
+chunk transaction rolls back, while run failure is recorded with a separate
+bounded completion context. `SIGKILL`, host loss, or a database disconnect can
+leave a run marked `running`; the next process acquires the entity locks, marks
+that abandoned run failed, and transfers its valid ledger in one transaction.
+If ledger transfer fails, the new run and copied rows roll back together and the
+source ledger remains authoritative.
+
+Every canonical and tracked chunk fences against the owning run row before it
+can commit. Once an abandoned run is marked failed, a delayed worker can no
+longer commit canonical data, progress, or entity completion. If an in-flight
+chunk obtains the fence first, abandonment waits for that atomic commit and the
+next run transfers the resulting ledger entry.
+
+An entity is complete only when chunk indexes cover the parsed stream without
+gaps, overlaps, or out-of-range indexes and both chunk and item totals match.
+The whole run becomes successful only after every selected entity is complete.
+Failed ledgers are retained until the current successful checkpoints, produced
+by the same processor version, supersede every entity/dump pair in the failed
+run. Historical success rows alone never authorize pruning. A failed ledger is
+also not resumed when a newer successful checkpoint with different dump or
+processor identity has overwritten one of its entity ranges. These rules
+prevent an Artist-only run from deleting the only valid resume state for a
+failed Artist+Release run or mixing ranges from different snapshots.
+
+Relations owned by each imported root are reconciled to the exact set in the
+dump: missing relations are deleted, changed mutable values are updated, and
+unchanged relation rows retain their identifiers. Root artist, label, master,
+and release rows are upserted; roots absent from a later dump are not currently
+deleted. The importer assumes official dump root identifiers are unique.
+The v1 schema still identifies several relation values with a 32-bit Java hash;
+a collision within one root can merge distinct values. The measured, online
+migration to collision-resistant identity is tracked in
+[`open-discogs-model#43`](https://github.com/dsub-io/open-discogs-model/issues/43).
+
+Atomicity is per chunk, not per monthly snapshot. Permanent full-dump staging is
+intentionally avoided because it would duplicate a catalog exceeding 200
+million records. Readers can therefore observe already committed chunks while
+an import is running. Deployments that require an all-at-once snapshot switch
+must put a separate versioned database or replica promotion boundary around the
+import.
 
 ## Requirements
 
@@ -105,6 +160,55 @@ the default chunk size into one set-based statement. These figures isolate the
 measured operations; end-to-end import throughput still depends on dump shape,
 PostgreSQL, storage, and runtime limits.
 
+### Measured durable-import cost and skip improvement
+
+The tracked production path was measured before and after the recovery fixes
+against commit `2a1ddbd` on the same Apple M2 Pro, PostgreSQL 18.4 Alpine tmpfs
+container, four 3-record fixture dumps, `chunk-size=5`, `max-workers=2`, one
+import per sample, and 20 samples. Output was suppressed identically. Initial
+import latency changed from p50/p95/p99 `48.509/54.527/80.881 ms` to
+`73.922/77.397/88.551 ms` (`52.4%/41.9%/9.5%` higher). Median throughput changed
+from `0.167` to `0.109 MB/s` (`34.4%` lower), allocated bytes from 2,327,712 to
+2,454,276 B/op (`5.4%` higher), and allocations from 43,524 to 44,333/op (`1.9%`
+higher).
+
+Forced-repeat latency changed from p50/p95/p99 `38.864/43.826/44.841 ms` to
+`72.822/74.057/74.204 ms` (`87.4%/69.0%/65.5%` higher). Median throughput changed
+from `0.208` to `0.111 MB/s` (`46.6%` lower), allocated bytes from 2,340,796 to
+2,466,576 B/op (`5.4%` higher), and allocations from 44,597 to 45,990/op (`3.1%`
+higher). The added cost buys current-checkpoint validation and a database fence
+that prevents delayed workers from committing after abandonment. This tiny
+12-record fixture exaggerates fixed transaction cost and is not a full-dataset
+throughput estimate.
+
+Fresh tracked relation chunks use one SQL statement for the active-run fence,
+ledger insert, and summary update. Resumed chunks add one exact-ledger lookup.
+The Artist and Label canonical pre-seed phase adds one active-run fence per
+chunk because those roots must exist before forward relations are reconciled.
+
+The production no-op path was measured separately with the same successful
+manifest and a cached 64 MiB sparse file. Checksum-before-admission latency was
+p50/p95/p99 `38.917/50.768/58.719 ms`; admission-before-checksum was
+`1.776/2.728/3.038 ms`, a `95.4%/94.6%/94.8%` reduction and `21.9x` median
+speedup. Median allocations changed from 40,008 to 6,800 B/op (`83.0%` lower)
+and 113 to 106 allocations/op (`6.2%` lower), while 64 MiB of file I/O was
+avoided per invocation.
+
+Peak RSS was not reported from these microbenchmarks because it would include
+the test process and container lifecycle while the 12-record fixture is too
+small to represent production heap pressure. Allocation counts are reported
+instead; production sizing still requires a heap/RSS profile from a
+representative large dump under the intended `chunk-size` and `max-workers`.
+
+Reproduce the focused measurements with:
+
+```shell
+go test ./src/batch -run '^$' \
+  -bench '^BenchmarkDurableBatchImport$' -benchtime=1x -count=20 -benchmem
+go test ./src/batch -run '^$' \
+  -bench '^BenchmarkCompletedManifestPreflight$' -benchtime=1x -count=20 -benchmem
+```
+
 ## Container
 
 Release images are published from Release Please release commits:
@@ -138,7 +242,7 @@ go test -run '^$' -bench 'IDSetLoadMillion' -benchmem ./src/cache
 ```
 
 Pull requests run formatting, module consistency, vet, race detection, unit and
-PostgreSQL integration tests, and a coverage gate. The separate E2E workflow
+PostgreSQL integration tests, and a 100% statement coverage gate. The separate E2E workflow
 uses deterministic fixtures on GitHub-hosted `ubuntu-latest`; it does not depend
 on live Discogs availability.
 

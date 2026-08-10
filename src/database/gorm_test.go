@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 	"testing"
 )
 
 func TestConnect(t *testing.T) {
 	t.Run("connect postgres", func(t *testing.T) {
-		pg := testutils.GetDatabase(testutils.Postgres)
+		pg := testutils.GetDatabase(t, testutils.Postgres)
 		dsn := testutils.GetDsn(testutils.Postgres, pg)
 		fmt.Println("DSN", dsn)
 		err := Connect(dsn)
@@ -35,5 +36,13 @@ func TestConnect(t *testing.T) {
 	t.Run("must complain", func(t *testing.T) {
 		err := Connect("test")
 		assert.ErrorContains(t, err, "unsupported dsn. please check again")
+	})
+
+	t.Run("reject missing dsn", func(t *testing.T) {
+		assert.ErrorContains(t, Connect(""), "missing dsn")
+	})
+
+	t.Run("report unavailable SQL pool", func(t *testing.T) {
+		assert.ErrorContains(t, ConfigurePool(&gorm.DB{Config: &gorm.Config{}}, 1), "open SQL connection pool")
 	})
 }

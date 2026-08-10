@@ -11,4 +11,5 @@ func TestExtractGormPKColumns(t *testing.T) {
 	extractedColumns := ExtractGormPKColumns(m)
 	assert.Contains(t, extractedColumns, "id")
 	assert.Len(t, extractedColumns, 1)
+	assert.Equal(t, extractedColumns, ExtractGormPKColumns(&m))
 }

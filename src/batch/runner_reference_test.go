@@ -12,7 +12,7 @@ import (
 )
 
 func TestPreloadReferenceIDsForReleaseOnlyImport(t *testing.T) {
-	pg := testutils.GetDatabase(testutils.Postgres)
+	pg := testutils.GetDatabase(t, testutils.Postgres)
 	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
 	require.NoError(t, err)
 	require.NoError(t, RunDDL(db))

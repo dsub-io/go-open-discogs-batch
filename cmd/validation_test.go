@@ -70,3 +70,40 @@ func TestValidator(t *testing.T) {
 	require.NoError(t, config.Set("entities", []string{"unknown"}))
 	require.ErrorContains(t, new(validator).Validate(config), "unknown entities")
 }
+
+func TestValidatorReportsEveryConfigurationBoundary(t *testing.T) {
+	valid := func() *koanf.Koanf {
+		config := koanf.New(".")
+		require.NoError(t, config.Set("database-url", "postgresql://user:pass@db:5432/discogs"))
+		require.NoError(t, config.Set("entities", []string{"artist"}))
+		require.NoError(t, config.Set("chunk-size", 5000))
+		require.NoError(t, config.Set("max-workers", 4))
+		return config
+	}
+
+	config := valid()
+	require.NoError(t, config.Set("cleanup", "invalid"))
+	require.ErrorContains(t, new(validator).Validate(config), "must be a boolean")
+
+	config = valid()
+	require.NoError(t, config.Set("dump-month", "invalid"))
+	require.ErrorContains(t, new(validator).Validate(config), "dump-month")
+
+	config = valid()
+	require.NoError(t, config.Set("database-url", "mysql://user:pass@db/catalog"))
+	require.ErrorContains(t, new(validator).Validate(config), "database-url")
+
+	config = valid()
+	require.NoError(t, config.Set("chunk-size", 0))
+	require.ErrorContains(t, new(validator).Validate(config), "chunk-size")
+
+	config = valid()
+	require.NoError(t, config.Set("max-workers", 0))
+	require.ErrorContains(t, new(validator).Validate(config), "max-workers")
+}
+
+func TestValidDatabaseURLRequiresPasswordHostAndDatabase(t *testing.T) {
+	require.ErrorContains(t, ValidDatabaseURL("postgresql://user@db/catalog"), "username and password")
+	require.ErrorContains(t, ValidDatabaseURL("postgresql://user:pass@/catalog"), "host and database")
+	require.ErrorContains(t, ValidDatabaseURL("postgresql://user:pass@db"), "host and database")
+}

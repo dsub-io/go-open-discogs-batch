@@ -9,17 +9,24 @@ import (
 type Order interface {
 	getContext() context.Context
 	getChunkSize() int
+	getEntityType() string
 	getMaxWorkers() int
 	getFilePath() string
+	getRunID() int64
+	shouldResumeProgress() bool
 	getDB() *gorm.DB
 	submitWorker(context.Context, func()) bool
+	withDB(*gorm.DB) Order
 }
 
 type orderImpl struct {
 	ctx        context.Context
 	chunkSize  int
+	entityType string
 	maxWorkers int
 	filepath   string
+	runID      int64
+	resume     bool
 	db         *gorm.DB
 	workers    chan struct{}
 }
@@ -32,12 +39,24 @@ func (o *orderImpl) getChunkSize() int {
 	return o.chunkSize
 }
 
+func (o *orderImpl) getEntityType() string {
+	return o.entityType
+}
+
 func (o *orderImpl) getMaxWorkers() int {
 	return o.maxWorkers
 }
 
 func (o *orderImpl) getFilePath() string {
 	return o.filepath
+}
+
+func (o *orderImpl) getRunID() int64 {
+	return o.runID
+}
+
+func (o *orderImpl) shouldResumeProgress() bool {
+	return o.resume
 }
 
 func (o *orderImpl) getDB() *gorm.DB {
@@ -63,7 +82,48 @@ func (o *orderImpl) submitWorker(ctx context.Context, work func()) bool {
 	return true
 }
 
+func (o *orderImpl) withDB(db *gorm.DB) Order {
+	copy := *o
+	copy.db = db
+	return &copy
+}
+
 func NewOrder(ctx context.Context, chunkSize, maxWorkers int, filepath string, db *gorm.DB) Order {
+	return newOrder(ctx, chunkSize, maxWorkers, filepath, db, 0, "", false)
+}
+
+func NewTrackedOrder(
+	ctx context.Context,
+	chunkSize int,
+	maxWorkers int,
+	filepath string,
+	db *gorm.DB,
+	runID int64,
+	entityType string,
+	resume bool,
+) Order {
+	if runID <= 0 {
+		panic("runID must be a positive integer")
+	}
+	if entityType == "" {
+		panic("entityType must not be empty")
+	}
+	return newOrder(ctx, chunkSize, maxWorkers, filepath, db, runID, entityType, resume)
+}
+
+func newOrder(
+	ctx context.Context,
+	chunkSize int,
+	maxWorkers int,
+	filepath string,
+	db *gorm.DB,
+	runID int64,
+	entityType string,
+	resume bool,
+) Order {
+	if chunkSize <= 0 {
+		panic("chunkSize must be a positive integer")
+	}
 	if maxWorkers <= 0 {
 		panic("maxWorkers must be a positive integer")
 	}
@@ -73,8 +133,11 @@ func NewOrder(ctx context.Context, chunkSize, maxWorkers int, filepath string, d
 	return &orderImpl{
 		ctx:        ctx,
 		chunkSize:  chunkSize,
+		entityType: entityType,
 		maxWorkers: maxWorkers,
 		filepath:   filepath,
+		runID:      runID,
+		resume:     resume,
 		db:         db,
 		workers:    make(chan struct{}, maxWorkers),
 	}

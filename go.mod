@@ -3,9 +3,11 @@ module github.com/dsub-io/go-open-discogs-batch
 go 1.26
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/cavaliergopher/grab/v3 v3.0.1
 	github.com/knadh/koanf v1.5.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
+	github.com/moby/moby/api v1.55.0
 	github.com/reactivex/rxgo/v2 v2.5.0
 	github.com/schollz/progressbar/v3 v3.19.1
 	github.com/sirupsen/logrus v1.9.4
@@ -25,7 +27,6 @@ require (
 	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.3.0 // indirect
-	github.com/moby/moby/api v1.55.0 // indirect
 	github.com/moby/moby/client v0.5.1 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
@@ -43,7 +44,7 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/dsub-io/open-discogs-model v0.1.2
+	github.com/dsub-io/open-discogs-model v0.2.1
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
@@ -54,7 +55,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.10.0 // indirect
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect

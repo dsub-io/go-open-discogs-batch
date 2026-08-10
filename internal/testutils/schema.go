@@ -9,15 +9,18 @@ import (
 	"gorm.io/gorm"
 )
 
+var loadSharedMigrations = opendiscogsschema.Migrations
+
 func ApplySharedSchema(db *gorm.DB) error {
-	migrations, err := opendiscogsschema.Migrations()
+	migrations, err := loadSharedMigrations()
 	if err != nil {
 		return err
 	}
-	names, err := fs.Glob(migrations, "*.sql")
-	if err != nil {
-		return err
-	}
+	return applySharedMigrations(db, migrations)
+}
+
+func applySharedMigrations(db *gorm.DB, migrations fs.FS) error {
+	names, _ := fs.Glob(migrations, "*.sql")
 	sort.Strings(names)
 	for _, name := range names {
 		contents, readErr := fs.ReadFile(migrations, name)
