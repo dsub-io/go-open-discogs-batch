@@ -242,7 +242,7 @@ go test -run '^$' -bench 'IDSetLoadMillion' -benchmem ./src/cache
 ```
 
 Pull requests run formatting, module consistency, vet, race detection, unit and
-PostgreSQL integration tests, and a coverage gate. The separate E2E workflow
+PostgreSQL integration tests, and a 100% statement coverage gate. The separate E2E workflow
 uses deterministic fixtures on GitHub-hosted `ubuntu-latest`; it does not depend
 on live Discogs availability.
 
