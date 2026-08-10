@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -467,4 +468,43 @@ data-dir: testdata/
 		require.ErrorContains(t, err, "checksum")
 		require.Nil(t, result)
 	})
+}
+
+func TestResolveImportPlanDoesNotDownload(t *testing.T) {
+	server := testserver.NewServer(func(
+		requests []*testserver.HttpRequest,
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		t.Fatalf("resolve import plan must not request %s", r.URL.String())
+	})
+	defer server.Close()
+	origin := DiscogsS3BaseUrl
+	defer func() { DiscogsS3BaseUrl = origin }()
+	DiscogsS3BaseUrl = server.URL + "/"
+
+	dataDirectory := filepath.Join(t.TempDir(), "not-created")
+	config := koanf.New(".")
+	require.NoError(t, config.Set("entities", []string{"artist"}))
+	require.NoError(t, config.Set("dump-month", "2010-10"))
+	require.NoError(t, config.Set("data-dir", dataDirectory))
+	repository := &RepositoryStub{}
+	_, err := repository.BatchInsert([]*Data{
+		{
+			ETag:        "artist-2010-10",
+			GeneratedAt: time.Date(2010, 10, 1, 0, 0, 0, 0, time.UTC),
+			Checksum:    strings.Repeat("a", 64),
+			TargetType:  "artist",
+			Uri:         "data/2010/discogs_20101001_artists.xml.gz",
+		},
+	})
+	require.NoError(t, err)
+
+	plan, err := ResolveImportPlan(config, repository)
+
+	require.NoError(t, err)
+	require.Len(t, plan.Dumps, 1)
+	require.Contains(t, plan.Resources["artists"], "discogs_20101001_artists.xml.gz")
+	require.NoDirExists(t, dataDirectory)
+	require.Empty(t, server.Requests())
 }

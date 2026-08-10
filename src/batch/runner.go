@@ -20,6 +20,12 @@ type Runner struct {
 	Version string
 }
 
+const importCompletionTimeout = 30 * time.Second
+
+type importCompleter interface {
+	Complete(context.Context, error) error
+}
+
 func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	var (
 		begin      = time.Now()
@@ -52,7 +58,7 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		fmt.Printf("dump catalog refresh affected: %+v rows\n", updated)
 	}
 
-	plan, err := data.FetchImportPlan(config, dataRepo)
+	plan, err := data.ResolveImportPlan(config, dataRepo)
 	if err != nil {
 		return errors.Join(updateErr, err)
 	}
@@ -65,6 +71,7 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	preparation, err := coordinator.Prepare(
 		ctx,
 		plan.Dumps,
+		chunk,
 		config.Bool("force"),
 		config.Bool("allow-downgrade"),
 	)
@@ -82,10 +89,12 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		}
 		return nil
 	}
+	if err := data.FetchImportResources(ctx, plan); err != nil {
+		return finalizeImport(ctx, coordinator, plan, false, err)
+	}
 	cache.ResetIDs()
 	if err := preloadReferenceIDs(ctx, sqlDB, config); err != nil {
-		completionErr := coordinator.Complete(ctx, err)
-		return errors.Join(err, completionErr)
+		return finalizeImport(ctx, coordinator, plan, false, err)
 	}
 
 	var (
@@ -93,7 +102,16 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		totalUpdates = 0
 	)
 	fmt.Printf("max-workers=%d\n", maxWorkers)
-	steps := buildImportSteps(ctx, config, plan, b, chunk, maxWorkers, database.DB)
+	steps := buildImportSteps(
+		ctx,
+		config,
+		plan,
+		b,
+		chunk,
+		maxWorkers,
+		database.DB,
+		preparation.RunID,
+	)
 
 	for i := range steps {
 		r := steps[i]()
@@ -104,15 +122,29 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		}
 	}
 
-	if err == nil && config.Bool("cleanup") {
-		err = cleanupImportFiles(plan)
-	}
-	completionErr := coordinator.Complete(ctx, err)
-	if completionErr != nil {
-		err = errors.Join(err, completionErr)
-	}
+	err = finalizeImport(ctx, coordinator, plan, config.Bool("cleanup"), err)
 	printResult(begin, totalUpdates, err)
 	return err
+}
+
+func finalizeImport(
+	ctx context.Context,
+	completer importCompleter,
+	plan *data.ImportPlan,
+	cleanup bool,
+	runErr error,
+) error {
+	completionCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		importCompletionTimeout,
+	)
+	defer cancel()
+	completionErr := completer.Complete(completionCtx, runErr)
+	finalErr := errors.Join(runErr, completionErr)
+	if finalErr != nil || !cleanup {
+		return finalErr
+	}
+	return cleanupImportFiles(plan)
 }
 
 func preloadReferenceIDs(ctx context.Context, db *sql.DB, config *koanf.Koanf) error {
@@ -175,28 +207,32 @@ func buildImportSteps(
 	chunkSize int,
 	maxWorkers int,
 	db *gorm.DB,
+	runID int64,
 ) []Step {
 	definitions := []struct {
 		enabled     bool
+		entityType  string
 		resourceKey string
 		build       func(Order) Step
 	}{
-		{hasArtist(config), "artists", batch.UpdateArtist},
-		{hasLabel(config), "labels", batch.UpdateLabel},
-		{hasMaster(config), "masters", batch.UpdateMaster},
-		{hasRelease(config), "releases", batch.UpdateRelease},
+		{hasArtist(config), "artist", "artists", batch.UpdateArtist},
+		{hasLabel(config), "label", "labels", batch.UpdateLabel},
+		{hasMaster(config), "master", "masters", batch.UpdateMaster},
+		{hasRelease(config), "release", "releases", batch.UpdateRelease},
 	}
 	steps := make([]Step, 0, len(definitions))
 	for _, definition := range definitions {
 		if !definition.enabled {
 			continue
 		}
-		order := NewOrder(
+		order := NewTrackedOrder(
 			ctx,
 			chunkSize,
 			maxWorkers,
 			plan.Resources[definition.resourceKey],
 			db,
+			runID,
+			definition.entityType,
 		)
 		steps = append(steps, definition.build(order))
 	}

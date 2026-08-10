@@ -39,12 +39,29 @@ func (a *XmlArtist) Transform() rxgo.Observable {
 }
 
 type XmlArtistRelation struct {
-	ID       int32    `xml:"id"`
-	URLs     []string `xml:"urls>url"`
-	NameVars []string `xml:"namevariations>name"`
-	Aliases  []XmlRef `xml:"aliases>name"`
-	Groups   []XmlRef `xml:"groups>name"`
-	Members  []XmlRef `xml:"members>name"`
+	ID          int32    `xml:"id"`
+	Name        *string  `xml:"name"`
+	DataQuality *string  `xml:"data_quality"`
+	Profile     *string  `xml:"profile"`
+	RealName    *string  `xml:"realname"`
+	URLs        []string `xml:"urls>url"`
+	NameVars    []string `xml:"namevariations>name"`
+	Aliases     []XmlRef `xml:"aliases>name"`
+	Groups      []XmlRef `xml:"groups>name"`
+	Members     []XmlRef `xml:"members>name"`
+}
+
+func (a *XmlArtistRelation) GetArtist() *opendiscogsmodel.Artist {
+	now := time.Now().UTC()
+	return &opendiscogsmodel.Artist{
+		ID:             a.ID,
+		CreatedAt:      now,
+		LastModifiedAt: now,
+		DataQuality:    helper.FilterStr(a.DataQuality),
+		Name:           helper.FilterStr(a.Name),
+		Profile:        helper.FilterStr(a.Profile),
+		RealName:       helper.FilterStr(a.RealName),
+	}
 }
 
 func (a *XmlArtistRelation) GetUrls() []*opendiscogsmodel.ArtistURL {
@@ -158,9 +175,26 @@ func (l *XmlLabel) Transform() rxgo.Observable {
 }
 
 type XmlLabelRelation struct {
-	ID        int32    `xml:"id"`
-	URLs      []string `xml:"urls>url"`
-	SubLabels []XmlRef `xml:"sublabels>label"`
+	ID          int32    `xml:"id"`
+	Name        *string  `xml:"name"`
+	ContactInfo *string  `xml:"contactinfo"`
+	Profile     *string  `xml:"profile"`
+	DataQuality *string  `xml:"data_quality"`
+	URLs        []string `xml:"urls>url"`
+	SubLabels   []XmlRef `xml:"sublabels>label"`
+}
+
+func (l *XmlLabelRelation) GetLabel() *opendiscogsmodel.Label {
+	now := time.Now().UTC()
+	return &opendiscogsmodel.Label{
+		ID:             l.ID,
+		CreatedAt:      now,
+		LastModifiedAt: now,
+		Name:           helper.FilterStr(l.Name),
+		ContactInfo:    helper.FilterStr(l.ContactInfo),
+		Profile:        helper.FilterStr(l.Profile),
+		DataQuality:    helper.FilterStr(l.DataQuality),
+	}
 }
 
 func (l *XmlLabelRelation) GetUrls() []*opendiscogsmodel.LabelURL {

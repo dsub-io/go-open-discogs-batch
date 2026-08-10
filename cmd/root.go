@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/batch"
 	"github.com/knadh/koanf"
@@ -42,7 +44,9 @@ var booleanEnvironmentOptions = map[string]struct{}{
 }
 
 func Execute() error {
-	return NewRootCommand().Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return NewRootCommand().ExecuteContext(ctx)
 }
 
 func NewRootCommand() *cobra.Command {
@@ -83,7 +87,7 @@ var getMainFunc = func() func(cmd *cobra.Command, args []string) error {
 		if err := new(validator).Validate(conf); err != nil {
 			return err
 		}
-		return (&batch.Runner{Version: version}).Run(context.Background(), conf)
+		return (&batch.Runner{Version: version}).Run(cmd.Context(), conf)
 	}
 }
 

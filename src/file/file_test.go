@@ -2,15 +2,46 @@ package file
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"github.com/dsub-io/go-open-discogs-batch/internal/test/resource"
 	"github.com/dsub-io/go-open-discogs-batch/internal/testserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestFetchAndCheckContextHonorsCancellation(t *testing.T) {
+	handler := NewHandler()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	target := filepath.Join(t.TempDir(), "cancelled-download")
+
+	err := handler.FetchAndCheckContext(
+		ctx,
+		"https://example.invalid/cancelled-download",
+		target,
+		strings.Repeat("0", 64),
+	)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoFileExists(t, target)
+}
+
+func TestFetchRejectsInvalidURI(t *testing.T) {
+	handler := NewHandler()
+	target := filepath.Join(t.TempDir(), "invalid-download")
+
+	err := handler.Fetch("://invalid", target)
+
+	require.ErrorContains(t, err, "create download request")
+	require.NoFileExists(t, target)
+}
 
 func Test_handlerImpl_Checksum(t *testing.T) {
 	type args struct {
