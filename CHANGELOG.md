@@ -1,28 +1,28 @@
-## [1.1.3](https://github.com/state303/go-discogs/compare/v1.1.2...v1.1.3) (2024-02-10)
-
-
-### Bug Fixes
-
-* **dep:** replace to new checksum ([8251672](https://github.com/state303/go-discogs/commit/825167271dc7500a9e5bf4246bcbcc58acd7f400))
-* release item not to contain an empty str field ([72cbcfb](https://github.com/state303/go-discogs/commit/72cbcfb81a67b801f8667372ee8816a48f91a7b5))
-* releases and masters will not contain empty genre, style entry ([60c59b5](https://github.com/state303/go-discogs/commit/60c59b5e4d4814c015e6c71087ee5fec2125bfeb))
-* removes redundant ctx reference ([b823bcc](https://github.com/state303/go-discogs/commit/b823bcc976f432f76ce64a7d5de04c3d0001a19b))
+# Changelog
 
 ## [2.1.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.0.0...v2.1.0) (2026-08-10)
 
+### Durability and Idempotency
 
-### Features
+* persist immutable import manifests, per-entity progress, and exact committed source-chunk ledgers; resume only compatible failed runs and skip only currently clean successful manifests
+* reconcile owned relations exactly, fence delayed workers after abandonment, and lock selected entities with their Artist, Label, and Master reference dependencies
+* retain downloads and valid ledgers after failure, clean selected files only after durable success, and keep peak work bounded by `chunk-size × max-workers × relation fan-out`
 
-* make snapshot imports durable and convergent ([2a1ddbd](https://github.com/dsub-io/go-open-discogs-batch/commit/2a1ddbd20dca4fc2b2301994d0b12c66379e16b7))
+### Correctness
 
+* return dump-listing and payload failures without panicking, make XML cancellation and close ordering race-free, and preserve requested file-copy permissions
+* validate rollback, lock release, resumed ledgers, completion fencing, timeout, cancellation, and cleanup paths with real PostgreSQL integration coverage
 
-### Bug Fixes
+### Measured Impact
 
-* close Go batch correctness and coverage gaps ([c6da0ce](https://github.com/dsub-io/go-open-discogs-batch/commit/c6da0ce7b3732c44e7afa65181ee274a607c417e))
-* fence durable import recovery ([f18b42b](https://github.com/dsub-io/go-open-discogs-batch/commit/f18b42b0ea477189ffd14b06b92d709281c255ef))
-* lock import reference dependencies ([c325747](https://github.com/dsub-io/go-open-discogs-batch/commit/c3257475defa6162a91c746d6ac534eee7cad420))
-* make snapshot imports durable and convergent ([0217cac](https://github.com/dsub-io/go-open-discogs-batch/commit/0217cac39e58d6378ff91c7a5fddd58676e7a3e4))
-* normalize model dependency metadata ([5632a98](https://github.com/dsub-io/go-open-discogs-batch/commit/5632a98294a0a9f14f6066a088fb43399b0999ad))
+* completed-manifest preflight p50/p95/p99 fell from `38.917/50.768/58.719 ms` to `1.776/2.728/3.038 ms` (`95.4%/94.6%/94.8%` lower), a `21.9x` median speedup that avoids 64 MiB of file I/O per skipped invocation
+* median allocations on that path fell from `40,008` to `6,800 B/op` (`83.0%` lower) and from `113` to `106 allocs/op` (`6.2%` lower)
+* durable initial-import p50 changed from `48.509` to `73.922 ms` (`+52.4%`) and forced-repeat p50 from `38.864` to `72.822 ms` (`+87.4%`); this is the measured fixed cost of checkpoint validation and active-run fencing on a 12-record fixture, not a full-dataset estimate
+* whole-suite statement coverage increased from `79.0%` to `100.0%` (`+21.0` percentage points), including race detection and tagged PostgreSQL E2E paths
+
+### Distribution
+
+* publish GoReleaser artifacts and non-root `linux/amd64` and `linux/arm64` GHCR images through the protected release workflow, including a post-publish architecture check
 
 ## [2.0.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v1.2.0...v2.0.0) (2026-08-09)
 
