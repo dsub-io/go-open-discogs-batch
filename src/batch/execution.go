@@ -86,13 +86,17 @@ func (c *ImportExecutionCoordinator) Prepare(
 	if err != nil {
 		return nil, err
 	}
+	lockTypes, err := opendiscogsmanifest.RequiredLockEntityTypes(orderedTypes)
+	if err != nil {
+		return nil, err
+	}
 
 	conn, err := c.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reserve import lock connection: %w", err)
 	}
 	c.conn = conn
-	if err := c.acquireEntityLocks(ctx, orderedTypes); err != nil {
+	if err := c.acquireEntityLocks(ctx, lockTypes); err != nil {
 		c.release(ctx)
 		return nil, err
 	}

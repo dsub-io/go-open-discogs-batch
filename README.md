@@ -28,8 +28,10 @@ Discogs. The Discogs name identifies only the public data source.
   retry skips only source ranges represented by valid committed chunk rows.
 - An older entity dump is rejected unless `--allow-downgrade` is supplied; the
   override is recorded in import history.
-- PostgreSQL advisory locks prevent concurrent runs from updating an overlapping
-  entity set. Runs with disjoint entity sets may proceed together.
+- PostgreSQL advisory locks cover both selected entities and their reference
+  dependencies. Master locks Artist and Master; Release locks Artist, Label,
+  Master, and Release because it also updates `master.main_release_id`.
+  Independent sets such as Artist and Label may still proceed together.
 - Downloads are retained by default. `--cleanup` deletes only the selected dump
   files after a successful import or successful-manifest skip. Failed imports
   retain their files for retry.

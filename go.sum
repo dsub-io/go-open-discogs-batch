@@ -73,6 +73,8 @@ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/dsub-io/open-discogs-model v0.2.0 h1:J89ZdKkY0/z6ZFCCK81MmZ3M+B4czdGA9GJJRkcg3s8=
 github.com/dsub-io/open-discogs-model v0.2.0/go.mod h1:V5lT/YpZiw5TuUBcXSLor0TH4AisrCg5SRHHz7IcPE4=
+github.com/dsub-io/open-discogs-model v0.2.1 h1:v5Yis29dv3P9ImXBrYm8TJrI53SGcLjpvJ7ZrMYS63k=
+github.com/dsub-io/open-discogs-model v0.2.1/go.mod h1:V5lT/YpZiw5TuUBcXSLor0TH4AisrCg5SRHHz7IcPE4=
 github.com/dustin/go-humanize v1.0.0/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/ebitengine/purego v0.10.2 h1:W809HbnvzAxgdm+aOvlSekrM16wGCdT/e76+9tS7gzE=
 github.com/ebitengine/purego v0.10.2/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=

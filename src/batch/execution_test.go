@@ -218,35 +218,69 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, repairJuly.Complete(ctx, nil))
 	})
 
-	t.Run("allows disjoint entities and rejects overlap", func(t *testing.T) {
+	t.Run("locks reference dependencies while allowing independent entities", func(t *testing.T) {
 		reset(t)
-		artistRelease := NewImportExecutionCoordinator(sqlDB, "test")
-		artistReleaseDumps := []*opendiscogsmodel.DiscogsDump{
+		artist := NewImportExecutionCoordinator(sqlDB, "test")
+		artistDumps := []*opendiscogsmodel.DiscogsDump{
 			importDump("artist", "2026-07-01", "b"),
-			importDump("release", "2026-07-01", "c"),
 		}
-		artistReleasePrepared, err := artistRelease.Prepare(
-			ctx, artistReleaseDumps, testChunkSize, false, false,
+		artistPrepared, err := artist.Prepare(
+			ctx, artistDumps, testChunkSize, false, false,
 		)
+		require.NoError(t, err)
+
+		label := NewImportExecutionCoordinator(sqlDB, "test")
+		labelDumps := []*opendiscogsmodel.DiscogsDump{
+			importDump("label", "2026-07-01", "c"),
+		}
+		labelPrepared, err := label.Prepare(ctx, labelDumps, testChunkSize, false, false)
 		require.NoError(t, err)
 
 		master := NewImportExecutionCoordinator(sqlDB, "test")
 		masterDumps := []*opendiscogsmodel.DiscogsDump{
 			importDump("master", "2026-07-01", "d"),
 		}
-		masterPrepared, err := master.Prepare(ctx, masterDumps, testChunkSize, false, false)
-		require.NoError(t, err)
+		_, err = master.Prepare(ctx, masterDumps, testChunkSize, false, false)
+		require.ErrorContains(t, err, "already updating artist")
 
-		overlapping := NewImportExecutionCoordinator(sqlDB, "test")
-		_, err = overlapping.Prepare(ctx, []*opendiscogsmodel.DiscogsDump{
-			importDump("artist", "2026-07-01", "e"),
+		release := NewImportExecutionCoordinator(sqlDB, "test")
+		_, err = release.Prepare(ctx, []*opendiscogsmodel.DiscogsDump{
+			importDump("release", "2026-07-01", "e"),
 		}, testChunkSize, false, false)
 		require.ErrorContains(t, err, "already updating artist")
 
-		complete(t, masterPrepared, masterDumps)
-		require.NoError(t, master.Complete(ctx, nil))
-		complete(t, artistReleasePrepared, artistReleaseDumps)
-		require.NoError(t, artistRelease.Complete(ctx, nil))
+		complete(t, labelPrepared, labelDumps)
+		require.NoError(t, label.Complete(ctx, nil))
+		complete(t, artistPrepared, artistDumps)
+		require.NoError(t, artist.Complete(ctx, nil))
+	})
+
+	t.Run("release locks every referenced entity and master write target", func(t *testing.T) {
+		reset(t)
+		release := NewImportExecutionCoordinator(sqlDB, "test")
+		releaseDumps := []*opendiscogsmodel.DiscogsDump{
+			importDump("release", "2026-07-01", "e"),
+		}
+		releasePrepared, err := release.Prepare(
+			ctx, releaseDumps, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+
+		for entityType, blockedLock := range map[string]string{
+			"artist":  "artist",
+			"label":   "label",
+			"master":  "artist",
+			"release": "artist",
+		} {
+			competing := NewImportExecutionCoordinator(sqlDB, "test")
+			_, err = competing.Prepare(ctx, []*opendiscogsmodel.DiscogsDump{
+				importDump(entityType, "2026-07-01", "f"),
+			}, testChunkSize, false, false)
+			require.ErrorContains(t, err, "already updating "+blockedLock)
+		}
+
+		complete(t, releasePrepared, releaseDumps)
+		require.NoError(t, release.Complete(ctx, nil))
 	})
 
 	t.Run("rejects downgrades unless separately authorized", func(t *testing.T) {
