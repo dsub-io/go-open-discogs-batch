@@ -15,10 +15,7 @@ import (
 )
 
 func TestImportExecutionCoordinator(t *testing.T) {
-	pg := testutils.GetDatabase(testutils.Postgres)
-	t.Cleanup(func() {
-		require.NoError(t, pg.Container.Terminate(context.Background()))
-	})
+	pg := testutils.GetDatabase(t, testutils.Postgres)
 	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
 	require.NoError(t, err)
 	require.NoError(t, RunDDL(db))

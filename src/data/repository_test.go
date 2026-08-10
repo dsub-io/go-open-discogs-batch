@@ -18,15 +18,13 @@ type DataRepoSuite struct {
 	repo Repository
 }
 
-func (s *DataRepoSuite) Prepare() {
-	if database.DB == nil {
-		dbInfo := testutils.GetDatabase(testutils.Postgres)
-		require.NoError(s.T(), database.Connect(testutils.GetDsn(testutils.Postgres, dbInfo)))
-		s.DB = database.DB
-		require.NoError(s.T(), testutils.ApplySharedSchema(s.DB))
-		s.DB.Logger.LogMode(3)
-		s.repo = NewDataRepository(s.DB)
-	}
+func (s *DataRepoSuite) SetupSuite() {
+	dbInfo := testutils.GetDatabase(s.T(), testutils.Postgres)
+	require.NoError(s.T(), database.Connect(testutils.GetDsn(testutils.Postgres, dbInfo)))
+	s.DB = database.DB
+	require.NoError(s.T(), testutils.ApplySharedSchema(s.DB))
+	s.DB.Logger.LogMode(3)
+	s.repo = NewDataRepository(s.DB)
 }
 
 func TestInit(t *testing.T) {
@@ -34,7 +32,6 @@ func TestInit(t *testing.T) {
 }
 
 func (s *DataRepoSuite) TestFindByYear() {
-	s.Prepare()
 	_, err := s.repo.FindByYearMonthType("1900", "03", "artist")
 	require.ErrorContains(s.T(), err, "1900")
 	require.ErrorContains(s.T(), err, "03")
@@ -42,14 +39,12 @@ func (s *DataRepoSuite) TestFindByYear() {
 }
 
 func (s *DataRepoSuite) TestFindByYearInvalidFormat() {
-	s.Prepare()
 	_, err := s.repo.FindByYearMonthType("xxxx", "xx", "Xx")
 	require.ErrorContains(s.T(), err, "failed to parse")
 	require.ErrorContains(s.T(), err, "xxxx.xx")
 }
 
 func (s *DataRepoSuite) TestFindLatestByTypeUsesIndependentEntityDate() {
-	s.Prepare()
 	items := []*Data{
 		{
 			ETag:        "latest-label-old",
@@ -80,7 +75,6 @@ func (s *DataRepoSuite) TestFindLatestByTypeUsesIndependentEntityDate() {
 }
 
 func (s *DataRepoSuite) TestBatchInsert() {
-	s.Prepare()
 	var (
 		etag = "test-etag-test-batch-insert"
 		gen  = time.Now()

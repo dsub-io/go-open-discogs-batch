@@ -9,7 +9,7 @@ import (
 
 func TestConnect(t *testing.T) {
 	t.Run("connect postgres", func(t *testing.T) {
-		pg := testutils.GetDatabase(testutils.Postgres)
+		pg := testutils.GetDatabase(t, testutils.Postgres)
 		dsn := testutils.GetDsn(testutils.Postgres, pg)
 		fmt.Println("DSN", dsn)
 		err := Connect(dsn)

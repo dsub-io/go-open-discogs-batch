@@ -16,7 +16,7 @@ import (
 )
 
 func TestBatch(t *testing.T) {
-	pg := testutils.GetDatabase(testutils.Postgres)
+	pg := testutils.GetDatabase(t, testutils.Postgres)
 	dsn := testutils.GetDsn(testutils.Postgres, pg)
 	db, err := database.GetConnect(dsn)
 	require.NoError(t, err)
