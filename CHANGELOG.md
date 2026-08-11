@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.2.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.1.1...v2.2.0) (2026-08-11)
+
+
+### Features
+
+* replace the unknown-length gzip spinner with exact local compressed-byte
+  percentage, throughput, elapsed time, and source ETA ([#49](https://github.com/dsub-io/go-open-discogs-batch/pull/49))
+* emit JSON `import_progress` events with exact durable committed items,
+  resume baseline, current-run rows per second, last commit time, and explicit
+  started, running, completed, failed, and non-fatal observation-error states
+
+### Scale and Validation
+
+* avoid a full XML pre-count pass; each emitted sample performs one primary-key
+  summary read, with running observations bounded to once every five seconds
+  (`0.2 reads/second` per active entity) plus start and finish reads
+* pass the race-enabled full suite at `100.0%` statement coverage and the tagged
+  dump-to-PostgreSQL failure/resume E2E, with no residual test container,
+  network, or volume
+* the first production-sized dump remains intentionally deferred, so no
+  200-million-row throughput, memory, or completion-time claim is inferred from
+  fixtures
+
 ## [2.1.1](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.1.0...v2.1.1) (2026-08-11)
 
 
