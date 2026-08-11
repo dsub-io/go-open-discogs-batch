@@ -83,6 +83,32 @@ an import is running. Deployments that require an all-at-once snapshot switch
 must put a separate versioned database or replica promotion boundary around the
 import.
 
+### Progress observability
+
+Download bars use the upstream-reported compressed size. Source-reading bars
+use the exact local compressed file size as their byte denominator and display
+percentage, byte throughput, elapsed time, and source ETA. A source-reading
+percentage describes how much of the gzip stream has been consumed; it does not
+claim that the same percentage of PostgreSQL work has committed.
+
+Tracked entity convergence also writes JSON progress records to stdout at
+start, at most once every five seconds while chunks finish, and at completion
+or failure. `committed_items` comes from `discogs_import_run_dump.processed_items`
+and therefore counts only roots whose canonical entity and complete relation
+set committed atomically with the chunk ledger. `initial_committed_items` makes
+resumed work explicit, `rows_per_second` covers newly committed roots in the
+current process, and `last_committed_progress_at` supports stall detection.
+Each emitted sample performs one primary-key summary read, bounded to 0.2 reads
+per second per active entity plus the start and finish reads; it never scans the
+chunk ledger or entity tables.
+
+`committed_percent` is intentionally omitted while the stream total is unknown.
+It becomes `100` only after end-of-stream coverage validation records exact item
+and chunk totals. Pre-counting every XML root merely to display a speculative
+percentage would add a second full gzip/XML scan. There is no synthetic overall
+percentage across Artist, Label, Master, and Release because their relation
+fan-out and database cost differ substantially.
+
 ## Requirements
 
 - PostgreSQL

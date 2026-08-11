@@ -44,6 +44,8 @@ func processRelationChunks[T any](
 	progressText string,
 	writeRelationChunk relationChunkWriter[T],
 ) result.Result {
+	reporter := newEntityProgressReporter(order)
+	reporter.Start()
 	ctx, cancel := context.WithCancel(order.getContext())
 	defer cancel()
 	results := make(chan result.Result)
@@ -53,6 +55,7 @@ func processRelationChunks[T any](
 	var totalChunks int64
 	source, err := newReadCloser(order.getFilePath(), progressText)
 	if err != nil {
+		reporter.Finish(false)
 		return result.NewResult(0, err)
 	}
 
@@ -80,6 +83,7 @@ func processRelationChunks[T any](
 				if order.submitWorker(ctx, func() {
 					defer workers.Done()
 					written := writeRelationChunk(order, chunk, items)
+					reporter.Observe()
 					if written.IsErr() {
 						cancel()
 					}
@@ -107,6 +111,7 @@ func processRelationChunks[T any](
 			sum = sum.Sum(result.NewResult(0, progressErr))
 		}
 	}
+	reporter.Finish(!sum.IsErr())
 
 	fmt.Printf("\nUpdated %+v %s\n", sum.Count(), topic)
 	return sum

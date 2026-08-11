@@ -45,7 +45,7 @@ func InsertMasterRelations(order Order) result.Result {
 		order,
 		"master relations",
 		"master",
-		"updating master relations...",
+		"source-read master relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlMasterRelation) result.Result {
 			return writeMasterRelationChunk(order, chunk, items, deleteStale)
 		},

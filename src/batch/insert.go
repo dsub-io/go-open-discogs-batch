@@ -13,7 +13,7 @@ import (
 )
 
 func InsertSimple[F, T any](order Order, topic string, localName string) result.Result {
-	r, err := newReadCloser(order.getFilePath(), fmt.Sprintf("updating %+v...", topic))
+	r, err := newReadCloser(order.getFilePath(), fmt.Sprintf("source-read %+v", topic))
 	if err != nil {
 		return result.NewResult(0, err)
 	}

@@ -42,3 +42,14 @@ func TestNewProgressBarGzipReadCloserRejectsInvalidGzip(t *testing.T) {
 	require.Nil(t, reader)
 	require.NoError(t, f.Close())
 }
+
+func TestNewProgressBarGzipReadCloserRejectsUnreadableFileMetadata(t *testing.T) {
+	f, err := os.Open("testdata/data.gz")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	reader, err := NewProgressBarGzipReadCloser(f, "closed")
+
+	require.Error(t, err)
+	require.Nil(t, reader)
+}

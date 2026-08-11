@@ -61,7 +61,7 @@ func insertArtistRelations(order Order) result.Result {
 		order,
 		"artist relations",
 		"artist",
-		"updating artist relations...",
+		"source-read artist relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlArtistRelation) result.Result {
 			return writeArtistRelationChunk(order, chunk, items, deleteStale)
 		},
