@@ -28,12 +28,14 @@ func TestPublicDefaults(t *testing.T) {
 	require.Equal(t, []string{"artist", "label", "master", "release"}, conf.Strings("entities"))
 	require.Equal(t, 5000, conf.Int("chunk-size"))
 	require.Equal(t, runtime.GOMAXPROCS(0), conf.Int("max-workers"))
+	require.Equal(t, "public", conf.String("database-schema"))
 	require.Equal(t, filepath.Join(getHomeDir(new(homeDirSupplier)), ".cache", "open-discogs-batch"), conf.String("data-dir"))
 	require.False(t, conf.Bool("cleanup"))
 }
 
 func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
 	t.Setenv("OPEN_DISCOGS_BATCH_DATABASE_URL", "postgresql://env:pass@db:5432/discogs")
+	t.Setenv("OPEN_DISCOGS_BATCH_DATABASE_SCHEMA", "env_schema")
 	t.Setenv("OPEN_DISCOGS_BATCH_ENTITIES", "artist, release")
 	t.Setenv("OPEN_DISCOGS_BATCH_DUMP_MONTH", "2026-07")
 	t.Setenv("OPEN_DISCOGS_BATCH_DATA_DIR", "/env-data")
@@ -46,6 +48,7 @@ func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
 	executeWithoutBatch(
 		t,
 		"--database-url", "postgresql://cli:pass@db:5432/discogs",
+		"--database-schema", "cli_schema",
 		"--entities", "label,master",
 		"--chunk-size", "5500",
 		"--max-workers", "3",
@@ -53,6 +56,7 @@ func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
 	)
 
 	require.Equal(t, "postgresql://cli:pass@db:5432/discogs", conf.String("database-url"))
+	require.Equal(t, "cli_schema", conf.String("database-schema"))
 	require.Equal(t, []string{"label", "master"}, conf.Strings("entities"))
 	require.Equal(t, "2026-07", conf.String("dump-month"))
 	require.Equal(t, "/cli-data", conf.String("data-dir"))

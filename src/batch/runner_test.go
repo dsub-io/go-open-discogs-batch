@@ -13,6 +13,7 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/internal/testserver"
 	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/dsub-io/go-open-discogs-batch/src/data"
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	"github.com/knadh/koanf"
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +26,7 @@ type runnerFixture struct {
 }
 
 func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
+	const customSchema = "open_discogs"
 	fixtures := make([]runnerFixture, 0, 4)
 	for _, entity := range []string{"artist", "label", "master", "release"} {
 		filename := fmt.Sprintf("discogs_20260701_%ss.xml.gz", entity)
@@ -79,6 +81,7 @@ func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
 	config := koanf.New(".")
 	for key, value := range map[string]interface{}{
 		"database-url":    testutils.GetDsn(testutils.Postgres, postgres),
+		"database-schema": customSchema,
 		"entities":        []string{"artist", "label", "master", "release"},
 		"dump-month":      "2026-07",
 		"data-dir":        t.TempDir(),
@@ -97,6 +100,16 @@ func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
 
 	runner := &Runner{Version: "test"}
 	require.NoError(t, runner.Run(context.Background(), config))
+	var artistCount int64
+	require.NoError(t, database.DB.Raw(
+		`select count(*) from "open_discogs"."artist"`,
+	).Scan(&artistCount).Error)
+	require.Positive(t, artistCount)
+	var publicArtistTable *string
+	require.NoError(t, database.DB.Raw(
+		`select to_regclass('public.artist')::text`,
+	).Scan(&publicArtistTable).Error)
+	require.Nil(t, publicArtistTable)
 	for _, fixture := range fixtures {
 		require.NoFileExists(t, filepath.Join(config.String("data-dir"), fixture.filename))
 	}

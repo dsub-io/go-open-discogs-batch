@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	"github.com/knadh/koanf"
 )
 
@@ -32,6 +33,9 @@ func (v *validator) Validate(config *koanf.Koanf) error {
 		return err
 	}
 	if err := ValidDatabaseURL(config.String("database-url")); err != nil {
+		return err
+	}
+	if err := database.ValidateSchemaName(config.String("database-schema")); err != nil {
 		return err
 	}
 	if err := ValidChunkSize(config.String("chunk-size")); err != nil {

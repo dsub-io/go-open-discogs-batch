@@ -419,9 +419,9 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	require.Empty(t, filterStyles([]*opendiscogsmodel.Style{{Name: " "}}))
 
 	db, mock, _ := newMockGorm(t)
-	mock.ExpectExec("update public.master").
+	mock.ExpectExec("update master").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE public.master AS target").
+	mock.ExpectExec("UPDATE master AS target").
 		WillReturnError(expected)
 	masterID := int32(1)
 	actual = updateMasterMainReleases(
@@ -486,10 +486,10 @@ func TestLabelChunkUsesSubLabelKeys(t *testing.T) {
 	t.Cleanup(cache.ResetIDs)
 	db, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
-	mock.ExpectExec("delete from public.label_url").
+	mock.ExpectExec("delete from label_url").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("delete from public.label_sub_label").
+	mock.ExpectExec("delete from label_sub_label").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnError(errors.New("fixture"))
 	mock.ExpectRollback()

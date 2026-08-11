@@ -197,7 +197,7 @@ func readCommittedProgress(order Order) (committedProgress, error) {
 	var summary committedProgress
 	query := order.getDB().WithContext(order.getContext()).Raw(
 		`select processed_items, total_items, last_progress_at
-		   from public.discogs_import_run_dump
+		   from discogs_import_run_dump
 		  where import_run_id = ?
 		    and entity_type = ?`,
 		order.getRunID(),

@@ -278,7 +278,7 @@ func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) resul
 		mainReleaseIDs = append(mainReleaseIDs, releaseID)
 	}
 	cleared := order.getDB().Exec(
-		`update public.master
+		`update master
 		    set main_release_id = null,
 		        last_modified_at = ?
 		  where main_release_id = any(?::integer[])
@@ -325,7 +325,7 @@ func masterMainReleaseUpdateStatement(
 		rows[index] = "(?::integer, ?::integer)"
 		arguments = append(arguments, masterID, updates[masterID])
 	}
-	return `UPDATE public.master AS target
+	return `UPDATE master AS target
 		SET main_release_id = incoming.release_id,
 			last_modified_at = ?
 		FROM (VALUES ` + strings.Join(rows, ", ") + `) AS incoming(master_id, release_id)

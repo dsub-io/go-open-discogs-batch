@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
@@ -23,6 +24,8 @@ type Runner struct {
 
 const importCompletionTimeout = 30 * time.Second
 
+const publicSchemaWarning = "WARN: database schema is public; set --database-schema or OPEN_DISCOGS_BATCH_DATABASE_SCHEMA to isolate OpenDiscogs tables"
+
 type importCompleter interface {
 	Complete(context.Context, error) error
 }
@@ -32,9 +35,10 @@ type importExecutionCoordinator interface {
 	Prepare(context.Context, []*opendiscogsmodel.DiscogsDump, int, bool, bool) (*ImportPreparation, error)
 }
 
-var connectDatabase = database.Connect
+var connectDatabase = database.ConnectInSchema
 var configureDatabasePool = database.ConfigurePool
-var runDatabaseDDL = RunDDL
+var ensureDatabaseSchema = database.EnsureSchema
+var runDatabaseDDL = RunDDLInSchema
 var refreshSelectedData = data.UpdateSelectedData
 var resolveImportPlan = data.ResolveImportPlan
 var fetchImportResources = data.FetchImportResources
@@ -51,16 +55,29 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 		begin      = time.Now()
 		chunk      = config.Int("chunk-size")
 		maxWorkers = config.Int("max-workers")
+		schemaName = config.String("database-schema")
 	)
-	if err := connectDatabase(config.String("database-url")); err != nil {
+	schema, err := database.ParseSchema(schemaName)
+	if err != nil {
+		return err
+	}
+	if schema.Name() == database.DefaultSchemaName {
+		fmt.Fprintln(os.Stderr, publicSchemaWarning)
+	}
+	if err := connectDatabase(config.String("database-url"), schemaName); err != nil {
 		return err
 	}
 	if err := configureDatabasePool(database.DB, maxWorkers); err != nil {
 		return err
 	}
+	created, err := ensureDatabaseSchema(database.DB, schema)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("database schema ready: %s (created=%t)\n", schema.Name(), created)
 
 	fmt.Println("execute DDL update...")
-	if err := runDatabaseDDL(database.DB); err != nil {
+	if err := runDatabaseDDL(database.DB, schemaName); err != nil {
 		return err
 	}
 
@@ -194,7 +211,7 @@ func preloadReferenceIDs(ctx context.Context, db *sql.DB, config *koanf.Koanf) e
 		if !load.required {
 			continue
 		}
-		rows, err := db.QueryContext(ctx, "SELECT id FROM public."+load.table)
+		rows, err := db.QueryContext(ctx, "SELECT id FROM "+load.table)
 		if err != nil {
 			return fmt.Errorf("stream %s identifiers: %w", load.table, err)
 		}

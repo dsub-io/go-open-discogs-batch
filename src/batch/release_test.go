@@ -37,7 +37,7 @@ func TestMasterMainReleaseUpdateStatementBatchesMappings(t *testing.T) {
 
 	query, arguments := masterMainReleaseUpdateStatement([]int32{10, 20, 30}, updates)
 
-	require.Contains(t, query, "UPDATE public.master AS target")
+	require.Contains(t, query, "UPDATE master AS target")
 	require.Equal(t, 3, strings.Count(query, "(?::integer, ?::integer)"))
 	require.Len(t, arguments, 7)
 	require.Equal(t, int32(10), arguments[1])

@@ -47,9 +47,10 @@ func (s batchStub) UpdateMaster(order Order) Step  { return s.step(order) }
 func (s batchStub) UpdateRelease(order Order) Step { return s.step(order) }
 
 type runnerSeams struct {
-	connect       func(string) error
+	connect       func(string, string) error
 	configure     func(*gorm.DB, int) error
-	ddl           func(*gorm.DB) error
+	ensure        func(*gorm.DB, database.Schema) (bool, error)
+	ddl           func(*gorm.DB, string) error
 	refresh       func(context.Context, data.Repository, []string, string) (int, error)
 	resolve       func(*koanf.Koanf, data.Repository) (*data.ImportPlan, error)
 	fetch         func(context.Context, *data.ImportPlan) error
@@ -64,6 +65,7 @@ func installRunnerSeams(t *testing.T, seams runnerSeams) {
 	t.Helper()
 	originalConnect := connectDatabase
 	originalConfigure := configureDatabasePool
+	originalEnsure := ensureDatabaseSchema
 	originalDDL := runDatabaseDDL
 	originalRefresh := refreshSelectedData
 	originalResolve := resolveImportPlan
@@ -76,6 +78,7 @@ func installRunnerSeams(t *testing.T, seams runnerSeams) {
 	t.Cleanup(func() {
 		connectDatabase = originalConnect
 		configureDatabasePool = originalConfigure
+		ensureDatabaseSchema = originalEnsure
 		runDatabaseDDL = originalDDL
 		refreshSelectedData = originalRefresh
 		resolveImportPlan = originalResolve
@@ -88,6 +91,7 @@ func installRunnerSeams(t *testing.T, seams runnerSeams) {
 	})
 	connectDatabase = seams.connect
 	configureDatabasePool = seams.configure
+	ensureDatabaseSchema = seams.ensure
 	runDatabaseDDL = seams.ddl
 	refreshSelectedData = seams.refresh
 	resolveImportPlan = seams.resolve
@@ -102,9 +106,10 @@ func installRunnerSeams(t *testing.T, seams runnerSeams) {
 func defaultRunnerSeams() runnerSeams {
 	coordinator := &executionCoordinatorStub{preparation: &ImportPreparation{RunID: 1}}
 	return runnerSeams{
-		connect:   func(string) error { return nil },
+		connect:   func(string, string) error { return nil },
 		configure: func(*gorm.DB, int) error { return nil },
-		ddl:       func(*gorm.DB) error { return nil },
+		ensure:    func(*gorm.DB, database.Schema) (bool, error) { return false, nil },
+		ddl:       func(*gorm.DB, string) error { return nil },
 		refresh: func(context.Context, data.Repository, []string, string) (int, error) {
 			return 0, nil
 		},
@@ -128,10 +133,11 @@ func runnerConfig(t *testing.T) *koanf.Koanf {
 	t.Helper()
 	config := koanf.New(".")
 	for key, value := range map[string]interface{}{
-		"entities":    []string{"artist"},
-		"artists":     true,
-		"chunk-size":  1,
-		"max-workers": 1,
+		"entities":        []string{"artist"},
+		"artists":         true,
+		"chunk-size":      1,
+		"max-workers":     1,
+		"database-schema": database.DefaultSchemaName,
 	} {
 		require.NoError(t, config.Set(key, value))
 	}
@@ -144,9 +150,12 @@ func TestRunnerPropagatesEveryStageFailure(t *testing.T) {
 		name   string
 		mutate func(*runnerSeams)
 	}{
-		{"connect", func(s *runnerSeams) { s.connect = func(string) error { return expected } }},
+		{"connect", func(s *runnerSeams) { s.connect = func(string, string) error { return expected } }},
 		{"pool", func(s *runnerSeams) { s.configure = func(*gorm.DB, int) error { return expected } }},
-		{"ddl", func(s *runnerSeams) { s.ddl = func(*gorm.DB) error { return expected } }},
+		{"schema", func(s *runnerSeams) {
+			s.ensure = func(*gorm.DB, database.Schema) (bool, error) { return false, expected }
+		}},
+		{"ddl", func(s *runnerSeams) { s.ddl = func(*gorm.DB, string) error { return expected } }},
 		{"catalog and plan", func(s *runnerSeams) {
 			s.refresh = func(context.Context, data.Repository, []string, string) (int, error) { return 0, expected }
 			s.resolve = func(*koanf.Koanf, data.Repository) (*data.ImportPlan, error) { return nil, expected }
@@ -173,6 +182,17 @@ func TestRunnerPropagatesEveryStageFailure(t *testing.T) {
 			require.ErrorIs(t, (&Runner{Version: "test"}).Run(context.Background(), runnerConfig(t)), expected)
 		})
 	}
+}
+
+func TestRunnerRejectsInvalidDatabaseSchema(t *testing.T) {
+	config := runnerConfig(t)
+	require.NoError(t, config.Set("database-schema", "Invalid"))
+
+	require.ErrorContains(
+		t,
+		(&Runner{Version: "test"}).Run(context.Background(), config),
+		"database-schema",
+	)
 }
 
 func TestBuildImportStepsSkipsDisabledEntitiesAndPrintsError(t *testing.T) {
