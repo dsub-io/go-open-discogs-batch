@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,8 +21,9 @@ import (
 	"github.com/reactivex/rxgo/v2"
 )
 
-var DiscogsS3BaseUrl = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com/"
 var DiscogsDataBaseURL = "https://data.discogs.com/"
+
+const dumpDateLayout = "20060102"
 
 var dumpUriPattern = regexp.MustCompile(`^data/(\d{4})/discogs_(\d{8})_(\w+)\.(.*)$`)
 var checksumPattern = regexp.MustCompile(`^([^ ]+) +.*(\d{8})_([^.]+).*$`)
@@ -80,7 +80,7 @@ func parseChecksumTextLine(line string) (chk chkSumP, ok bool) {
 		return chk, false
 	}
 	c, g, t := match[1], match[2], match[3]
-	pt, err := time.Parse("20060102", g)
+	pt, err := time.Parse(dumpDateLayout, g)
 	if err != nil {
 		return chk, false
 	}
@@ -97,7 +97,7 @@ func PopulateFromUri() func(_ context.Context, i interface{}) (interface{}, erro
 		if match == nil {
 			return nil, fmt.Errorf("invalid dump URI: %s", dump.Uri)
 		}
-		t, err := time.Parse("20060102", match[2])
+		t, err := time.Parse(dumpDateLayout, match[2])
 		if err != nil {
 			return nil, fmt.Errorf("invalid dump date in URI %s: %w", dump.Uri, err)
 		}
@@ -123,7 +123,7 @@ func ValidUriFilter() func(i interface{}) bool {
 		if match == nil {
 			return false
 		}
-		if _, err := time.Parse("20060102", match[2]); err != nil {
+		if _, err := time.Parse(dumpDateLayout, match[2]); err != nil {
 			return false
 		}
 		return isKnownType(strings.ToLower(match[3]))
@@ -162,7 +162,7 @@ func DispatchChecksumFetch(store *checksumStore) func(context.Context, interface
 }
 
 func checksumDownloadURL(uri string) string {
-	return DiscogsDataBaseURL + "?download=" + url.QueryEscape(uri)
+	return dataDownloadURL(uri)
 }
 
 func SetChecksumValues(m map[time.Time]map[string]string) func(_ context.Context, i interface{}) (interface{}, error) {
@@ -210,16 +210,19 @@ func UpdateData(ctx context.Context, repo Repository, maxWorkers int) (int, erro
 	if maxWorkers <= 0 {
 		return -1, fmt.Errorf("max-workers must be a positive integer")
 	}
-	c := client.NewClient()
 	checksums := newChecksumStore()
+	catalogItems, err := fetchCatalogData(ctx, "")
+	if err != nil {
+		return -1, err
+	}
+	items := make([]interface{}, 0, len(catalogItems))
+	for _, item := range catalogItems {
+		items = append(items, item)
+	}
 
-	items, err := c.Get(ctx, DiscogsS3BaseUrl).
-		FlatMap(ParseDumpModel(ctx)).
-		Filter(NotNilFilter()).
-		Filter(ValidUriFilter()).
-		Map(PopulateFromUri()).
+	items, err = rxgo.Just(items...)().
 		Map(DispatchChecksumFetch(checksums), rxgo.WithPool(maxWorkers)).
-		ToSlice(400, rxgo.WithContext(ctx)) // known size: 777 and beyond
+		ToSlice(len(items), rxgo.WithContext(ctx))
 
 	if err != nil {
 		return -1, err
@@ -253,28 +256,18 @@ func BatchInsertItems(repo Repository) func(_ context.Context, i interface{}) (i
 	}
 }
 
-// UpdateSelectedData refreshes only the catalog rows needed by this invocation. It performs one
-// bucket listing request and at most one checksum request per selected dump date, preventing the
-// unbounded historical checksum fan-out of the legacy full-catalog refresh.
+// UpdateSelectedData refreshes only the catalog rows needed by this invocation. A pinned month
+// requires one catalog request; latest selection requires the index and latest-year catalog. It
+// fetches at most one checksum document per selected dump date.
 func UpdateSelectedData(
 	ctx context.Context,
 	repo Repository,
 	entities []string,
 	dumpMonth string,
 ) (int, error) {
-	items, err := client.NewClient().Get(ctx, DiscogsS3BaseUrl).
-		FlatMap(ParseDumpModel(ctx)).
-		Filter(NotNilFilter()).
-		Filter(ValidUriFilter()).
-		Map(PopulateFromUri()).
-		ToSlice(400, rxgo.WithContext(ctx))
+	all, err := fetchCatalogData(ctx, dumpMonth)
 	if err != nil {
 		return -1, err
-	}
-
-	all := make([]*Data, 0, len(items))
-	for _, item := range items {
-		all = append(all, item.(*Data))
 	}
 	candidates := selectRefreshCandidates(all, entities, dumpMonth)
 	checksumDocuments := make(map[time.Time]map[string]string)
@@ -419,7 +412,7 @@ func FetchImportResources(ctx context.Context, plan *ImportPlan) error {
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 			return fmt.Errorf("create %s import directory: %w", dump.EntityType, err)
 		}
-		resourceURI := DiscogsS3BaseUrl + dump.URI
+		resourceURI := dataDownloadURL(dump.URI)
 		if err := handler.FetchAndCheckContext(
 			ctx,
 			resourceURI,
