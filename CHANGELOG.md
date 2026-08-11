@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.3.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.2.0...v2.3.0) (2026-08-11)
+
+
+### Features
+
+* add operator-selected PostgreSQL schemas through `--database-schema` and `OPEN_DISCOGS_BATCH_DATABASE_SCHEMA` ([cdbc356](https://github.com/dsub-io/go-open-discogs-batch/commit/cdbc356fea091ef7e8edec30b7fd40a4bab4e412))
+* create a missing selected schema and keep canonical migrations, import tables, and migration history inside it
+* retain `public` as the compatibility default while warning on every startup and documenting database and role prerequisites
+
 ## [2.2.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.1.1...v2.2.0) (2026-08-11)
 
 
