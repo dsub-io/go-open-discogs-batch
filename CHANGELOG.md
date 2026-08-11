@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.2.0...v2.3.0) (2026-08-11)
+
+
+### Features
+
+* support configurable database schemas ([67cebab](https://github.com/dsub-io/go-open-discogs-batch/commit/67cebab23bcf984c528400cdbc32be8e8acdf78d))
+* support configurable database schemas ([cdbc356](https://github.com/dsub-io/go-open-discogs-batch/commit/cdbc356fea091ef7e8edec30b7fd40a4bab4e412))
+
 ## [2.2.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.1.1...v2.2.0) (2026-08-11)
 
 
