@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
@@ -18,10 +19,10 @@ import (
 const (
 	progressCompletionFailureFunction = "fail_import_completion"
 	progressCompletionFailureTrigger  = "fail_import_completion_trigger"
-	progressFailureFunction           = "fail_selected_import_chunk"
-	progressFailureTrigger            = "fail_selected_import_chunk_trigger"
 	progressTransferFailureFunction   = "fail_import_progress_transfer"
 	progressTransferFailureTrigger    = "fail_import_progress_transfer_trigger"
+	intentionalChunkFailure           = "intentional chunk failure"
+	chunkSynchronizationTimeout       = 10 * time.Second
 )
 
 func TestFailedRunRejectsLateChunkAndEntityCompletion(t *testing.T) {
@@ -128,9 +129,7 @@ func TestImportResumesOutOfOrderChunks(t *testing.T) {
 		false,
 	)
 	require.NoError(t, err)
-	installChunkFailure(t, db)
-
-	failed := InsertMasterRelations(NewTrackedOrder(
+	failedOrder := NewTrackedOrder(
 		ctx,
 		chunkSize,
 		maxWorkers,
@@ -139,7 +138,18 @@ func TestImportResumesOutOfOrderChunks(t *testing.T) {
 		failedPreparation.RunID,
 		entityType,
 		false,
-	))
+	)
+	failed := processRelationChunks(
+		failedOrder,
+		"master relations",
+		"master",
+		"source-read master relations",
+		failChunkAfterLaterChunkCompletes(
+			func(order Order, chunk ChunkMetadata, items []*XmlMasterRelation) result.Result {
+				return writeMasterRelationChunk(order, chunk, items, false)
+			},
+		),
+	)
 	require.ErrorContains(t, failed.Err(), "intentional chunk failure")
 	require.NoError(t, failedCoordinator.Complete(ctx, failed.Err()))
 
@@ -150,7 +160,6 @@ func TestImportResumesOutOfOrderChunks(t *testing.T) {
 		"select count(*) from public.master where id = 2",
 	).Scan(&rolledBackRows).Error)
 	require.Zero(t, rolledBackRows)
-	removeChunkFailure(t, db)
 
 	retryCoordinator := NewImportExecutionCoordinator(sqlDB, "resume-test")
 	retryPreparation, err := retryCoordinator.Prepare(
@@ -470,8 +479,7 @@ func TestReleaseInterruptionConvergesWhenManifestExpands(t *testing.T) {
 		false,
 	)
 	require.NoError(t, err)
-	installChunkFailure(t, db)
-	interrupted := insertReleases(NewTrackedOrder(
+	interruptedOrder := NewTrackedOrder(
 		ctx,
 		chunkSize,
 		maxWorkers,
@@ -480,7 +488,18 @@ func TestReleaseInterruptionConvergesWhenManifestExpands(t *testing.T) {
 		interruptedPreparation.RunID,
 		"release",
 		false,
-	))
+	)
+	interrupted := processRelationChunks(
+		interruptedOrder,
+		"release relations",
+		"release",
+		"source-read release relations",
+		failChunkAfterLaterChunkCompletes(
+			func(order Order, chunk ChunkMetadata, items []*XmlReleaseRelation) result.Result {
+				return writeReleaseRelationChunk(order, chunk, items, false)
+			},
+		),
+	)
 	require.ErrorContains(t, interrupted.Err(), "intentional chunk failure")
 	require.ElementsMatch(
 		t,
@@ -488,7 +507,6 @@ func TestReleaseInterruptionConvergesWhenManifestExpands(t *testing.T) {
 		completedChunkIndexes(t, db, interruptedPreparation.RunID, "release"),
 	)
 	interruptedCoordinator.release(ctx)
-	removeChunkFailure(t, db)
 
 	expandedDumps := []*model.DiscogsDump{
 		importDump("artist", "2026-07-01", "7"),
@@ -563,39 +581,36 @@ func TestReleaseInterruptionConvergesWhenManifestExpands(t *testing.T) {
 	require.True(t, repeatedPreparation.Skipped)
 }
 
-func installChunkFailure(t *testing.T, db *gorm.DB) {
-	t.Helper()
-	require.NoError(t, db.Exec(`
-		create or replace function public.fail_selected_import_chunk()
-		returns trigger
-		language plpgsql
-		as $function$
-		begin
-		    if new.chunk_index = 1 then
-		        perform pg_sleep(0.25);
-		        raise exception 'intentional chunk failure';
-		    end if;
-		    return new;
-		end
-		$function$;
-
-		create trigger fail_selected_import_chunk_trigger
-		before insert on public.discogs_import_run_chunk
-		for each row execute function public.fail_selected_import_chunk();`).Error)
-	t.Cleanup(func() {
-		removeChunkFailure(t, db)
-	})
-}
-
-func removeChunkFailure(t *testing.T, db *gorm.DB) {
-	t.Helper()
-	require.NoError(t, db.Exec(
-		"drop trigger if exists "+progressFailureTrigger+
-			" on public.discogs_import_run_chunk",
-	).Error)
-	require.NoError(t, db.Exec(
-		"drop function if exists public."+progressFailureFunction+"()",
-	).Error)
+func failChunkAfterLaterChunkCompletes[T any](
+	write relationChunkWriter[T],
+) relationChunkWriter[T] {
+	const (
+		failedChunkIndex = int64(1)
+		laterChunkIndex  = int64(2)
+	)
+	laterChunkCompleted := make(chan struct{})
+	return func(order Order, chunk ChunkMetadata, items []*T) result.Result {
+		switch chunk.Index {
+		case failedChunkIndex:
+			timer := time.NewTimer(chunkSynchronizationTimeout)
+			defer timer.Stop()
+			select {
+			case <-laterChunkCompleted:
+				return result.NewResult(0, errors.New(intentionalChunkFailure))
+			case <-timer.C:
+				return result.NewResult(
+					0,
+					errors.New("timed out waiting for the later chunk to complete"),
+				)
+			}
+		case laterChunkIndex:
+			written := write(order, chunk, items)
+			close(laterChunkCompleted)
+			return written
+		default:
+			return write(order, chunk, items)
+		}
+	}
 }
 
 func installCompletionFailure(t *testing.T, db *gorm.DB) {
