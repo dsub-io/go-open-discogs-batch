@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,6 +30,135 @@ var validChecksumTextSliceSample = []string{
 	"8c40390a3e07b60e4eaa51dfb665a20a41a5ffc337644fb4420c6adea8ed8f50 *discogs_20080309_artists.xml.gz",
 	"36772fdcfd019c995fb16f0020a8876df96f522f76de1acfa632299255664e59 *discogs_20080309_labels.xml.gz",
 	"e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_20080309_releases.xml.gz",
+}
+
+var updateCatalogURIs = []string{
+	"data/2008/discogs_20080309_CHECKSUM.txt",
+	"data/2008/discogs_20080309_artists.xml.gz",
+	"data/2008/discogs_20080309_labels.xml.gz",
+	"data/2008/discogs_20080309_releases.xml.gz",
+}
+
+func catalogIndexFixture(years ...string) []byte {
+	var body strings.Builder
+	for _, year := range years {
+		fmt.Fprintf(&body, `<a href="?prefix=%s">%s/</a>`, url.QueryEscape("data/"+year+"/"), year)
+	}
+	return []byte(body.String())
+}
+
+func catalogListingFixture(uris ...string) []byte {
+	var body strings.Builder
+	for _, uri := range uris {
+		body.Write(catalogDownloadLink(uri))
+	}
+	return []byte(body.String())
+}
+
+func catalogDownloadLink(uri string) []byte {
+	return []byte(fmt.Sprintf(`<a href="?download=%s">fixture</a>`, url.QueryEscape(uri)))
+}
+
+func TestCatalogParsing(t *testing.T) {
+	t.Run("selects latest year", func(t *testing.T) {
+		year, err := latestCatalogYear(append(
+			catalogIndexFixture("2024", "2026", "2025"),
+			[]byte(`<a href="?prefix=data%2Finvalid%2F&amp;ignored=true">invalid</a>`)...,
+		))
+		require.NoError(t, err)
+		require.Equal(t, "2026", year)
+	})
+
+	t.Run("rejects index without years", func(t *testing.T) {
+		year, err := latestCatalogYear([]byte(`<a href="?download=fixture">fixture</a>`))
+		require.Empty(t, year)
+		require.ErrorContains(t, err, "contains no years")
+	})
+
+	t.Run("parses only supported valid dump links", func(t *testing.T) {
+		body := catalogListingFixture(
+			"data/2026/discogs_20260801_artists.xml.gz",
+			"data/2026/discogs_20260801_unknown.xml.gz",
+			"data/2026/discogs_20261301_labels.xml.gz",
+			"invalid",
+		)
+		items := parseCatalogData(body)
+		require.Len(t, items, 1)
+		require.Equal(t, "artists", items[0].TargetType)
+		require.Equal(t, time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), items[0].GeneratedAt)
+	})
+
+	t.Run("handles malformed link URL", func(t *testing.T) {
+		require.Empty(t, catalogQueryValue("%invalid", downloadParameter))
+	})
+}
+
+func TestResolveCatalogYear(t *testing.T) {
+	t.Run("uses pinned year without request", func(t *testing.T) {
+		year, err := resolveCatalogYear(context.Background(), "2026-08")
+		require.NoError(t, err)
+		require.Equal(t, "2026", year)
+	})
+
+	for _, dumpMonth := range []string{"2026", "26-08"} {
+		t.Run("rejects "+dumpMonth, func(t *testing.T) {
+			year, err := resolveCatalogYear(context.Background(), dumpMonth)
+			require.Empty(t, year)
+			require.ErrorContains(t, err, "invalid dump month")
+		})
+	}
+
+	t.Run("reports index request failure", func(t *testing.T) {
+		server := testserver.NewServer(func(
+			requests []*testserver.HttpRequest,
+			w http.ResponseWriter,
+			r *http.Request,
+		) {
+			http.Error(w, "fixture", http.StatusServiceUnavailable)
+		})
+		defer server.Close()
+		origin := DiscogsDataBaseURL
+		t.Cleanup(func() { DiscogsDataBaseURL = origin })
+		DiscogsDataBaseURL = server.URL
+
+		year, err := resolveCatalogYear(context.Background(), "")
+		require.Empty(t, year)
+		require.ErrorContains(t, err, "fetch dump catalog index")
+	})
+}
+
+func TestFetchCatalogDataErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "listing request", want: "fetch 2026 dump catalog"},
+		{name: "empty listing", body: "<html></html>", want: "contains no supported files"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := testserver.NewServer(func(
+				requests []*testserver.HttpRequest,
+				w http.ResponseWriter,
+				r *http.Request,
+			) {
+				if test.body == "" {
+					http.Error(w, "fixture", http.StatusServiceUnavailable)
+					return
+				}
+				_, _ = w.Write([]byte(test.body))
+			})
+			defer server.Close()
+			origin := DiscogsDataBaseURL
+			t.Cleanup(func() { DiscogsDataBaseURL = origin })
+			DiscogsDataBaseURL = server.URL
+
+			items, err := fetchCatalogData(context.Background(), "2026-08")
+			require.Nil(t, items)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
 }
 
 func Test_parseChecksumTextLine(t *testing.T) {
@@ -347,27 +477,23 @@ func (r *RepositoryStub) FindLatestByType(typ string) (*opendiscogsmodel.Discogs
 }
 
 func TestUpdateData(t *testing.T) {
-	data := resource.Read("testdata/update-data-test.xml")
+	listing := catalogListingFixture(updateCatalogURIs...)
 	server := testserver.NewServer(func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
 		if r.URL.Query().Get("download") == "data/2008/discogs_20080309_CHECKSUM.txt" {
 			_, _ = w.Write([]byte(`8c40390a3e07b60e4eaa51dfb665a20a41a5ffc337644fb4420c6adea8ed8f50 *discogs_20080309_artists.xml.gz
 36772fdcfd019c995fb16f0020a8876df96f522f76de1acfa632299255664e59 *discogs_20080309_labels.xml.gz
 e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_20080309_releases.xml.gz\n`))
-		} else if len(path) == 0 || path == "/" {
-			_, _ = w.Write(data)
+		} else if r.URL.Query().Has("prefix") {
+			_, _ = w.Write(listing)
+		} else {
+			_, _ = w.Write(catalogIndexFixture("2008"))
 		}
 	})
 	defer server.Close()
 
 	t.Run("UpdateDate updates items", func(t *testing.T) {
-		s3Origin := DiscogsS3BaseUrl
 		dataOrigin := DiscogsDataBaseURL
-		defer func() {
-			DiscogsS3BaseUrl = s3Origin
-			DiscogsDataBaseURL = dataOrigin
-		}()
-		DiscogsS3BaseUrl = server.URL + "/"
+		defer func() { DiscogsDataBaseURL = dataOrigin }()
 		DiscogsDataBaseURL = server.URL + "/"
 		repo := &RepositoryStub{items: make([]*Data, 0)}
 		updateCount, err := UpdateData(context.Background(), repo, 2)
@@ -375,7 +501,6 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 		require.Equal(t, 4, updateCount)
 		require.Len(t, repo.items, 4)
 		for _, item := range repo.items {
-			require.NotEmpty(t, item.ETag)
 			require.NotEmpty(t, item.GeneratedAt)
 			require.NotEmpty(t, item.TargetType)
 			if item.TargetType != "checksum" {
@@ -400,9 +525,34 @@ func TestUpdateDataPropagatesListingFailure(t *testing.T) {
 		http.Error(w, "fixture", http.StatusInternalServerError)
 	})
 	defer server.Close()
-	originalURL := DiscogsS3BaseUrl
-	t.Cleanup(func() { DiscogsS3BaseUrl = originalURL })
-	DiscogsS3BaseUrl = server.URL
+	originalURL := DiscogsDataBaseURL
+	t.Cleanup(func() { DiscogsDataBaseURL = originalURL })
+	DiscogsDataBaseURL = server.URL
+
+	updated, err := UpdateData(context.Background(), &RepositoryStub{}, 1)
+	require.Equal(t, -1, updated)
+	require.Error(t, err)
+}
+
+func TestUpdateDataPropagatesChecksumFailure(t *testing.T) {
+	server := testserver.NewServer(func(
+		requests []*testserver.HttpRequest,
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		switch {
+		case r.URL.Query().Has(downloadParameter):
+			http.Error(w, "fixture", http.StatusServiceUnavailable)
+		case r.URL.Query().Has(catalogPrefixParameter):
+			_, _ = w.Write(catalogListingFixture(updateCatalogURIs...))
+		default:
+			_, _ = w.Write(catalogIndexFixture("2008"))
+		}
+	})
+	defer server.Close()
+	originalURL := DiscogsDataBaseURL
+	t.Cleanup(func() { DiscogsDataBaseURL = originalURL })
+	DiscogsDataBaseURL = server.URL
 
 	updated, err := UpdateData(context.Background(), &RepositoryStub{}, 1)
 	require.Equal(t, -1, updated)
@@ -425,7 +575,7 @@ func TestCatalogUpdateCount(t *testing.T) {
 }
 
 func TestUpdateSelectedDataBoundsChecksumRequests(t *testing.T) {
-	listing := resource.Read("testdata/update-data-test.xml")
+	listing := catalogListingFixture(updateCatalogURIs...)
 	server := testserver.NewServer(func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("download") == "data/2008/discogs_20080309_CHECKSUM.txt" {
 			_, _ = w.Write([]byte(`8c40390a3e07b60e4eaa51dfb665a20a41a5ffc337644fb4420c6adea8ed8f50 *discogs_20080309_artists.xml.gz
@@ -438,12 +588,8 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 	})
 	defer server.Close()
 
-	s3Origin, dataOrigin := DiscogsS3BaseUrl, DiscogsDataBaseURL
-	defer func() {
-		DiscogsS3BaseUrl = s3Origin
-		DiscogsDataBaseURL = dataOrigin
-	}()
-	DiscogsS3BaseUrl = server.URL + "/"
+	dataOrigin := DiscogsDataBaseURL
+	defer func() { DiscogsDataBaseURL = dataOrigin }()
 	DiscogsDataBaseURL = server.URL + "/"
 	repo := &RepositoryStub{}
 
@@ -451,7 +597,7 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 		context.Background(),
 		repo,
 		[]string{"artist", "label", "release"},
-		"",
+		"2008-03",
 	)
 
 	require.NoError(t, err)
@@ -461,7 +607,7 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 }
 
 func TestUpdateSelectedDataErrorBoundaries(t *testing.T) {
-	listing := resource.Read("testdata/update-data-test.xml")
+	listing := catalogListingFixture(updateCatalogURIs...)
 	tests := []struct {
 		name            string
 		listingResponse []byte
@@ -471,7 +617,7 @@ func TestUpdateSelectedDataErrorBoundaries(t *testing.T) {
 	}{
 		{
 			name:            "missing checksum manifest",
-			listingResponse: bytes.Replace(listing, checksumContents(listing), nil, 1),
+			listingResponse: bytes.Replace(listing, catalogDownloadLink(updateCatalogURIs[0]), nil, 1),
 			checksumStatus:  http.StatusOK,
 			want:            "checksum manifest not found",
 		},
@@ -504,36 +650,20 @@ func TestUpdateSelectedDataErrorBoundaries(t *testing.T) {
 				_, _ = w.Write(test.listingResponse)
 			})
 			defer server.Close()
-			originalS3URL, originalDataURL := DiscogsS3BaseUrl, DiscogsDataBaseURL
-			t.Cleanup(func() {
-				DiscogsS3BaseUrl = originalS3URL
-				DiscogsDataBaseURL = originalDataURL
-			})
-			DiscogsS3BaseUrl = server.URL
+			originalDataURL := DiscogsDataBaseURL
+			t.Cleanup(func() { DiscogsDataBaseURL = originalDataURL })
 			DiscogsDataBaseURL = server.URL
 
 			updated, err := UpdateSelectedData(
 				context.Background(),
 				&RepositoryStub{},
 				[]string{"artist"},
-				"",
+				"2008-03",
 			)
 			require.Equal(t, -1, updated)
 			require.ErrorContains(t, err, test.want)
 		})
 	}
-}
-
-func checksumContents(listing []byte) []byte {
-	start := bytes.Index(listing, []byte("    <Contents>"))
-	if start < 0 {
-		return nil
-	}
-	end := bytes.Index(listing[start:], []byte("    </Contents>"))
-	if end < 0 {
-		return nil
-	}
-	return listing[start : start+end+len("    </Contents>")]
 }
 
 func TestUpdateSelectedDataPropagatesListingFailure(t *testing.T) {
@@ -545,9 +675,9 @@ func TestUpdateSelectedDataPropagatesListingFailure(t *testing.T) {
 		http.Error(w, "fixture", http.StatusInternalServerError)
 	})
 	defer server.Close()
-	originalURL := DiscogsS3BaseUrl
-	t.Cleanup(func() { DiscogsS3BaseUrl = originalURL })
-	DiscogsS3BaseUrl = server.URL
+	originalURL := DiscogsDataBaseURL
+	t.Cleanup(func() { DiscogsDataBaseURL = originalURL })
+	DiscogsDataBaseURL = server.URL
 
 	updated, err := UpdateSelectedData(context.Background(), &RepositoryStub{}, []string{"artist"}, "")
 	require.Equal(t, -1, updated)
@@ -589,8 +719,7 @@ func TestFetchFiles(t *testing.T) {
 
 	h := file.NewHandler()
 	server := testserver.NewServer(func(requests []*testserver.HttpRequest, w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if path == "/fetch-data-result" {
+		if r.URL.Query().Get(downloadParameter) == "fetch-data-result" {
 			data := resource.Read("testdata/fetch-data-test.xml")
 			w.WriteHeader(200)
 			w.Header().Add("Content-Length", strconv.Itoa(len(data)))
@@ -623,9 +752,9 @@ data-dir: testdata
 
 	t.Run("must return items when valid", func(t *testing.T) {
 		t.Cleanup(func() { _ = h.Delete("testdata/fetch-data-result") })
-		origin := DiscogsS3BaseUrl
-		defer func() { DiscogsS3BaseUrl = origin }()
-		DiscogsS3BaseUrl = server.URL + "/"
+		origin := DiscogsDataBaseURL
+		defer func() { DiscogsDataBaseURL = origin }()
+		DiscogsDataBaseURL = server.URL + "/"
 		k := koanf.New(".")
 		err := k.Load(rawbytes.Provider([]byte(`
 entities:
@@ -669,9 +798,9 @@ data-dir: testdata
 	})
 
 	t.Run("must report error when checksum failed", func(t *testing.T) {
-		origin := DiscogsS3BaseUrl
-		defer func() { DiscogsS3BaseUrl = origin }()
-		DiscogsS3BaseUrl = server.URL + "/"
+		origin := DiscogsDataBaseURL
+		defer func() { DiscogsDataBaseURL = origin }()
+		DiscogsDataBaseURL = server.URL + "/"
 		k := koanf.New(".")
 		err := k.Load(rawbytes.Provider([]byte(`
 entities:
@@ -706,9 +835,9 @@ func TestResolveImportPlanDoesNotDownload(t *testing.T) {
 		t.Fatalf("resolve import plan must not request %s", r.URL.String())
 	})
 	defer server.Close()
-	origin := DiscogsS3BaseUrl
-	defer func() { DiscogsS3BaseUrl = origin }()
-	DiscogsS3BaseUrl = server.URL + "/"
+	origin := DiscogsDataBaseURL
+	defer func() { DiscogsDataBaseURL = origin }()
+	DiscogsDataBaseURL = server.URL + "/"
 
 	dataDirectory := filepath.Join(t.TempDir(), "not-created")
 	config := koanf.New(".")

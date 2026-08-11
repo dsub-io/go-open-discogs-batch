@@ -41,27 +41,26 @@ func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
 	}
 
 	listing := new(strings.Builder)
-	listing.WriteString(`<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
-	listing.WriteString(`<Contents><Key>data/2026/discogs_20260701_CHECKSUM.txt</Key></Contents>`)
+	listing.WriteString(`<a href="?download=data%2F2026%2Fdiscogs_20260701_CHECKSUM.txt">checksum</a>`)
 	checksums := new(strings.Builder)
-	fixtureByPath := make(map[string]runnerFixture, len(fixtures))
+	fixtureByURI := make(map[string]runnerFixture, len(fixtures))
 	for _, fixture := range fixtures {
-		fmt.Fprintf(listing, `<Contents><Key>data/2026/%s</Key></Contents>`, fixture.filename)
+		fmt.Fprintf(listing, `<a href="?download=data%%2F2026%%2F%s">%s</a>`, fixture.filename, fixture.filename)
 		fmt.Fprintf(checksums, "%s *%s\n", fixture.checksum, fixture.filename)
-		fixtureByPath["/data/2026/"+fixture.filename] = fixture
+		fixtureByURI["data/2026/"+fixture.filename] = fixture
 	}
-	listing.WriteString(`</ListBucketResult>`)
 
 	server := testserver.NewServer(func(
 		requests []*testserver.HttpRequest,
 		w http.ResponseWriter,
 		r *http.Request,
 	) {
-		if r.URL.Query().Has("download") {
+		download := r.URL.Query().Get("download")
+		if strings.HasSuffix(download, "CHECKSUM.txt") {
 			_, _ = w.Write([]byte(checksums.String()))
 			return
 		}
-		if fixture, ok := fixtureByPath[r.URL.Path]; ok {
+		if fixture, ok := fixtureByURI[download]; ok {
 			_, _ = w.Write(fixture.body)
 			return
 		}
@@ -69,12 +68,8 @@ func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
 	})
 	defer server.Close()
 
-	originalS3URL, originalDataURL := data.DiscogsS3BaseUrl, data.DiscogsDataBaseURL
-	t.Cleanup(func() {
-		data.DiscogsS3BaseUrl = originalS3URL
-		data.DiscogsDataBaseURL = originalDataURL
-	})
-	data.DiscogsS3BaseUrl = server.URL + "/"
+	originalDataURL := data.DiscogsDataBaseURL
+	t.Cleanup(func() { data.DiscogsDataBaseURL = originalDataURL })
 	data.DiscogsDataBaseURL = server.URL + "/"
 
 	postgres := testutils.GetDatabase(t, testutils.Postgres)

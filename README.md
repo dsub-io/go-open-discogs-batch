@@ -14,7 +14,7 @@ Discogs. The Discogs name identifies only the public data source.
 - Artist, label, master, and release select their newest available dump
   independently unless an exact `--dump-month` is requested.
 - Every run records the selected dump dates, SHA-256 checksums, source URIs,
-  sizes, and stable identifiers as one immutable manifest.
+  and stable identifiers as one immutable manifest.
 - A successful manifest is admitted and skipped before dump files are downloaded
   or checksummed only while all of its entity dumps are still the current
   checkpoints and no later failed or abandoned run has dirtied those entities.
@@ -38,6 +38,13 @@ Discogs. The Discogs name identifies only the public data source.
 
 If the upstream catalog refresh fails, the importer tries the catalog already
 stored in PostgreSQL. It fails if that catalog cannot satisfy the request.
+
+Catalog discovery and file downloads use the official `data.discogs.com` dump
+browser. Direct S3 bucket and object URLs are not part of this contract. The
+browser catalog exposes rounded display sizes, so new catalog rows store
+`size_bytes=0` instead of presenting an estimate as an exact byte count.
+Download progress uses the response `Content-Length` when supplied rather than
+this catalog field.
 
 ### Durability and idempotency boundaries
 
