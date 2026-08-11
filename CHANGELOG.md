@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.3.2](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.1...v2.3.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* use official Discogs dump browser ([#56](https://github.com/dsub-io/go-open-discogs-batch/issues/56)) ([5b172dd](https://github.com/dsub-io/go-open-discogs-batch/commit/5b172dd1c7a456f8996831517f9626c83e761900))
+* restore fresh-database imports after direct S3 catalog and object requests
+  began returning HTTP 403 by using the official browser index, year catalog,
+  checksum, and download routes
+* keep catalog discovery bounded to one request for a pinned month or two for
+  latest selection, plus at most one checksum document per selected dump date
+* record `size_bytes=0` when the browser exposes only a rounded display size;
+  download progress continues to use response `Content-Length` when available
+
 ## [2.3.1](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.0...v2.3.1) (2026-08-11)
 
 
