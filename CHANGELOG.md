@@ -5,8 +5,8 @@
 
 ### Bug Fixes
 
-* make resume durability tests deterministic ([0833b1e](https://github.com/dsub-io/go-open-discogs-batch/commit/0833b1ec57b6bcc4c103375a3b01ad5ff83fe756))
-* make resume durability tests deterministic ([b4028fb](https://github.com/dsub-io/go-open-discogs-batch/commit/b4028fb8f49af358f86ece25ce67d91eb08b63d9))
+* replace the fixed 250ms delay in out-of-order resume and manifest-expansion tests with explicit later-chunk completion synchronization ([b4028fb](https://github.com/dsub-io/go-open-discogs-batch/commit/b4028fb8f49af358f86ece25ce67d91eb08b63d9))
+* bound failed synchronization at 10 seconds instead of allowing a hung release, with 40 consecutive affected scenario executions passing before release
 
 ## [2.3.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.2.0...v2.3.0) (2026-08-11)
 
