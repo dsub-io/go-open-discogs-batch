@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.1.1](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.1.0...v2.1.1) (2026-08-11)
+
+
+### Performance Improvements
+
+* apply the model `V007` API query indexes during batch schema migration ([f656a09](https://github.com/dsub-io/go-open-discogs-batch/commit/f656a09a261a0d0541de5341ffe835e790c91877))
+
+### Measured Impact
+
+* on the same warm-cache PostgreSQL 18.4 synthetic dataset, deep release pagination p95 fell from `183.106 ms` to `0.038 ms` (`99.979%` lower, `4,818.6x` faster) when consumers use keyset pagination
+* indexed title-contains search p95 fell from `194.535 ms` to `0.136 ms` (`99.930%` lower, `1,430.4x` faster), and reverse artist-relation lookup p95 fell from `17.309 ms` to `0.061 ms` (`99.648%` lower, `283.8x` faster)
+* measured database size increased from `314,308,287` to `486,389,439` bytes (`+164.1 MiB`, `+54.7%`) for the synthetic benchmark; full 200M+ dump import duration, index size, cold-I/O behavior, and concurrent throughput remain to be measured before production import
+
 ## [2.1.0](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.0.0...v2.1.0) (2026-08-10)
 
 
