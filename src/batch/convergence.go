@@ -47,7 +47,7 @@ func reconcileIntegerRelation[T comparable](
 	}
 	deleted := order.getDB().Exec(
 		fmt.Sprintf(
-			`delete from public.%s current
+			`delete from %s current
 			  where current.%s = any(?::integer[])
 			    and not exists (
 			        select 1
@@ -91,7 +91,7 @@ func reconcileTextRelation[T comparable](
 	}
 	deleted := order.getDB().Exec(
 		fmt.Sprintf(
-			`delete from public.%s current
+			`delete from %s current
 			  where current.%s = any(?::integer[])
 			    and not exists (
 			        select 1
@@ -138,7 +138,7 @@ func reconcileTwoIntegerKeyRelation[T comparable](
 	}
 	deleted := order.getDB().Exec(
 		fmt.Sprintf(
-			`delete from public.%s current
+			`delete from %s current
 			  where current.%s = any(?::integer[])
 			    and not exists (
 			        select 1
@@ -179,7 +179,7 @@ func postgresArray[T comparable](values []T) pgtype.Array[T] {
 func relationTablesContainRows(order Order, tables ...string) (bool, error) {
 	checks := make([]string, len(tables))
 	for index, table := range tables {
-		checks[index] = fmt.Sprintf("exists (select 1 from public.%s limit 1)", table)
+		checks[index] = fmt.Sprintf("exists (select 1 from %s limit 1)", table)
 	}
 	var containsRows bool
 	query := order.getDB().Raw(

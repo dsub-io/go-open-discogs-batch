@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	opendiscogsmanifest "github.com/dsub-io/open-discogs-model/manifest"
 	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
@@ -53,40 +54,47 @@ func newMockGorm(t *testing.T) (*gorm.DB, sqlmock.Sqlmock, *sql.DB) {
 }
 
 func TestRunDDLErrorBoundaries(t *testing.T) {
+	schema, schemaErr := database.ParseSchema(database.DefaultSchemaName)
+	require.NoError(t, schemaErr)
 	originalLoad := loadSchemaMigrations
 	t.Cleanup(func() { loadSchemaMigrations = originalLoad })
 	expected := errors.New("fixture")
 	loadSchemaMigrations = func() (fs.FS, error) { return nil, expected }
 	require.ErrorContains(t, RunDDL(nil), "load shared schema migrations")
 	loadSchemaMigrations = originalLoad
+	require.ErrorContains(t, RunDDLInSchema(nil, "Invalid"), "database-schema")
 
 	db, mock, _ := newMockGorm(t)
-	mock.ExpectExec("create table if not exists public.open_discogs_schema_migration").
+	mock.ExpectExec(regexp.QuoteMeta(`create table if not exists "public"."open_discogs_schema_migration"`)).
 		WillReturnError(expected)
-	require.ErrorContains(t, runDDL(db, fstest.MapFS{}), "create schema migration ledger")
+	require.ErrorContains(t, runDDL(db, fstest.MapFS{}, schema), "create schema migration ledger")
 }
 
 func TestRunDDLReadFailure(t *testing.T) {
+	schema, schemaErr := database.ParseSchema(database.DefaultSchemaName)
+	require.NoError(t, schemaErr)
 	db, mock, _ := newMockGorm(t)
-	mock.ExpectExec("create table if not exists public.open_discogs_schema_migration").
+	mock.ExpectExec(regexp.QuoteMeta(`create table if not exists "public"."open_discogs_schema_migration"`)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	migrations := fstest.MapFS{
 		"001-broken.sql": &fstest.MapFile{Mode: fs.ModeDir},
 	}
-	require.ErrorContains(t, runDDL(db, migrations), "read shared migration")
+	require.ErrorContains(t, runDDL(db, migrations, schema), "read shared migration")
 }
 
 func TestRunDDLPropagatesMigrationFailure(t *testing.T) {
+	schema, schemaErr := database.ParseSchema(database.DefaultSchemaName)
+	require.NoError(t, schemaErr)
 	db, mock, _ := newMockGorm(t)
 	expected := errors.New("fixture")
-	mock.ExpectExec("create table if not exists public.open_discogs_schema_migration").
+	mock.ExpectExec(regexp.QuoteMeta(`create table if not exists "public"."open_discogs_schema_migration"`)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectBegin()
-	mock.ExpectQuery("select checksum from public.open_discogs_schema_migration").WillReturnError(expected)
+	mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).WillReturnError(expected)
 	mock.ExpectRollback()
 	require.ErrorContains(t, runDDL(db, fstest.MapFS{
 		"001.sql": &fstest.MapFile{Data: []byte("select 1")},
-	}), "read migration ledger")
+	}, schema), "read migration ledger")
 }
 
 func TestApplyMigrationErrorBoundaries(t *testing.T) {
@@ -100,7 +108,7 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 			name: "ledger query failure",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
-				mock.ExpectQuery("select checksum from public.open_discogs_schema_migration").WillReturnError(expected)
+				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).WillReturnError(expected)
 				mock.ExpectRollback()
 			},
 			want: "read migration ledger",
@@ -109,7 +117,7 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 			name: "changed checksum",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
-				mock.ExpectQuery("select checksum from public.open_discogs_schema_migration").
+				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 					WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow("old"))
 				mock.ExpectRollback()
 			},
@@ -119,7 +127,7 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 			name: "migration execution failure",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
-				mock.ExpectQuery("select checksum from public.open_discogs_schema_migration").
+				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 					WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
 				mock.ExpectExec(regexp.QuoteMeta("invalid SQL")).WillReturnError(expected)
 				mock.ExpectRollback()
@@ -130,10 +138,10 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 			name: "ledger insert failure",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
-				mock.ExpectQuery("select checksum from public.open_discogs_schema_migration").
+				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 					WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
 				mock.ExpectExec(regexp.QuoteMeta("invalid SQL")).WillReturnResult(sqlmock.NewResult(0, 0))
-				mock.ExpectExec("insert into public.open_discogs_schema_migration").WillReturnError(expected)
+				mock.ExpectExec(regexp.QuoteMeta(`insert into "public"."open_discogs_schema_migration"`)).WillReturnError(expected)
 				mock.ExpectRollback()
 			},
 			want: "record shared migration",
@@ -141,19 +149,23 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			schema, schemaErr := database.ParseSchema(database.DefaultSchemaName)
+			require.NoError(t, schemaErr)
 			db, mock, _ := newMockGorm(t)
 			test.setup(mock)
-			require.ErrorContains(t, applyMigration(db, "001.sql", "new", "invalid SQL"), test.want)
+			require.ErrorContains(t, applyMigration(db, schema, "001.sql", "new", "invalid SQL"), test.want)
 		})
 	}
 
 	t.Run("already applied checksum", func(t *testing.T) {
+		schema, schemaErr := database.ParseSchema(database.DefaultSchemaName)
+		require.NoError(t, schemaErr)
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
-		mock.ExpectQuery("select checksum from public.open_discogs_schema_migration").
+		mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow("same"))
 		mock.ExpectCommit()
-		require.NoError(t, applyMigration(db, "001.sql", "same", "unused"))
+		require.NoError(t, applyMigration(db, schema, "001.sql", "same", "unused"))
 	})
 }
 
@@ -327,13 +339,13 @@ func TestExecutionQueryHelpersPropagateErrors(t *testing.T) {
 
 	t.Run("prune superseded", func(t *testing.T) {
 		mock, tx := newMockTransaction(t)
-		mock.ExpectExec("delete from public.discogs_import_run_chunk run_chunk").WillReturnError(expected)
+		mock.ExpectExec("delete from discogs_import_run_chunk run_chunk").WillReturnError(expected)
 		require.ErrorContains(t, pruneSupersededFailedProgress(context.Background(), tx), "prune superseded")
 	})
 
 	t.Run("record dump", func(t *testing.T) {
 		mock, tx := newMockTransaction(t)
-		mock.ExpectQuery("insert into public.discogs_dump").WithArgs(
+		mock.ExpectQuery("insert into discogs_dump").WithArgs(
 			dump.ETag, dump.DumpDate, dump.EntityType, dump.ChecksumSHA256, dump.SizeBytes, dump.URI,
 		).WillReturnError(expected)
 		_, err := findOrInsertDump(context.Background(), tx, dump)
@@ -342,11 +354,11 @@ func TestExecutionQueryHelpersPropagateErrors(t *testing.T) {
 
 	t.Run("resolve existing dump", func(t *testing.T) {
 		mock, tx := newMockTransaction(t)
-		mock.ExpectQuery("insert into public.discogs_dump").WithArgs(
+		mock.ExpectQuery("insert into discogs_dump").WithArgs(
 			dump.ETag, dump.DumpDate, dump.EntityType, dump.ChecksumSHA256, dump.SizeBytes, dump.URI,
 		).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}))
-		mock.ExpectQuery("select id.*from public.discogs_dump").WithArgs(
+		mock.ExpectQuery("select id.*from discogs_dump").WithArgs(
 			dump.DumpDate, dump.EntityType, dump.ChecksumSHA256,
 		).WillReturnError(expected)
 		_, err := findOrInsertDump(context.Background(), tx, dump)
@@ -355,7 +367,7 @@ func TestExecutionQueryHelpersPropagateErrors(t *testing.T) {
 
 	t.Run("insert run", func(t *testing.T) {
 		mock, tx := newMockTransaction(t)
-		mock.ExpectQuery("insert into public.discogs_import_run").WithArgs(
+		mock.ExpectQuery("insert into discogs_import_run").WithArgs(
 			"fingerprint", false, false, processorName, "version", sqlmock.AnyArg(),
 		).WillReturnError(expected)
 		_, err := insertImportRun(context.Background(), tx, "fingerprint", false, false, "version", 7)
@@ -373,64 +385,64 @@ func TestCopyResumeProgressErrorBoundaries(t *testing.T) {
 		{
 			name: "summary execution",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnError(expected)
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnError(expected)
 			},
 			want: "copy import run 1 summaries",
 		},
 		{
 			name: "summary count",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewErrorResult(expected))
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewErrorResult(expected))
 			},
 			want: "count copied import run 1 summaries",
 		},
 		{
 			name: "summary mismatch",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 0))
 			},
 			want: "copied 0 of 1 entities",
 		},
 		{
 			name: "chunk execution",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("insert into public.discogs_import_run_chunk").WithArgs(2, 1).WillReturnError(expected)
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("insert into discogs_import_run_chunk").WithArgs(2, 1).WillReturnError(expected)
 			},
 			want: "copy import run 1 chunks",
 		},
 		{
 			name: "chunk count",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("insert into public.discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewErrorResult(expected))
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("insert into discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewErrorResult(expected))
 			},
 			want: "count copied import run 1 chunks",
 		},
 		{
 			name: "prune execution",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("insert into public.discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("delete from public.discogs_import_run_chunk").WithArgs(1).WillReturnError(expected)
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("insert into discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("delete from discogs_import_run_chunk").WithArgs(1).WillReturnError(expected)
 			},
 			want: "prune resumed import run 1 chunks",
 		},
 		{
 			name: "prune count",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("insert into public.discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("delete from public.discogs_import_run_chunk").WithArgs(1).WillReturnResult(sqlmock.NewErrorResult(expected))
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("insert into discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("delete from discogs_import_run_chunk").WithArgs(1).WillReturnResult(sqlmock.NewErrorResult(expected))
 			},
 			want: "count pruned import run 1 chunks",
 		},
 		{
 			name: "transfer mismatch",
 			setup: func(mock sqlmock.Sqlmock) {
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("insert into public.discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 2))
-				mock.ExpectExec("delete from public.discogs_import_run_chunk").WithArgs(1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("insert into discogs_import_run_chunk").WithArgs(2, 1).WillReturnResult(sqlmock.NewResult(0, 2))
+				mock.ExpectExec("delete from discogs_import_run_chunk").WithArgs(1).WillReturnResult(sqlmock.NewResult(0, 1))
 			},
 			want: "copied 2 but pruned 1",
 		},
@@ -457,20 +469,20 @@ func TestPreloadReferenceIDErrorBoundaries(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		_, mock, sqlDB := newMockGorm(t)
-		mock.ExpectQuery("SELECT id FROM public.artist").WillReturnError(expected)
+		mock.ExpectQuery("SELECT id FROM artist").WillReturnError(expected)
 		require.ErrorContains(t, preloadReferenceIDs(context.Background(), sqlDB, preloadConfig(t)), "stream artist")
 	})
 
 	t.Run("scan", func(t *testing.T) {
 		_, mock, sqlDB := newMockGorm(t)
-		mock.ExpectQuery("SELECT id FROM public.artist").
+		mock.ExpectQuery("SELECT id FROM artist").
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("not-an-integer"))
 		require.ErrorContains(t, preloadReferenceIDs(context.Background(), sqlDB, preloadConfig(t)), "scan artist")
 	})
 
 	t.Run("row iteration", func(t *testing.T) {
 		_, mock, sqlDB := newMockGorm(t)
-		mock.ExpectQuery("SELECT id FROM public.artist").WillReturnRows(
+		mock.ExpectQuery("SELECT id FROM artist").WillReturnRows(
 			sqlmock.NewRows([]string{"id"}).AddRow(1).RowError(0, expected),
 		)
 		require.ErrorContains(t, preloadReferenceIDs(context.Background(), sqlDB, preloadConfig(t)), "read artist")
@@ -481,7 +493,7 @@ func TestPreloadReferenceIDErrorBoundaries(t *testing.T) {
 		t.Cleanup(func() { closeIdentifierRows = originalClose })
 		closeIdentifierRows = func(*sql.Rows) error { return expected }
 		_, mock, sqlDB := newMockGorm(t)
-		mock.ExpectQuery("SELECT id FROM public.artist").
+		mock.ExpectQuery("SELECT id FROM artist").
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 		require.ErrorContains(t, preloadReferenceIDs(context.Background(), sqlDB, preloadConfig(t)), "close artist")
 	})
@@ -500,7 +512,7 @@ func expectEntityUnlock(mock sqlmock.Sqlmock) {
 }
 
 func expectMarkAbandoned(mock sqlmock.Sqlmock) {
-	mock.ExpectExec("update public.discogs_import_run import_run").
+	mock.ExpectExec("update discogs_import_run import_run").
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 }
@@ -518,7 +530,7 @@ func expectNoSuccessfulRun(mock sqlmock.Sqlmock) {
 }
 
 func expectInsertedDump(mock sqlmock.Sqlmock, dump *opendiscogsmodel.DiscogsDump) {
-	mock.ExpectQuery("insert into public.discogs_dump").WithArgs(
+	mock.ExpectQuery("insert into discogs_dump").WithArgs(
 		dump.ETag,
 		dump.DumpDate,
 		dump.EntityType,
@@ -535,7 +547,7 @@ func expectNoResumableRun(mock sqlmock.Sqlmock) {
 }
 
 func expectInsertedRun(mock sqlmock.Sqlmock, resumedFrom interface{}) {
-	mock.ExpectQuery("insert into public.discogs_import_run").WithArgs(
+	mock.ExpectQuery("insert into discogs_import_run").WithArgs(
 		sqlmock.AnyArg(),
 		false,
 		false,
@@ -546,7 +558,7 @@ func expectInsertedRun(mock sqlmock.Sqlmock, resumedFrom interface{}) {
 }
 
 func expectInsertedRunDump(mock sqlmock.Sqlmock) {
-	mock.ExpectExec("insert into public.discogs_import_run_dump").
+	mock.ExpectExec("insert into discogs_import_run_dump").
 		WithArgs(int64(2), "artist", int64(1), 5).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
@@ -657,7 +669,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 			setup: func(mock sqlmock.Sqlmock) {
 				expectEntityLock(mock)
 				mock.ExpectBegin()
-				mock.ExpectExec("update public.discogs_import_run import_run").WithArgs(sqlmock.AnyArg()).WillReturnError(expected)
+				mock.ExpectExec("update discogs_import_run import_run").WithArgs(sqlmock.AnyArg()).WillReturnError(expected)
 				mock.ExpectRollback()
 				expectEntityUnlock(mock)
 			},
@@ -709,7 +721,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectMarkAbandoned(mock)
 				expectNoCheckpoint(mock)
 				expectNoSuccessfulRun(mock)
-				mock.ExpectQuery("insert into public.discogs_dump").WithArgs(
+				mock.ExpectQuery("insert into discogs_dump").WithArgs(
 					dump.ETag, dump.DumpDate, dump.EntityType, dump.ChecksumSHA256, dump.SizeBytes, dump.URI,
 				).WillReturnError(expected)
 				mock.ExpectRollback()
@@ -742,7 +754,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoSuccessfulRun(mock)
 				expectInsertedDump(mock, dump)
 				expectNoResumableRun(mock)
-				mock.ExpectQuery("insert into public.discogs_import_run").WithArgs(
+				mock.ExpectQuery("insert into discogs_import_run").WithArgs(
 					sqlmock.AnyArg(), false, false, processorName, "version", sqlmock.AnyArg(),
 				).WillReturnError(expected)
 				mock.ExpectRollback()
@@ -761,7 +773,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectInsertedDump(mock, dump)
 				expectNoResumableRun(mock)
 				expectInsertedRun(mock, sqlmock.AnyArg())
-				mock.ExpectExec("insert into public.discogs_import_run_dump").WithArgs(int64(2), "artist", int64(1), 5).WillReturnError(expected)
+				mock.ExpectExec("insert into discogs_import_run_dump").WithArgs(int64(2), "artist", int64(1), 5).WillReturnError(expected)
 				mock.ExpectRollback()
 				expectEntityUnlock(mock)
 			},
@@ -780,7 +792,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 					WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 				expectInsertedRun(mock, sqlmock.AnyArg())
 				expectInsertedRunDump(mock)
-				mock.ExpectExec("update public.discogs_import_run_dump target").WithArgs(int64(2), int64(7)).WillReturnError(expected)
+				mock.ExpectExec("update discogs_import_run_dump target").WithArgs(int64(2), int64(7)).WillReturnError(expected)
 				mock.ExpectRollback()
 				expectEntityUnlock(mock)
 			},
@@ -840,13 +852,13 @@ func expectCompletionValidation(mock sqlmock.Sqlmock) {
 }
 
 func expectCompletedRunUpdate(mock sqlmock.Sqlmock) {
-	mock.ExpectExec("update public.discogs_import_run").
+	mock.ExpectExec("update discogs_import_run").
 		WithArgs("success", sqlmock.AnyArg(), int64(1)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 func expectPrunedSupersededProgress(mock sqlmock.Sqlmock) {
-	mock.ExpectExec("delete from public.discogs_import_run_chunk run_chunk").
+	mock.ExpectExec("delete from discogs_import_run_chunk run_chunk").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 }
 
@@ -878,7 +890,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 			name: "status update",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
-				mock.ExpectExec("update public.discogs_import_run").
+				mock.ExpectExec("update discogs_import_run").
 					WithArgs("failed", sqlmock.AnyArg(), int64(1)).
 					WillReturnError(expected)
 				mock.ExpectRollback()
@@ -890,7 +902,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 			name: "status result",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
-				mock.ExpectExec("update public.discogs_import_run").
+				mock.ExpectExec("update discogs_import_run").
 					WithArgs("failed", sqlmock.AnyArg(), int64(1)).
 					WillReturnResult(sqlmock.NewErrorResult(expected))
 				mock.ExpectRollback()
@@ -902,7 +914,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 			name: "run no longer active",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
-				mock.ExpectExec("update public.discogs_import_run").
+				mock.ExpectExec("update discogs_import_run").
 					WithArgs("failed", sqlmock.AnyArg(), int64(1)).
 					WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectRollback()
@@ -916,7 +928,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
-				mock.ExpectExec("delete from public.discogs_import_run_chunk run_chunk").WillReturnError(expected)
+				mock.ExpectExec("delete from discogs_import_run_chunk run_chunk").WillReturnError(expected)
 				mock.ExpectRollback()
 			},
 			want: "prune superseded failed import progress",
@@ -928,7 +940,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
 				expectPrunedSupersededProgress(mock)
-				mock.ExpectExec("delete from public.discogs_import_run_chunk where import_run_id").
+				mock.ExpectExec("delete from discogs_import_run_chunk where import_run_id").
 					WithArgs(int64(1)).
 					WillReturnError(expected)
 				mock.ExpectRollback()
@@ -942,7 +954,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
 				expectPrunedSupersededProgress(mock)
-				mock.ExpectExec("delete from public.discogs_import_run_chunk where import_run_id").
+				mock.ExpectExec("delete from discogs_import_run_chunk where import_run_id").
 					WithArgs(int64(1)).
 					WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectCommit().WillReturnError(expected)

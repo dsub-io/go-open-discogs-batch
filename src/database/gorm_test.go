@@ -2,10 +2,11 @@ package database
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
-	"testing"
 )
 
 func TestConnect(t *testing.T) {
@@ -24,6 +25,12 @@ func TestConnect(t *testing.T) {
 		result := DB.Exec("SELECT 1")
 		assert.Equal(t, int64(1), result.RowsAffected)
 		assert.Nil(t, result.Error)
+
+		connection, connectErr := GetConnect(dsn)
+		assert.NoError(t, connectErr)
+		connectionPool, poolErr := connection.DB()
+		assert.NoError(t, poolErr)
+		assert.NoError(t, connectionPool.Close())
 	})
 	t.Run("reject invalid pool limit", func(t *testing.T) {
 		assert.Error(t, ConfigurePool(DB, 0))
@@ -40,6 +47,24 @@ func TestConnect(t *testing.T) {
 
 	t.Run("reject missing dsn", func(t *testing.T) {
 		assert.ErrorContains(t, Connect(""), "missing dsn")
+	})
+
+	t.Run("reject invalid schema", func(t *testing.T) {
+		_, err := GetConnectInSchema("postgres://user:password@localhost/database", "Invalid")
+		assert.ErrorContains(t, err, "database-schema")
+	})
+
+	t.Run("reject malformed PostgreSQL dsn", func(t *testing.T) {
+		_, err := GetConnectInSchema("postgres://%", DefaultSchemaName)
+		assert.ErrorContains(t, err, "parse PostgreSQL DSN")
+	})
+
+	t.Run("report unavailable PostgreSQL", func(t *testing.T) {
+		_, err := GetConnectInSchema(
+			"postgres://invalid:invalid@127.0.0.1:1/invalid?connect_timeout=1",
+			DefaultSchemaName,
+		)
+		assert.Error(t, err)
 	})
 
 	t.Run("report unavailable SQL pool", func(t *testing.T) {

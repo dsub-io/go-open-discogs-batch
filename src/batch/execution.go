@@ -193,7 +193,7 @@ func (c *ImportExecutionCoordinator) Prepare(
 	for index, dump := range dumps {
 		if _, err := tx.ExecContext(
 			ctx,
-			`insert into public.discogs_import_run_dump
+			`insert into discogs_import_run_dump
 			    (import_run_id, entity_type, dump_id, chunk_size)
 			 values ($1, $2, $3, $4)`,
 			runID,
@@ -253,7 +253,7 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 		if scanErr := tx.QueryRowContext(
 			ctx,
 			`select count(*)
-			   from public.discogs_import_run_dump
+			   from discogs_import_run_dump
 			  where import_run_id = $1
 			    and (completed_at is null
 			         or total_items is null
@@ -282,7 +282,7 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 	}
 	result, err := tx.ExecContext(
 		ctx,
-		`update public.discogs_import_run
+		`update discogs_import_run
 		    set status = $1,
 		        completed_at = now(),
 		        failure_message = $2
@@ -312,7 +312,7 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 		}
 		if _, err := tx.ExecContext(
 			ctx,
-			"delete from public.discogs_import_run_chunk where import_run_id = $1",
+			"delete from discogs_import_run_chunk where import_run_id = $1",
 			c.runID,
 		); err != nil {
 			_ = tx.Rollback()
@@ -376,14 +376,14 @@ func markAbandonedRuns(
 	entityTypes []string,
 ) error {
 	if _, err := tx.ExecContext(ctx, `
-		update public.discogs_import_run import_run
+		update discogs_import_run import_run
 		   set status = 'failed',
 		       completed_at = now(),
 		       failure_message = 'recovered after entity advisory locks were released'
 		 where import_run.status = 'running'
 		   and exists (
 		       select 1
-		         from public.discogs_import_run_dump run_dump
+		         from discogs_import_run_dump run_dump
 		        where run_dump.import_run_id = import_run.id
 		          and run_dump.entity_type = any($1::text[])
 		   )`, postgresArray(entityTypes)); err != nil {
@@ -406,7 +406,7 @@ func assertNotDowngrade(
 		err := tx.QueryRowContext(
 			ctx,
 			`select dump_date
-			   from public.discogs_import_checkpoint
+			   from discogs_import_checkpoint
 			  where entity_type = $1`,
 			dump.EntityType,
 		).Scan(&checkpointDate)
@@ -438,15 +438,15 @@ func findSuccessfulRun(
 	err := tx.QueryRowContext(
 		ctx,
 		`select candidate_run.id
-		   from public.discogs_import_run candidate_run
+		   from discogs_import_run candidate_run
 		  where candidate_run.manifest_sha256 = $1
 		    and candidate_run.status = 'success'
 		    and not exists (
 		        select 1
-		          from public.discogs_import_run_dump candidate_dump
-		          left join public.discogs_import_checkpoint checkpoint
+		          from discogs_import_run_dump candidate_dump
+		          left join discogs_import_checkpoint checkpoint
 		            on checkpoint.entity_type = candidate_dump.entity_type
-		          left join public.discogs_import_run_dump current_dump
+		          left join discogs_import_run_dump current_dump
 		            on current_dump.import_run_id = checkpoint.import_run_id
 		           and current_dump.entity_type = checkpoint.entity_type
 		         where candidate_dump.import_run_id = candidate_run.id
@@ -454,12 +454,12 @@ func findSuccessfulRun(
 		    )
 		    and not exists (
 		        select 1
-		          from public.discogs_import_run_dump candidate_dump
-		          join public.discogs_import_checkpoint checkpoint
+		          from discogs_import_run_dump candidate_dump
+		          join discogs_import_checkpoint checkpoint
 		            on checkpoint.entity_type = candidate_dump.entity_type
-		          join public.discogs_import_run_dump failed_dump
+		          join discogs_import_run_dump failed_dump
 		            on failed_dump.entity_type = candidate_dump.entity_type
-		          join public.discogs_import_run failed_run
+		          join discogs_import_run failed_run
 		            on failed_run.id = failed_dump.import_run_id
 		         where candidate_dump.import_run_id = candidate_run.id
 		           and failed_run.status = 'failed'
@@ -492,36 +492,36 @@ func findResumableRun(
 	err := tx.QueryRowContext(
 		ctx,
 		`select import_run.id
-		   from public.discogs_import_run import_run
+		   from discogs_import_run import_run
 		  where import_run.manifest_sha256 = $1
 		    and import_run.status = 'failed'
 		    and import_run.processor = $2
 		    and import_run.processor_version = $3
 		    and not import_run.force_requested
 		    and (select count(*)
-		           from public.discogs_import_run_dump run_dump
+		           from discogs_import_run_dump run_dump
 		          where run_dump.import_run_id = import_run.id) = $4
 		    and not exists (
 		        select 1
-		          from public.discogs_import_run_dump run_dump
+		          from discogs_import_run_dump run_dump
 		         where run_dump.import_run_id = import_run.id
 		           and run_dump.chunk_size is distinct from $5
 		    )
 		    and not exists (
 		        select 1
-		          from public.discogs_import_run_dump run_dump
+		          from discogs_import_run_dump run_dump
 		         where run_dump.import_run_id = import_run.id
 		           and run_dump.processed_items <> (
 		               select coalesce(sum(run_chunk.item_count), 0)
-		                 from public.discogs_import_run_chunk run_chunk
+		                 from discogs_import_run_chunk run_chunk
 		                where run_chunk.import_run_id = run_dump.import_run_id
 		                  and run_chunk.entity_type = run_dump.entity_type
 		           )
 		    )
 		    and not exists (
 		        select 1
-		          from public.discogs_import_run_chunk run_chunk
-		          join public.discogs_import_run_dump run_dump
+		          from discogs_import_run_chunk run_chunk
+		          join discogs_import_run_dump run_dump
 		            on run_dump.import_run_id = run_chunk.import_run_id
 		           and run_dump.entity_type = run_chunk.entity_type
 		         where run_chunk.import_run_id = import_run.id
@@ -530,13 +530,13 @@ func findResumableRun(
 		    )
 		    and not exists (
 		        select 1
-		          from public.discogs_import_run_dump failed_dump
-		          join public.discogs_import_checkpoint checkpoint
+		          from discogs_import_run_dump failed_dump
+		          join discogs_import_checkpoint checkpoint
 		            on checkpoint.entity_type = failed_dump.entity_type
-		          join public.discogs_import_run_dump current_dump
+		          join discogs_import_run_dump current_dump
 		            on current_dump.import_run_id = checkpoint.import_run_id
 		           and current_dump.entity_type = checkpoint.entity_type
-		          join public.discogs_import_run current_run
+		          join discogs_import_run current_run
 		            on current_run.id = checkpoint.import_run_id
 		         where failed_dump.import_run_id = import_run.id
 		           and (current_dump.dump_id <> failed_dump.dump_id
@@ -572,13 +572,13 @@ func copyResumeProgress(
 ) error {
 	summaryResult, err := tx.ExecContext(
 		ctx,
-		`update public.discogs_import_run_dump target
+		`update discogs_import_run_dump target
 		    set processed_items = source.processed_items,
 		        total_items = source.total_items,
 		        total_chunks = source.total_chunks,
 		        last_progress_at = source.last_progress_at,
 		        completed_at = source.completed_at
-		   from public.discogs_import_run_dump source
+		   from discogs_import_run_dump source
 		  where target.import_run_id = $1
 		    and source.import_run_id = $2
 		    and target.entity_type = source.entity_type
@@ -605,10 +605,10 @@ func copyResumeProgress(
 
 	chunkResult, err := tx.ExecContext(
 		ctx,
-		`insert into public.discogs_import_run_chunk
+		`insert into discogs_import_run_chunk
 		    (import_run_id, entity_type, chunk_index, first_item_index, item_count, completed_at)
 		 select $1, entity_type, chunk_index, first_item_index, item_count, completed_at
-		   from public.discogs_import_run_chunk
+		   from discogs_import_run_chunk
 		  where import_run_id = $2`,
 		toRunID,
 		fromRunID,
@@ -622,7 +622,7 @@ func copyResumeProgress(
 	}
 	deleteResult, err := tx.ExecContext(
 		ctx,
-		"delete from public.discogs_import_run_chunk where import_run_id = $1",
+		"delete from discogs_import_run_chunk where import_run_id = $1",
 		fromRunID,
 	)
 	if err != nil {
@@ -646,19 +646,19 @@ func copyResumeProgress(
 func pruneSupersededFailedProgress(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(
 		ctx,
-		`delete from public.discogs_import_run_chunk run_chunk
+		`delete from discogs_import_run_chunk run_chunk
 		  where run_chunk.import_run_id in (
 		      select failed_run.id
-		        from public.discogs_import_run failed_run
+		        from discogs_import_run failed_run
 		       where failed_run.status = 'failed'
 		         and not exists (
 		             select 1
-		               from public.discogs_import_run_dump failed_dump
-		               left join public.discogs_import_checkpoint checkpoint
+		               from discogs_import_run_dump failed_dump
+		               left join discogs_import_checkpoint checkpoint
 		                 on checkpoint.entity_type = failed_dump.entity_type
-		               left join public.discogs_import_run current_run
+		               left join discogs_import_run current_run
 		                 on current_run.id = checkpoint.import_run_id
-		               left join public.discogs_import_run_dump current_dump
+		               left join discogs_import_run_dump current_dump
 		                 on current_dump.import_run_id = checkpoint.import_run_id
 		                and current_dump.entity_type = checkpoint.entity_type
 		              where failed_dump.import_run_id = failed_run.id
@@ -681,7 +681,7 @@ func findOrInsertDump(
 	var dumpID int64
 	err := tx.QueryRowContext(
 		ctx,
-		`insert into public.discogs_dump
+		`insert into discogs_dump
 		    (etag, dump_date, entity_type, checksum_sha256, size_bytes, uri)
 		 values ($1, $2, $3, $4, $5, $6)
 		 on conflict (dump_date, entity_type, checksum_sha256) do nothing
@@ -702,7 +702,7 @@ func findOrInsertDump(
 	err = tx.QueryRowContext(
 		ctx,
 		`select id
-		   from public.discogs_dump
+		   from discogs_dump
 		  where dump_date = $1
 		    and entity_type = $2
 		    and checksum_sha256 = $3`,
@@ -732,7 +732,7 @@ func insertImportRun(
 	}
 	err := tx.QueryRowContext(
 		ctx,
-		`insert into public.discogs_import_run
+		`insert into discogs_import_run
 		    (manifest_sha256, status, force_requested,
 		     allow_downgrade_requested, processor, processor_version, resumed_from_run_id)
 		 values ($1, 'running', $2, $3, $4, $5, $6)

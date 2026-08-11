@@ -3,13 +3,16 @@ package database
 import (
 	"errors"
 	"fmt"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 	"log"
 	"os"
 	"regexp"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var (
@@ -21,7 +24,12 @@ var DB *gorm.DB
 
 // Connect opens the canonical PostgreSQL database.
 func Connect(dsn string) (err error) {
-	if DB, err = GetConnect(dsn); err != nil {
+	return ConnectInSchema(dsn, DefaultSchemaName)
+}
+
+// ConnectInSchema opens PostgreSQL with the selected schema first in every connection's search path.
+func ConnectInSchema(dsn, schemaName string) (err error) {
+	if DB, err = GetConnectInSchema(dsn, schemaName); err != nil {
 		return
 	}
 	return nil
@@ -47,18 +55,30 @@ func ConfigurePool(db *gorm.DB, maxWorkers int) error {
 }
 
 func GetConnect(dsn string) (*gorm.DB, error) {
-	var dl gorm.Dialector
+	return GetConnectInSchema(dsn, DefaultSchemaName)
+}
+
+// GetConnectInSchema creates a bounded-schema GORM connection without mutating the caller's DSN.
+func GetConnectInSchema(dsn, schemaName string) (*gorm.DB, error) {
 	if len(dsn) == 0 {
 		return nil, errors.New("missing dsn")
-	} else if p.MatchString(dsn) {
-		dl = postgres.Open(dsn)
-	} else {
+	}
+	if !p.MatchString(dsn) {
 		if match := x.FindStringSubmatch(dsn); match != nil {
 			return nil, errors.New("unsupported database from dsn: " + match[1])
-		} else {
-			return nil, errors.New("unsupported dsn. please check again")
 		}
+		return nil, errors.New("unsupported dsn. please check again")
 	}
+	schema, err := ParseSchema(schemaName)
+	if err != nil {
+		return nil, err
+	}
+	connectionConfig, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse PostgreSQL DSN: %w", err)
+	}
+	connectionConfig.RuntimeParams[searchPathParameter] = schema.SearchPath()
+	sqlDB := stdlib.OpenDB(*connectionConfig)
 
 	newLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
@@ -69,8 +89,13 @@ func GetConnect(dsn string) (*gorm.DB, error) {
 			LogLevel:                  logger.Error,
 		})
 
-	return gorm.Open(dl, &gorm.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
 		Logger:                 newLogger,
 		SkipDefaultTransaction: true,
 	})
+	if err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	return db, nil
 }

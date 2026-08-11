@@ -32,7 +32,7 @@ func executeActiveRunTransaction(
 		var active activeImportRun
 		fenced := tx.Raw(
 			`select id
-			   from public.discogs_import_run
+			   from discogs_import_run
 			  where id = ?
 			    and status = 'running'
 			  for update`,
@@ -97,7 +97,7 @@ func chunkAlreadyCompleted(
 	var recorded recordedChunk
 	query := tx.Raw(
 		`select first_item_index, item_count
-		   from public.discogs_import_run_chunk
+		   from discogs_import_run_chunk
 		  where import_run_id = ?
 		    and entity_type = ?
 		    and chunk_index = ?`,
@@ -138,20 +138,20 @@ func recordCompletedChunk(
 	updated := tx.Exec(
 		`with active_run as (
 		    select id
-		      from public.discogs_import_run
+		      from discogs_import_run
 		     where id = ?
 		       and status = 'running'
 		     for update
 		),
 		inserted as (
-		    insert into public.discogs_import_run_chunk
+		    insert into discogs_import_run_chunk
 		        (import_run_id, entity_type, chunk_index, first_item_index, item_count)
 		    select active_run.id, ?, ?, ?, ?
 		      from active_run
 		    on conflict do nothing
 		    returning item_count
 		)
-		update public.discogs_import_run_dump run_dump
+		update discogs_import_run_dump run_dump
 		   set processed_items = run_dump.processed_items + inserted.item_count,
 		       last_progress_at = now()
 		  from inserted
@@ -193,7 +193,7 @@ func completeEntityProgress(order Order, totalItems, totalChunks int64) error {
 	updated := order.getDB().WithContext(order.getContext()).Exec(
 		`with active_run as (
 		    select id
-		      from public.discogs_import_run
+		      from discogs_import_run
 		     where id = ?
 		       and status = 'running'
 		     for update
@@ -209,11 +209,11 @@ func completeEntityProgress(order Order, totalItems, totalChunks int64) error {
 		                      else ?
 		                  end
 		           ) as invalid_chunks
-		      from public.discogs_import_run_chunk
+		      from discogs_import_run_chunk
 		     where import_run_id = ?
 		       and entity_type = ?
 		)
-		update public.discogs_import_run_dump
+		update discogs_import_run_dump
 		   set total_items = ?,
 		       total_chunks = ?,
 		       completed_at = now(),

@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/batch"
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/posflag"
@@ -49,6 +50,7 @@ var environmentOptionNames = map[string]string{
 	"CLEANUP":         "cleanup",
 	"FORCE":           "force",
 	"ALLOW_DOWNGRADE": "allow-downgrade",
+	"DATABASE_SCHEMA": "database-schema",
 }
 
 var booleanEnvironmentOptions = map[string]struct{}{
@@ -80,6 +82,7 @@ into the canonical PostgreSQL schema published by open-discogs-model.`,
 	dataDir := filepath.Join(getHomeDir(new(homeDirSupplier)), ".cache", "open-discogs-batch")
 	f := rootCmd.Flags()
 	f.String("database-url", "", "PostgreSQL URI including credentials (required)")
+	f.String("database-schema", database.DefaultSchemaName, "PostgreSQL schema for canonical tables")
 	f.StringSliceP("entities", "e", []string{"artist", "label", "master", "release"}, "entities to import")
 	f.StringP("dump-month", "m", "", "exact dump month in yyyy-MM form (default: latest per entity)")
 	f.String("data-dir", dataDir, "download directory")

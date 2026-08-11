@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	"github.com/knadh/koanf"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +61,7 @@ func TestValidDumpMonth(t *testing.T) {
 func TestValidator(t *testing.T) {
 	config := koanf.New(".")
 	require.NoError(t, config.Set("database-url", "postgresql://user:pass@db:5432/discogs"))
+	require.NoError(t, config.Set("database-schema", database.DefaultSchemaName))
 	require.NoError(t, config.Set("entities", []string{"artist"}))
 	require.NoError(t, config.Set("chunk-size", 5000))
 	require.NoError(t, config.Set("max-workers", 4))
@@ -75,6 +77,7 @@ func TestValidatorReportsEveryConfigurationBoundary(t *testing.T) {
 	valid := func() *koanf.Koanf {
 		config := koanf.New(".")
 		require.NoError(t, config.Set("database-url", "postgresql://user:pass@db:5432/discogs"))
+		require.NoError(t, config.Set("database-schema", database.DefaultSchemaName))
 		require.NoError(t, config.Set("entities", []string{"artist"}))
 		require.NoError(t, config.Set("chunk-size", 5000))
 		require.NoError(t, config.Set("max-workers", 4))
@@ -92,6 +95,10 @@ func TestValidatorReportsEveryConfigurationBoundary(t *testing.T) {
 	config = valid()
 	require.NoError(t, config.Set("database-url", "mysql://user:pass@db/catalog"))
 	require.ErrorContains(t, new(validator).Validate(config), "database-url")
+
+	config = valid()
+	require.NoError(t, config.Set("database-schema", "Invalid-Schema"))
+	require.ErrorContains(t, new(validator).Validate(config), "database-schema")
 
 	config = valid()
 	require.NoError(t, config.Set("chunk-size", 0))
