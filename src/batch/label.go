@@ -51,7 +51,7 @@ func insertLabelRelations(order Order) result.Result {
 		order,
 		"label relations",
 		"label",
-		"updating label relations...",
+		"source-read label relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlLabelRelation) result.Result {
 			return writeLabelRelationChunk(order, chunk, items, deleteStale)
 		},

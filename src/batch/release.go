@@ -76,7 +76,7 @@ func insertReleases(order Order) result.Result {
 		order,
 		"release relations",
 		"release",
-		"updating releases...",
+		"source-read release relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlReleaseRelation) result.Result {
 			return writeReleaseRelationChunk(order, chunk, items, deleteStale)
 		},

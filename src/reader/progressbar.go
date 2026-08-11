@@ -11,15 +11,19 @@ import (
 )
 
 func NewProgressBarGzipReadCloser(f *os.File, progressBarText string) (io.ReadCloser, error) {
-	reader, err := gzip.NewReader(f)
+	fileInfo, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
 
-	pb := getProgressBar(GetFilename(progressBarText), -1)
-	pbReader := progressbar.NewReader(reader, pb)
+	pb := getProgressBar(GetFilename(progressBarText), fileInfo.Size())
+	pbReader := progressbar.NewReader(f, pb)
+	reader, err := gzip.NewReader(&pbReader)
+	if err != nil {
+		return nil, err
+	}
 	return &readCloserImpl{
-		readDelegate:   &pbReader,
+		readDelegate:   reader,
 		closeDelegates: []io.Closer{reader, f},
 	}, nil
 }
@@ -28,7 +32,9 @@ func getProgressBar(text string, size int64) *progressbar.ProgressBar {
 	pb := progressbar.NewOptions64(size,
 		progressbar.OptionEnableColorCodes(false),
 		progressbar.OptionShowBytes(true),
+		progressbar.OptionShowCount(),
 		progressbar.OptionSetElapsedTime(true),
+		progressbar.OptionSetPredictTime(true),
 		progressbar.OptionThrottle(time.Millisecond*250),
 		progressbar.OptionSetWidth(15),
 		progressbar.OptionShowElapsedTimeOnFinish(),
