@@ -17,7 +17,7 @@ func NewProgressGzipReadCloser(f *os.File, progressText string) (io.ReadCloser, 
 	}
 
 	progressReporter := progress.NewReporter(
-		os.Stdout,
+		progress.StructuredOutput(os.Stdout),
 		os.Stderr,
 		term.IsTerminal(int(os.Stderr.Fd())),
 		progress.StageSourceRead,

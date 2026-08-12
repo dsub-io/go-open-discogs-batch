@@ -247,7 +247,7 @@ func (h *handlerImpl) execGrabReq(req *grab.Request) error {
 
 	// monitor
 	progressReporter := progress.NewReporter(
-		os.Stdout,
+		progress.StructuredOutput(os.Stdout),
 		os.Stderr,
 		term.IsTerminal(int(os.Stderr.Fd())),
 		progress.StageDownload,
