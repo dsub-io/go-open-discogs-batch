@@ -73,6 +73,11 @@ func runDDL(db *gorm.DB, migrations fs.FS, schema database.Schema) error {
 
 func applyMigration(db *gorm.DB, schema database.Schema, version, checksum, sql string) error {
 	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"lock table " + schema.Qualify(migrationTable) + " in exclusive mode",
+		).Error; err != nil {
+			return fmt.Errorf("lock shared migration ledger: %w", err)
+		}
 		var appliedChecksum string
 		result := tx.Raw(
 			"select checksum from "+schema.Qualify(migrationTable)+" where version = ?",

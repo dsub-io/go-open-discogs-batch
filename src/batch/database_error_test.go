@@ -90,6 +90,8 @@ func TestRunDDLPropagatesMigrationFailure(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`create table if not exists "public"."open_discogs_schema_migration"`)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`lock table "public"."open_discogs_schema_migration" in exclusive mode`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).WillReturnError(expected)
 	mock.ExpectRollback()
 	require.ErrorContains(t, runDDL(db, fstest.MapFS{
@@ -105,9 +107,21 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 		want  string
 	}{
 		{
+			name: "ledger lock failure",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectBegin()
+				mock.ExpectExec(regexp.QuoteMeta(`lock table "public"."open_discogs_schema_migration" in exclusive mode`)).
+					WillReturnError(expected)
+				mock.ExpectRollback()
+			},
+			want: "lock shared migration ledger",
+		},
+		{
 			name: "ledger query failure",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
+				mock.ExpectExec(regexp.QuoteMeta(`lock table "public"."open_discogs_schema_migration" in exclusive mode`)).
+					WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).WillReturnError(expected)
 				mock.ExpectRollback()
 			},
@@ -117,6 +131,8 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 			name: "changed checksum",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
+				mock.ExpectExec(regexp.QuoteMeta(`lock table "public"."open_discogs_schema_migration" in exclusive mode`)).
+					WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 					WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow("old"))
 				mock.ExpectRollback()
@@ -127,6 +143,8 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 			name: "migration execution failure",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
+				mock.ExpectExec(regexp.QuoteMeta(`lock table "public"."open_discogs_schema_migration" in exclusive mode`)).
+					WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 					WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
 				mock.ExpectExec(regexp.QuoteMeta("invalid SQL")).WillReturnError(expected)
@@ -138,6 +156,8 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 			name: "ledger insert failure",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
+				mock.ExpectExec(regexp.QuoteMeta(`lock table "public"."open_discogs_schema_migration" in exclusive mode`)).
+					WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 					WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
 				mock.ExpectExec(regexp.QuoteMeta("invalid SQL")).WillReturnResult(sqlmock.NewResult(0, 0))
@@ -162,6 +182,8 @@ func TestApplyMigrationErrorBoundaries(t *testing.T) {
 		require.NoError(t, schemaErr)
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
+		mock.ExpectExec(regexp.QuoteMeta(`lock table "public"."open_discogs_schema_migration" in exclusive mode`)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectQuery(regexp.QuoteMeta(`select checksum from "public"."open_discogs_schema_migration"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow("same"))
 		mock.ExpectCommit()
