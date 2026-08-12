@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.7](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.6...v2.3.7) (2026-08-12)
+
+
+### Bug Fixes
+
+* prevent release master deadlocks ([837f942](https://github.com/dsub-io/go-open-discogs-batch/commit/837f942474b7668f815a16254812c1479473bc88))
+* prevent release master deadlocks ([36ca133](https://github.com/dsub-io/go-open-discogs-batch/commit/36ca133fa94e443303151a096278667bc7bf634e))
+
 ## [2.3.6](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.5...v2.3.6) (2026-08-12)
 
 
