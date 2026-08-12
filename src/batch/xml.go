@@ -498,7 +498,7 @@ func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
@@ -522,56 +522,64 @@ func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetIdentifiers() []*opendiscogsmodel.ReleaseItemIdentifier {
 	items := make([]*opendiscogsmodel.ReleaseItemIdentifier, 0, len(r.Identifiers))
 	for _, identifier := range r.Identifiers {
-		hashSource := identifier.Type + identifier.Description + identifier.Value
+		description := helper.FilterStr(&identifier.Description)
+		identifierType := helper.FilterStr(&identifier.Type)
+		value := helper.FilterStr(&identifier.Value)
+		hashSource := stringValue(identifierType) + stringValue(description) + stringValue(value)
 		if strings.TrimSpace(hashSource) == "" {
 			continue
 		}
 		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemIdentifier{
 			ReleaseItemID:  r.ID,
-			Description:    helper.FilterStr(&identifier.Description),
-			Type:           helper.FilterStr(&identifier.Type),
-			Value:          helper.FilterStr(&identifier.Value),
+			Description:    description,
+			Type:           identifierType,
+			Value:          value,
 			Hash:           helper.JavaStringHash(hashSource),
 			CreatedAt:      now,
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetTracks() []*opendiscogsmodel.ReleaseItemTrack {
 	items := make([]*opendiscogsmodel.ReleaseItemTrack, 0, len(r.Tracks))
 	for _, track := range r.Tracks {
-		hashSource := track.Position + track.Title + track.Duration
+		duration := helper.FilterStr(&track.Duration)
+		position := helper.FilterStr(&track.Position)
+		title := helper.FilterStr(&track.Title)
+		hashSource := stringValue(position) + stringValue(title) + stringValue(duration)
 		if strings.TrimSpace(hashSource) == "" {
 			continue
 		}
 		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemTrack{
 			ReleaseItemID:  r.ID,
-			Duration:       helper.FilterStr(&track.Duration),
-			Position:       helper.FilterStr(&track.Position),
-			Title:          helper.FilterStr(&track.Title),
+			Duration:       duration,
+			Position:       position,
+			Title:          title,
 			Hash:           helper.JavaStringHash(hashSource),
 			CreatedAt:      now,
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat {
 	items := make([]*opendiscogsmodel.ReleaseItemFormat, 0, len(r.Formats))
 	for _, format := range r.Formats {
 		description := reducedDescription(format.Descriptions)
-		hashSource := stringValue(format.Name) + stringValue(description) + stringValue(format.Text)
+		name := helper.FilterStr(format.Name)
+		text := helper.FilterStr(format.Text)
+		hashSource := stringValue(name) + stringValue(description) + stringValue(text)
 		if strings.TrimSpace(hashSource) == "" {
 			continue
 		}
@@ -579,15 +587,15 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 		items = append(items, &opendiscogsmodel.ReleaseItemFormat{
 			ReleaseItemID:  r.ID,
 			Description:    description,
-			Name:           helper.FilterStr(format.Name),
+			Name:           name,
 			Quantity:       format.Quantity,
-			Text:           helper.FilterStr(format.Text),
+			Text:           text,
 			Hash:           helper.JavaStringHash(hashSource),
 			CreatedAt:      now,
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseItemCreditedArtist {
@@ -610,7 +618,7 @@ func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseIte
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItemArtist {
@@ -627,7 +635,7 @@ func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItem
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
@@ -656,16 +664,21 @@ func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
 			LastModifiedAt:   now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (r *XmlReleaseRelation) GetReleaseStyles() []*opendiscogsmodel.ReleaseItemStyle {
 	items := make([]*opendiscogsmodel.ReleaseItemStyle, 0, len(r.Styles))
-	for _, value := range unique.Slice(r.Styles) {
+	seen := make(map[string]struct{}, len(r.Styles))
+	for _, value := range r.Styles {
 		style := strings.TrimSpace(value)
 		if style == "" {
 			continue
 		}
+		if _, exists := seen[style]; exists {
+			continue
+		}
+		seen[style] = struct{}{}
 		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemStyle{
 			ReleaseItemID:  r.ID,
@@ -679,11 +692,16 @@ func (r *XmlReleaseRelation) GetReleaseStyles() []*opendiscogsmodel.ReleaseItemS
 
 func (r *XmlReleaseRelation) GetReleaseGenres() []*opendiscogsmodel.ReleaseItemGenre {
 	items := make([]*opendiscogsmodel.ReleaseItemGenre, 0, len(r.Genres))
-	for _, value := range unique.Slice(r.Genres) {
+	seen := make(map[string]struct{}, len(r.Genres))
+	for _, value := range r.Genres {
 		genre := strings.TrimSpace(value)
 		if genre == "" {
 			continue
 		}
+		if _, exists := seen[genre]; exists {
+			continue
+		}
+		seen[genre] = struct{}{}
 		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemGenre{
 			ReleaseItemID:  r.ID,

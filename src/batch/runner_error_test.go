@@ -55,6 +55,7 @@ type runnerSeams struct {
 	resolve       func(*koanf.Koanf, data.Repository) (*data.ImportPlan, error)
 	fetch         func(context.Context, *data.ImportPlan) error
 	open          func(*gorm.DB) (*sql.DB, error)
+	preflight     func(context.Context, *sql.DB, []*opendiscogsmodel.DiscogsDump) error
 	coordinator   func(*sql.DB, string) importExecutionCoordinator
 	preload       func(context.Context, *sql.DB, *koanf.Koanf) error
 	newBatch      func() Batch
@@ -71,6 +72,7 @@ func installRunnerSeams(t *testing.T, seams runnerSeams) {
 	originalResolve := resolveImportPlan
 	originalFetch := fetchImportResources
 	originalOpen := openSQLDatabase
+	originalPreflight := validateImportDependencies
 	originalCoordinator := newExecutionCoordinator
 	originalPreload := preloadImportReferenceIDs
 	originalBatch := newImportBatch
@@ -84,6 +86,7 @@ func installRunnerSeams(t *testing.T, seams runnerSeams) {
 		resolveImportPlan = originalResolve
 		fetchImportResources = originalFetch
 		openSQLDatabase = originalOpen
+		validateImportDependencies = originalPreflight
 		newExecutionCoordinator = originalCoordinator
 		preloadImportReferenceIDs = originalPreload
 		newImportBatch = originalBatch
@@ -97,6 +100,7 @@ func installRunnerSeams(t *testing.T, seams runnerSeams) {
 	resolveImportPlan = seams.resolve
 	fetchImportResources = seams.fetch
 	openSQLDatabase = seams.open
+	validateImportDependencies = seams.preflight
 	newExecutionCoordinator = seams.coordinator
 	preloadImportReferenceIDs = seams.preload
 	newImportBatch = seams.newBatch
@@ -119,8 +123,15 @@ func defaultRunnerSeams() runnerSeams {
 				Dumps:     []*opendiscogsmodel.DiscogsDump{importDump("artist", "2026-07-01", "a")},
 			}, nil
 		},
-		fetch:       func(context.Context, *data.ImportPlan) error { return nil },
-		open:        func(*gorm.DB) (*sql.DB, error) { return nil, nil },
+		fetch: func(context.Context, *data.ImportPlan) error { return nil },
+		open:  func(*gorm.DB) (*sql.DB, error) { return nil, nil },
+		preflight: func(
+			context.Context,
+			*sql.DB,
+			[]*opendiscogsmodel.DiscogsDump,
+		) error {
+			return nil
+		},
 		coordinator: func(*sql.DB, string) importExecutionCoordinator { return coordinator },
 		preload:     func(context.Context, *sql.DB, *koanf.Koanf) error { return nil },
 		newBatch: func() Batch {
@@ -161,6 +172,15 @@ func TestRunnerPropagatesEveryStageFailure(t *testing.T) {
 			s.resolve = func(*koanf.Koanf, data.Repository) (*data.ImportPlan, error) { return nil, expected }
 		}},
 		{"open SQL pool", func(s *runnerSeams) { s.open = func(*gorm.DB) (*sql.DB, error) { return nil, expected } }},
+		{"dependency preflight", func(s *runnerSeams) {
+			s.preflight = func(
+				context.Context,
+				*sql.DB,
+				[]*opendiscogsmodel.DiscogsDump,
+			) error {
+				return expected
+			}
+		}},
 		{"prepare", func(s *runnerSeams) {
 			s.coordinator = func(*sql.DB, string) importExecutionCoordinator {
 				return &executionCoordinatorStub{prepareErr: expected}
@@ -182,6 +202,35 @@ func TestRunnerPropagatesEveryStageFailure(t *testing.T) {
 			require.ErrorIs(t, (&Runner{Version: "test"}).Run(context.Background(), runnerConfig(t)), expected)
 		})
 	}
+}
+
+func TestRunnerRechecksDependenciesAfterAdmissionBeforeFetch(t *testing.T) {
+	expected := errors.New("dependency changed during admission")
+	seams := defaultRunnerSeams()
+	preflightCalls := 0
+	fetchCalled := false
+	seams.preflight = func(
+		context.Context,
+		*sql.DB,
+		[]*opendiscogsmodel.DiscogsDump,
+	) error {
+		preflightCalls++
+		if preflightCalls == 2 {
+			return expected
+		}
+		return nil
+	}
+	seams.fetch = func(context.Context, *data.ImportPlan) error {
+		fetchCalled = true
+		return nil
+	}
+	installRunnerSeams(t, seams)
+
+	err := (&Runner{Version: "test"}).Run(context.Background(), runnerConfig(t))
+
+	require.ErrorIs(t, err, expected)
+	require.Equal(t, 2, preflightCalls)
+	require.False(t, fetchCalled)
 }
 
 func TestRunnerRejectsInvalidDatabaseSchema(t *testing.T) {

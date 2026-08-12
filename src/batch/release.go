@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -125,6 +126,42 @@ func writeReleaseRelationChunk(
 			tracks = append(tracks, item.GetTracks()...)
 			videos = append(videos, item.GetVideos()...)
 			creditedArtists = append(creditedArtists, item.GetCreditedArtists()...)
+		}
+		var (
+			artistError         error
+			creditedArtistError error
+			workError           error
+			styleError          error
+			genreError          error
+			labelError          error
+			formatError         error
+			identifierError     error
+			trackError          error
+			videoError          error
+		)
+		artists, artistError = deduplicateReleaseArtists(artists)
+		creditedArtists, creditedArtistError = deduplicateReleaseCreditedArtists(creditedArtists)
+		works, workError = deduplicateReleaseWorks(works)
+		releaseStyles, styleError = deduplicateReleaseStyles(releaseStyles)
+		releaseGenres, genreError = deduplicateReleaseGenres(releaseGenres)
+		labels, labelError = deduplicateLabelReleaseItems(labels)
+		formats, formatError = deduplicateReleaseFormats(formats)
+		identifiers, identifierError = deduplicateReleaseIdentifiers(identifiers)
+		tracks, trackError = deduplicateReleaseTracks(tracks)
+		videos, videoError = deduplicateReleaseVideos(videos)
+		if deduplicateError := errors.Join(
+			artistError,
+			creditedArtistError,
+			workError,
+			styleError,
+			genreError,
+			labelError,
+			formatError,
+			identifierError,
+			trackError,
+			videoError,
+		); deduplicateError != nil {
+			return result.NewResult(0, deduplicateError)
 		}
 		rootIDs = unique.Slice(rootIDs)
 		if referenceResult := writeReferenceEntities(

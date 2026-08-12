@@ -58,6 +58,14 @@ func GetConnect(dsn string) (*gorm.DB, error) {
 
 // GetConnectInSchema creates a bounded-schema GORM connection without mutating the caller's DSN.
 func GetConnectInSchema(dsn, schemaName string) (*gorm.DB, error) {
+	return getConnectInSchema(dsn, schemaName, validatePostgreSQLServerVersion)
+}
+
+func getConnectInSchema(
+	dsn string,
+	schemaName string,
+	validateVersion postgreSQLServerVersionValidator,
+) (*gorm.DB, error) {
 	if len(dsn) == 0 {
 		return nil, errors.New("missing dsn")
 	}
@@ -83,6 +91,10 @@ func GetConnectInSchema(dsn, schemaName string) (*gorm.DB, error) {
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	if err := validateVersion(db); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
 	}

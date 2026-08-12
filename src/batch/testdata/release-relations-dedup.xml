@@ -1,0 +1,48 @@
+<releases>
+  <release id="200000001" status="Accepted">
+    <artists>
+      <artist><id>1</id></artist>
+      <artist><id>1</id></artist>
+    </artists>
+    <title>Canonical relation deduplication</title>
+    <labels>
+      <label catno="" id="5"/>
+      <label catno=" " id="5"/>
+      <label catno="SK 026" id="5"/>
+      <label catno="SK026" id="5"/>
+      <label catno=" SK026 " id="5"/>
+    </labels>
+    <extraartists>
+      <artist><id>1</id><role>Producer</role></artist>
+      <artist><id>1</id><role> Producer </role></artist>
+    </extraartists>
+    <formats>
+      <format name="Vinyl" qty="1" text="Text"><descriptions><description>12 inch</description></descriptions></format>
+      <format name=" Vinyl " qty="1" text=" Text "><descriptions><description> 12 inch </description></descriptions></format>
+    </formats>
+    <genres>
+      <genre>Electronic</genre>
+      <genre> Electronic </genre>
+    </genres>
+    <styles>
+      <style>Techno</style>
+      <style> Techno </style>
+    </styles>
+    <tracklist>
+      <track><position>A1</position><title>Track</title><duration>3:00</duration></track>
+      <track><position> A1 </position><title> Track </title><duration> 3:00 </duration></track>
+    </tracklist>
+    <identifiers>
+      <identifier type="Barcode" description="Primary" value="123"/>
+      <identifier type=" Barcode " description=" Primary " value=" 123 "/>
+    </identifiers>
+    <videos>
+      <video src="https://example.invalid/video"><title>Video</title><description>Description</description></video>
+      <video src=" https://example.invalid/video "><title> Video </title><description> Description </description></video>
+    </videos>
+    <companies>
+      <company><id>5</id><entity_type_name>Recorded At</entity_type_name></company>
+      <company><id>5</id><entity_type_name> Recorded At </entity_type_name></company>
+    </companies>
+  </release>
+</releases>

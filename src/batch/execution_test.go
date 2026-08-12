@@ -24,6 +24,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
 	require.NoError(t, err)
 	require.NoError(t, RunDDL(db))
+	installImportContractRevisionFixture(t, db)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	ctx := context.Background()
@@ -57,6 +58,447 @@ func TestImportExecutionCoordinator(t *testing.T) {
 			require.NoError(t, completeEntityProgress(order, 0, 0))
 		}
 	}
+
+	t.Run("reprocesses successful runs from an older contract revision", func(t *testing.T) {
+		reset(t)
+		dumps := []*opendiscogsmodel.DiscogsDump{
+			importDump(releaseEntityType, "2026-07-01", "0"),
+		}
+
+		legacy := NewImportExecutionCoordinator(sqlDB, "old-go-version")
+		legacyPreparation, err := legacy.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		complete(t, legacyPreparation, dumps)
+		require.NoError(t, legacy.Complete(ctx, nil))
+		setImportContractRevision(
+			t,
+			db,
+			legacyPreparation.RunID,
+			legacyImportContractRevision,
+		)
+
+		current := NewImportExecutionCoordinator(sqlDB, "new-go-version")
+		currentPreparation, err := current.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.False(t, currentPreparation.Skipped)
+		require.Zero(t, currentPreparation.ResumedFromRunID)
+		requireImportContractRevision(
+			t,
+			db,
+			currentPreparation.RunID,
+			currentImportContractRevisions[releaseEntityType],
+		)
+		complete(t, currentPreparation, dumps)
+		require.NoError(t, current.Complete(ctx, nil))
+
+		repeated := NewImportExecutionCoordinator(sqlDB, "another-go-version")
+		repeatedPreparation, err := repeated.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.True(t, repeatedPreparation.Skipped)
+		require.Equal(t, currentPreparation.RunID, repeatedPreparation.RunID)
+	})
+
+	t.Run("narrows a mixed outdated manifest to release and preserves valid checkpoints", func(t *testing.T) {
+		reset(t)
+		dumps := []*opendiscogsmodel.DiscogsDump{
+			importDump(artistEntityType, "2026-07-01", "1"),
+			importDump(labelEntityType, "2026-07-01", "2"),
+			importDump(masterEntityType, "2026-07-01", "3"),
+			importDump(releaseEntityType, "2026-07-01", "4"),
+		}
+		legacy := NewImportExecutionCoordinator(sqlDB, "legacy")
+		legacyPreparation, err := legacy.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		complete(t, legacyPreparation, dumps)
+		require.NoError(t, legacy.Complete(ctx, nil))
+		setImportContractRevision(
+			t,
+			db,
+			legacyPreparation.RunID,
+			legacyImportContractRevision,
+		)
+		checkpointRunIDs := importCheckpointRunIDs(t, db)
+
+		mixed := NewImportExecutionCoordinator(sqlDB, "current")
+		_, err = mixed.Prepare(ctx, dumps, testChunkSize, false, false)
+		require.ErrorContains(t, err, "rerun only --entities release")
+		require.Equal(t, checkpointRunIDs, importCheckpointRunIDs(t, db))
+
+		releaseOnly := NewImportExecutionCoordinator(sqlDB, "current")
+		releasePreparation, err := releaseOnly.Prepare(
+			ctx,
+			dumps[3:],
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.False(t, releasePreparation.Skipped)
+		requireImportContractRevision(
+			t,
+			db,
+			releasePreparation.RunID,
+			currentImportContractRevisions[releaseEntityType],
+		)
+		complete(t, releasePreparation, dumps[3:])
+		require.NoError(t, releaseOnly.Complete(ctx, nil))
+
+		currentCheckpointRunIDs := importCheckpointRunIDs(t, db)
+		for _, entityType := range []string{
+			artistEntityType,
+			labelEntityType,
+			masterEntityType,
+		} {
+			require.Equal(
+				t,
+				checkpointRunIDs[entityType],
+				currentCheckpointRunIDs[entityType],
+			)
+		}
+		require.Equal(
+			t,
+			releasePreparation.RunID,
+			currentCheckpointRunIDs[releaseEntityType],
+		)
+
+		consolidated := NewImportExecutionCoordinator(sqlDB, "current")
+		consolidatedPreparation, err := consolidated.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.True(t, consolidatedPreparation.Skipped)
+		require.NotEqual(t, legacyPreparation.RunID, consolidatedPreparation.RunID)
+		requireRunDumpContractRevisions(
+			t,
+			db,
+			consolidatedPreparation.RunID,
+			currentImportContractRevisions,
+		)
+	})
+
+	t.Run("shares successful current-revision runs across processors", func(t *testing.T) {
+		reset(t)
+		dumps := []*opendiscogsmodel.DiscogsDump{
+			importDump("label", "2026-07-01", "0"),
+		}
+		javaRun := NewImportExecutionCoordinator(sqlDB, "go-fixture")
+		javaPreparation, err := javaRun.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		complete(t, javaPreparation, dumps)
+		require.NoError(t, javaRun.Complete(ctx, nil))
+		require.NoError(t, db.Exec(
+			`update public.discogs_import_run
+			    set processor = ?, processor_version = ?
+			  where id = ?`,
+			"open-discogs-batch",
+			"java-fixture",
+			javaPreparation.RunID,
+		).Error)
+
+		goRun := NewImportExecutionCoordinator(sqlDB, "go-fixture")
+		goPreparation, err := goRun.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.True(t, goPreparation.Skipped)
+		require.Equal(t, javaPreparation.RunID, goPreparation.RunID)
+	})
+
+	t.Run("dirties current success after a failed older-revision attempt", func(t *testing.T) {
+		reset(t)
+		dumps := []*opendiscogsmodel.DiscogsDump{
+			importDump("release", "2026-07-01", "0"),
+		}
+		successful := NewImportExecutionCoordinator(sqlDB, "test")
+		successfulPreparation, err := successful.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		complete(t, successfulPreparation, dumps)
+		require.NoError(t, successful.Complete(ctx, nil))
+
+		legacyFailure := NewImportExecutionCoordinator(sqlDB, "test")
+		legacyFailurePreparation, err := legacyFailure.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			true,
+			false,
+		)
+		require.NoError(t, err)
+		setImportContractRevision(
+			t,
+			db,
+			legacyFailurePreparation.RunID,
+			legacyImportContractRevision,
+		)
+		require.NoError(t, legacyFailure.Complete(ctx, errors.New("fixture failure")))
+
+		repeated := NewImportExecutionCoordinator(sqlDB, "test")
+		repeatedPreparation, err := repeated.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.False(t, repeatedPreparation.Skipped)
+		require.NotEqual(t, successfulPreparation.RunID, repeatedPreparation.RunID)
+		require.NoError(t, repeated.Complete(ctx, errors.New("fixture cleanup")))
+	})
+
+	t.Run("resumes abandoned and failed runs only at the current revision", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			revision   importContractRevision
+			abandoned  bool
+			wantResume bool
+		}{
+			{
+				name:       "current failed",
+				revision:   currentImportContractRevisions[masterEntityType],
+				wantResume: true,
+			},
+			{
+				name:      "incompatible failed",
+				revision:  incompatibleImportContractRevision,
+				abandoned: false,
+			},
+			{
+				name:       "current abandoned",
+				revision:   currentImportContractRevisions[masterEntityType],
+				abandoned:  true,
+				wantResume: true,
+			},
+			{
+				name:      "incompatible abandoned",
+				revision:  incompatibleImportContractRevision,
+				abandoned: true,
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				reset(t)
+				dumps := []*opendiscogsmodel.DiscogsDump{
+					importDump("master", "2026-07-01", "0"),
+				}
+				previous := NewImportExecutionCoordinator(sqlDB, "same-version")
+				previousPreparation, err := previous.Prepare(
+					ctx,
+					dumps,
+					testChunkSize,
+					false,
+					false,
+				)
+				require.NoError(t, err)
+				setImportContractRevision(
+					t,
+					db,
+					previousPreparation.RunID,
+					test.revision,
+				)
+				if test.abandoned {
+					previous.release(ctx)
+				} else {
+					require.NoError(t, previous.Complete(ctx, errors.New("fixture failure")))
+				}
+
+				retry := NewImportExecutionCoordinator(sqlDB, "same-version")
+				retryPreparation, err := retry.Prepare(
+					ctx,
+					dumps,
+					testChunkSize,
+					false,
+					false,
+				)
+				require.NoError(t, err)
+				if test.wantResume {
+					require.Equal(
+						t,
+						previousPreparation.RunID,
+						retryPreparation.ResumedFromRunID,
+					)
+				} else {
+					require.Zero(t, retryPreparation.ResumedFromRunID)
+				}
+				requireImportContractRevision(
+					t,
+					db,
+					retryPreparation.RunID,
+					currentImportContractRevisions[masterEntityType],
+				)
+				require.NoError(t, retry.Complete(ctx, errors.New("fixture cleanup")))
+
+				var previousStatus string
+				require.NoError(t, db.Raw(
+					"select status from public.discogs_import_run where id = ?",
+					previousPreparation.RunID,
+				).Scan(&previousStatus).Error)
+				require.Equal(t, "failed", previousStatus)
+			})
+		}
+	})
+
+	t.Run("does not resume across a newer checkpoint from another revision", func(t *testing.T) {
+		reset(t)
+		dumps := []*opendiscogsmodel.DiscogsDump{
+			importDump("master", "2026-07-01", "0"),
+		}
+		failed := NewImportExecutionCoordinator(sqlDB, "same-version")
+		failedPreparation, err := failed.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.NoError(t, failed.Complete(ctx, errors.New("fixture failure")))
+
+		legacyCheckpoint := NewImportExecutionCoordinator(sqlDB, "same-version")
+		legacyCheckpointPreparation, err := legacyCheckpoint.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			true,
+			false,
+		)
+		require.NoError(t, err)
+		complete(t, legacyCheckpointPreparation, dumps)
+		require.NoError(t, legacyCheckpoint.Complete(ctx, nil))
+		setImportContractRevision(
+			t,
+			db,
+			legacyCheckpointPreparation.RunID,
+			incompatibleImportContractRevision,
+		)
+
+		retry := NewImportExecutionCoordinator(sqlDB, "same-version")
+		retryPreparation, err := retry.Prepare(
+			ctx,
+			dumps,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		require.False(t, retryPreparation.Skipped)
+		require.Zero(t, retryPreparation.ResumedFromRunID)
+		require.NotEqual(t, failedPreparation.RunID, retryPreparation.RunID)
+		require.NoError(t, retry.Complete(ctx, errors.New("fixture cleanup")))
+	})
+
+	t.Run("keeps force and downgrade authorization independent from revision", func(t *testing.T) {
+		reset(t)
+		julyDump := []*opendiscogsmodel.DiscogsDump{
+			importDump(releaseEntityType, "2026-07-01", "0"),
+		}
+		july := NewImportExecutionCoordinator(sqlDB, "test")
+		julyPreparation, err := july.Prepare(
+			ctx,
+			julyDump,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		complete(t, julyPreparation, julyDump)
+		require.NoError(t, july.Complete(ctx, nil))
+		setImportContractRevision(
+			t,
+			db,
+			julyPreparation.RunID,
+			legacyImportContractRevision,
+		)
+
+		augustDump := []*opendiscogsmodel.DiscogsDump{
+			importDump(releaseEntityType, "2026-08-01", "1"),
+		}
+		august := NewImportExecutionCoordinator(sqlDB, "test")
+		augustPreparation, err := august.Prepare(
+			ctx,
+			augustDump,
+			testChunkSize,
+			false,
+			false,
+		)
+		require.NoError(t, err)
+		complete(t, augustPreparation, augustDump)
+		require.NoError(t, august.Complete(ctx, nil))
+
+		for _, force := range []bool{false, true} {
+			blocked := NewImportExecutionCoordinator(sqlDB, "test")
+			_, err = blocked.Prepare(
+				ctx,
+				julyDump,
+				testChunkSize,
+				force,
+				false,
+			)
+			require.ErrorContains(t, err, "predates checkpoint")
+		}
+
+		authorized := NewImportExecutionCoordinator(sqlDB, "test")
+		authorizedPreparation, err := authorized.Prepare(
+			ctx,
+			julyDump,
+			testChunkSize,
+			false,
+			true,
+		)
+		require.NoError(t, err)
+		require.False(t, authorizedPreparation.Skipped)
+		require.Zero(t, authorizedPreparation.ResumedFromRunID)
+		requireImportContractRevision(
+			t,
+			db,
+			authorizedPreparation.RunID,
+			currentImportContractRevisions[releaseEntityType],
+		)
+		require.NoError(t, authorized.Complete(ctx, errors.New("fixture cleanup")))
+	})
 
 	t.Run("skips a successful manifest unless forced", func(t *testing.T) {
 		reset(t)
@@ -867,5 +1309,96 @@ func importDump(entityType, date, checksumSeed string) *opendiscogsmodel.Discogs
 		ChecksumSHA256: checksum,
 		SizeBytes:      1,
 		URI:            fmt.Sprintf("data/%s/%s.xml.gz", date, entityType),
+	}
+}
+
+const (
+	legacyImportContractRevision       = importContractRevision(1)
+	incompatibleImportContractRevision = importContractRevision(99)
+)
+
+func installImportContractRevisionFixture(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+		alter table public.discogs_import_run_dump
+		add column if not exists import_contract_revision integer not null default 1
+		check (import_contract_revision > 0);
+		alter table public.discogs_import_run_dump
+		alter column import_contract_revision drop default`).Error)
+}
+
+func setImportContractRevision(
+	t *testing.T,
+	db *gorm.DB,
+	runID int64,
+	revision importContractRevision,
+) {
+	t.Helper()
+	result := db.Exec(
+		`update public.discogs_import_run_dump
+		    set import_contract_revision = ?
+		  where import_run_id = ?`,
+		revision,
+		runID,
+	)
+	require.NoError(t, result.Error)
+	require.Positive(t, result.RowsAffected)
+}
+
+func requireImportContractRevision(
+	t *testing.T,
+	db *gorm.DB,
+	runID int64,
+	want importContractRevision,
+) {
+	t.Helper()
+	var actual importContractRevision
+	require.NoError(t, db.Raw(
+		`select import_contract_revision
+		   from public.discogs_import_run_dump
+		  where import_run_id = ?`,
+		runID,
+	).Scan(&actual).Error)
+	require.Equal(t, want, actual)
+}
+
+func importCheckpointRunIDs(t *testing.T, db *gorm.DB) map[string]int64 {
+	t.Helper()
+	type checkpoint struct {
+		EntityType  string
+		ImportRunID int64
+	}
+	var checkpoints []checkpoint
+	require.NoError(t, db.Raw(`
+		select entity_type, import_run_id
+		  from public.discogs_import_checkpoint
+		 order by entity_type`).Scan(&checkpoints).Error)
+	runIDs := make(map[string]int64, len(checkpoints))
+	for _, checkpoint := range checkpoints {
+		runIDs[checkpoint.EntityType] = checkpoint.ImportRunID
+	}
+	return runIDs
+}
+
+func requireRunDumpContractRevisions(
+	t *testing.T,
+	db *gorm.DB,
+	runID int64,
+	want map[string]importContractRevision,
+) {
+	t.Helper()
+	type runDumpRevision struct {
+		EntityType             string
+		ImportContractRevision importContractRevision
+	}
+	var revisions []runDumpRevision
+	require.NoError(t, db.Raw(`
+		select entity_type, import_contract_revision
+		  from public.discogs_import_run_dump
+		 where import_run_id = ?
+		 order by entity_type`, runID).Scan(&revisions).Error)
+	require.Len(t, revisions, len(want))
+	for _, revision := range revisions {
+		require.Equal(t, want[revision.EntityType], revision.ImportContractRevision)
 	}
 }
