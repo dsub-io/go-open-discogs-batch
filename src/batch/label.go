@@ -66,7 +66,6 @@ func writeLabelRelationChunk(
 ) result.Result {
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		rootIDs := make([]int32, 0, len(items))
-		labels := make([]*model.Label, 0, len(items))
 		urls := make([]*model.LabelURL, 0)
 		subLabels := make([]*model.LabelSubLabel, 0)
 		for _, item := range items {
@@ -74,15 +73,11 @@ func writeLabelRelationChunk(
 				continue
 			}
 			rootIDs = append(rootIDs, item.ID)
-			labels = append(labels, item.GetLabel())
 			urls = append(urls, item.GetUrls()...)
 			subLabels = append(subLabels, item.GetSubLabels()...)
 		}
 		rootIDs = unique.Slice(rootIDs)
-		written := writeChunk(transactionOrder, labels)
-		if written.IsErr() {
-			return written
-		}
+		written := result.NewResult(0, nil)
 		reconcile := []func() result.Result{
 			func() result.Result {
 				return reconcileIntegerRelation(

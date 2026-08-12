@@ -358,13 +358,17 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 		require.Equal(t, wantError, actual.IsErr())
 	}
 
-	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
+	NewWriter = func(*gorm.DB) Writer {
+		t.Fatal("Artist and Label relation passes must not write root records")
+		return nil
+	}
 	run(t, false, func(order Order) result.Result {
 		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{nil}, false)
 	})
 	run(t, false, func(order Order) result.Result {
 		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{nil}, false)
 	})
+	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
 	run(t, false, func(order Order) result.Result {
 		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{nil}, false)
 	})
@@ -373,12 +377,6 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 	})
 
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, errors.New("writer"))} }
-	run(t, true, func(order Order) result.Result {
-		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{{ID: 1}}, false)
-	})
-	run(t, true, func(order Order) result.Result {
-		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{{ID: 1}}, false)
-	})
 	run(t, true, func(order Order) result.Result {
 		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}}, false)
 	})
