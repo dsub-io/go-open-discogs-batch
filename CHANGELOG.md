@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.3.6](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.5...v2.3.6) (2026-08-12)
+
+
+### Bug Fixes
+
+* enforce canonical dump recovery ([50fe133](https://github.com/dsub-io/go-open-discogs-batch/commit/50fe1338808dfcaf9ced0431cfb88fa8f65754dc))
+* enforce canonical import recovery ([6a3afe2](https://github.com/dsub-io/go-open-discogs-batch/commit/6a3afe27295e08564518c874540c4d36e7b0c8b5))
+* preserve release label catalog identities ([7c35ee7](https://github.com/dsub-io/go-open-discogs-batch/commit/7c35ee784168a07e09b995e5c2270acdf16776d6))
+* serialize canonical schema migrations ([be3fb66](https://github.com/dsub-io/go-open-discogs-batch/commit/be3fb66d5b1be35a5dc19bc882ab5e38a311a313))
+
 ## [2.3.5](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.4...v2.3.5) (2026-08-12)
 
 
