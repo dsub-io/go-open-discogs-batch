@@ -39,6 +39,17 @@ Discogs. The Discogs name identifies only the public data source.
 If the upstream catalog refresh fails, the importer tries the catalog already
 stored in PostgreSQL. It fails if that catalog cannot satisfy the request.
 
+An exact `--dump-month` uses a complete matching PostgreSQL catalog entry before
+contacting Discogs. If any selected entity is missing, dumps from 2021 onward
+are resolved with one monthly checksum request; its filenames and SHA-256 values
+define all selected download URIs. Older dumps have irregular publication dates,
+so they require one annual catalog request and one checksum request. The importer
+stores every selected URI and checksum before downloading files. Retries of that
+pinned month reuse the stored catalog without another metadata request. A 429,
+5xx, timeout, or malformed response fails the refresh without speculative extra
+requests. Latest-per-entity selection still refreshes upstream first because the
+local database cannot prove that no newer dump exists.
+
 Catalog discovery and file downloads use the official `data.discogs.com` dump
 browser. Direct S3 bucket and object URLs are not part of this contract. The
 browser catalog exposes rounded display sizes, so new catalog rows store
