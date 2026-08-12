@@ -126,8 +126,9 @@ the database URI through a secret mechanism instead of command history.
 Byte progress describes transfer/read activity. Import progress reports
 durably committed roots, not merely parsed rows; its percentage appears only
 after an exact entity total is stored. Progress records are one JSON object per
-line, but ordinary lifecycle messages can also use stdout; do not treat the
-entire stream as a JSON-only document. Keep stderr separate from collectors.
+line. Floating-point progress metrics are numeric values rounded to at most two
+decimal places. Ordinary lifecycle messages can also use stdout; do not treat
+the entire stream as a JSON-only document. Keep stderr separate from collectors.
 
 ### Resources
 
