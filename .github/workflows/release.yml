@@ -110,7 +110,10 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.release-created == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
+    env:
+      IMAGE_REPOSITORY: ghcr.io/dsub-io/go-open-discogs-batch
+      OPEN_DISCOGS_TEST_RUN_ID: gh-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     permissions:
       contents: write
       packages: write
@@ -151,14 +154,76 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Test release source
-        run: go test ./...
+      - name: Verify release policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq empty release-please-config.json
+          for type in build chore ci docs refactor style test; do
+            jq -e \
+              --arg type "$type" \
+              'any(.["changelog-sections"][]; .type == $type and .hidden == true)' \
+              release-please-config.json >/dev/null
+          done
+
+      - name: Verify formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'The following files need gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Verify module metadata
+        run: go mod tidy -diff
+
+      - name: Vet release packages
+        run: go vet ./...
+
+      - name: Test release with race detector and coverage
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Enforce exact release coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          total="$(
+            go tool cover -func=coverage.out |
+              awk '/^total:/ { gsub("%", "", $3); print $3 }'
+          )"
+          if [[ -z "$total" ]]; then
+            echo "::error::Coverage profile has no total."
+            exit 1
+          fi
+          uncovered="$(
+            awk 'NR > 1 && $2 > 0 && $3 == 0 { print }' coverage.out
+          )"
+          if [[ -n "$uncovered" ]]; then
+            printf 'coverage %s%% has uncovered statements:\n%s\n' \
+              "$total" "$uncovered"
+            exit 1
+          fi
+          printf 'coverage %s%% has no uncovered statements\n' "$total"
+
+      - name: Run release dump-to-PostgreSQL end-to-end tests
+        run: >-
+          go test -tags=e2e
+          -run '^(TestBatchE2E|TestImportExecutionCoordinator)$'
+          -count=1
+          ./src/batch
+
+      - name: Remove owned test resources and verify no residue
+        if: ${{ always() }}
+        shell: bash
+        run: scripts/verify-test-docker-cleanup.sh
 
       - name: Publish release binaries
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           distribution: goreleaser
-          version: latest
+          version: v2.17.1
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -176,7 +241,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
-      - name: Publish release container
+      - name: Publish versioned release container
         id: image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
@@ -187,30 +252,146 @@ jobs:
             VERSION=${{ needs.release-please.outputs.version }}
           tags: |
             ghcr.io/dsub-io/go-open-discogs-batch:${{ needs.release-please.outputs.version }}
-            ghcr.io/dsub-io/go-open-discogs-batch:latest
           labels: |
             org.opencontainers.image.source=https://github.com/dsub-io/go-open-discogs-batch
             org.opencontainers.image.revision=${{ needs.release-please.outputs.sha }}
             org.opencontainers.image.version=${{ needs.release-please.outputs.version }}
             org.opencontainers.image.licenses=MIT
 
-      - name: Verify published architectures
+      - name: Verify versioned image
+        shell: bash
+        env:
+          EXPECTED_IMAGE_LICENSES: MIT
+          EXPECTED_IMAGE_SOURCE: https://github.com/dsub-io/go-open-discogs-batch
+          EXPECTED_IMAGE_USER: 65532:65532
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+          VERSIONED_IMAGE: ghcr.io/dsub-io/go-open-discogs-batch:${{ needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Buildx returned an invalid image digest."
+            exit 1
+          fi
+
+          manifest="$(
+            docker buildx imagetools inspect \
+              --format '{{json .Manifest}}' \
+              "$VERSIONED_IMAGE"
+          )"
+          published_digest="$(jq -er '.digest' <<<"$manifest")"
+          if [[ "$published_digest" != "$IMAGE_DIGEST" ]]; then
+            echo "::error::Versioned image tag does not resolve to the Buildx digest."
+            exit 1
+          fi
+          jq -e '
+            def target_platform:
+              .platform.os == "linux" and
+              (.platform.architecture == "amd64" or .platform.architecture == "arm64");
+            def attestation:
+              (.annotations["vnd.docker.reference.type"] // "") == "attestation-manifest" and
+              .platform.os == "unknown" and
+              .platform.architecture == "unknown";
+            all(.manifests[]; target_platform or attestation) and
+            ([
+              .manifests[]
+              | select(target_platform)
+              | (.platform.os + "/" + .platform.architecture)
+            ] | sort) == ["linux/amd64", "linux/arm64"]
+          ' <<<"$manifest" >/dev/null
+
+          verify_platform_image() {
+            local platform="$1"
+            local platform_digest="$2"
+            local platform_image="${IMAGE_REPOSITORY}@${platform_digest}"
+            local image_licenses
+            local image_revision
+            local image_source
+            local image_user
+            local image_version
+            local reported_version
+
+            docker pull --platform "$platform" "$platform_image"
+
+            image_user="$(
+              docker image inspect "$platform_image" --format '{{.Config.User}}'
+            )"
+            if [[ "$image_user" != "$EXPECTED_IMAGE_USER" ]]; then
+              echo "::error::$platform image user is $image_user, expected $EXPECTED_IMAGE_USER."
+              return 1
+            fi
+
+            image_source="$(
+              docker image inspect "$platform_image" \
+                --format '{{ index .Config.Labels "org.opencontainers.image.source" }}'
+            )"
+            image_revision="$(
+              docker image inspect "$platform_image" \
+                --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+            )"
+            image_version="$(
+              docker image inspect "$platform_image" \
+                --format '{{ index .Config.Labels "org.opencontainers.image.version" }}'
+            )"
+            image_licenses="$(
+              docker image inspect "$platform_image" \
+                --format '{{ index .Config.Labels "org.opencontainers.image.licenses" }}'
+            )"
+            if [[ "$image_source" != "$EXPECTED_IMAGE_SOURCE" ||
+              "$image_revision" != "$RELEASE_SHA" ||
+              "$image_version" != "$RELEASE_VERSION" ||
+              "$image_licenses" != "$EXPECTED_IMAGE_LICENSES" ]]; then
+              echo "::error::$platform image OCI labels do not match the release."
+              return 1
+            fi
+
+            reported_version="$(
+              docker run --rm --network none --read-only \
+                --platform "$platform" \
+                "$platform_image" --version
+            )"
+            if [[ "$reported_version" != "go-open-discogs-batch $RELEASE_VERSION" ]]; then
+              echo "::error::$platform image reports unexpected version: $reported_version"
+              return 1
+            fi
+          }
+
+          while IFS=$'\t' read -r platform platform_digest; do
+            verify_platform_image "$platform" "$platform_digest"
+          done < <(
+            jq -r '
+              .manifests[]
+              | select(
+                  .platform.os == "linux" and
+                  (.platform.architecture == "amd64" or
+                   .platform.architecture == "arm64")
+                )
+              | [(.platform.os + "/" + .platform.architecture), .digest]
+              | @tsv
+            ' <<<"$manifest"
+          )
+
+      - name: Promote validated image to latest
         shell: bash
         env:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           set -euo pipefail
-          manifest="$(
-            docker buildx imagetools inspect --raw \
-              "ghcr.io/dsub-io/go-open-discogs-batch@${IMAGE_DIGEST}"
+          immutable_image="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+          latest_image="${IMAGE_REPOSITORY}:latest"
+
+          docker buildx imagetools create \
+            --tag "$latest_image" \
+            "$immutable_image"
+
+          latest_manifest="$(
+            docker buildx imagetools inspect \
+              --format '{{json .Manifest}}' \
+              "$latest_image"
           )"
-          jq -e '
-            ([
-              .manifests[].platform
-              | select(
-                  .os == "linux" and
-                  (.architecture == "amd64" or .architecture == "arm64")
-                )
-              | (.os + "/" + .architecture)
-            ] | unique) == ["linux/amd64", "linux/arm64"]
-          ' <<<"$manifest"
+          latest_digest="$(jq -er '.digest' <<<"$latest_manifest")"
+          if [[ "$latest_digest" != "$IMAGE_DIGEST" ]]; then
+            echo "::error::Latest image does not resolve to the validated digest."
+            exit 1
+          fi

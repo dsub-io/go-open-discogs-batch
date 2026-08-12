@@ -1,6 +1,7 @@
 name: E2E
 
 on:
+  merge_group:
   workflow_dispatch:
   pull_request:
     types:
@@ -37,7 +38,7 @@ jobs:
           -count=1
           ./src/batch
 
-      - name: Verify test Docker cleanup
+      - name: Remove owned test resources and verify no residue
         if: ${{ always() }}
         shell: bash
         run: scripts/verify-test-docker-cleanup.sh
