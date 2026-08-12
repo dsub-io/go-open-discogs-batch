@@ -1,15 +1,25 @@
 # Performance measurements
 
-These measurements isolate named changes. They are not estimates of full-dump
-throughput on other hardware. See the [README](../README.md) for sizing guidance
-and [Import safety and recovery](import-safety.md) for the guarantees whose cost
-is measured here.
+These are bounded measurements of named changes, not forecasts for a full dump
+or different hardware. They also do not approve a production import: both
+batch implementations still require release and cross-language validation
+against canonical `open-discogs-model` v0.3.0.
+
+## Results at a glance
+
+| Change | Measured outcome | Scope |
+| --- | --- | --- |
+| Reference ID cache | 25.4× lower median time; 99.88% fewer allocated bytes | 1,000,000 sequential IDs |
+| Durable import contract | Higher fixed latency and allocation | 12-record PostgreSQL fixture |
+| Successful-manifest preflight | 95.4% lower p50; avoided 64 MiB file I/O | Cached sparse file |
+
+Do not compare rows across these harnesses. Their inputs, paths, and units are
+different.
 
 ## Reference ID cache
 
-On an Apple M2 Pro, the previous `sync.Map` and the segmented bit set were
-compared with 1,000,000 sequential IDs, three iterations per sample and five
-samples.
+On an Apple M2 Pro, the previous `sync.Map` and segmented bit set were compared
+with 1,000,000 sequential IDs, three iterations per sample, and five samples.
 
 | Metric | Before | After | Change |
 | --- | ---: | ---: | ---: |
@@ -18,7 +28,8 @@ samples.
 | Allocations/op | 2,359,348 | 39 | 99.998% lower |
 
 Release-to-master updates also changed up to 5,000 row-by-row statements at the
-default chunk size into one set-based statement.
+default chunk size into one set-based statement. That is a statement-count
+fact; no latency improvement was measured for this change.
 
 ## Durable import cost
 
@@ -39,7 +50,7 @@ The added fixed cost buys active-run fencing, exact chunk-ledger commits,
 coverage validation, and stale-relation reconciliation. A 12-record fixture
 exaggerates this cost and cannot represent a full import.
 
-## Successful-manifest skip
+## Successful-manifest preflight
 
 The same successful manifest and a cached 64 MiB sparse file compared checksum
 before admission with admission before checksum.
@@ -51,16 +62,30 @@ before admission with admission before checksum.
 | Allocations/op | 113 | 106 | 6.2% lower |
 | Avoided file I/O | — | 64 MiB/invocation | — |
 
-Peak RSS was not reported because the microbenchmark process includes test and
-container lifecycle overhead while the fixture is too small to represent
+Peak RSS is not reported: the microbenchmark process includes test and
+container lifecycle overhead, while the fixture is too small to represent
 production memory.
 
-## Reproduction
+## Reproduce
 
 ```shell
 go test ./src/batch -run '^$' \
-  -bench '^BenchmarkDurableBatchImport$' -benchtime=1x -count=20 -benchmem
+  -bench '^(BenchmarkBatchImport|BenchmarkDurableBatchImport)$' \
+  -benchtime=1x -count=20 -benchmem
 go test ./src/batch -run '^$' \
   -bench '^BenchmarkCompletedManifestPreflight$' -benchtime=1x -count=20 -benchmem
-go test -run '^$' -bench 'IDSetLoadMillion' -benchmem ./src/cache
+go test ./src/cache -run '^$' \
+  -bench '^(BenchmarkIDSetLoadMillion|BenchmarkSyncMapIDSetLoadMillion)$' \
+  -benchtime=3x -count=5 -benchmem
 ```
+
+Each command includes both comparison paths or implementations. The cache
+command matches the recorded three iterations and five samples. Exact published
+numbers still require the stated Apple M2 Pro and PostgreSQL 18.4 tmpfs
+environment, equivalent system load, and the same Go toolchain. Results from
+another machine are new measurements, not a reproduction of these tables.
+
+These fixtures do not measure a production-sized dump, cold storage, network
+download, or peak process RSS. The preflight benchmark uses a sparse file and
+the import benchmark uses 12 records; neither may be extrapolated to the
+200-million-row deployment.

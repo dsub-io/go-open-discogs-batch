@@ -1,51 +1,53 @@
 # Import safety and recovery
 
-This is the detailed contract for dump selection, concurrent runs, commits,
-recovery, and reader visibility. For normal setup, start with the
-[README](../README.md).
+This is the operational contract for dump discovery, admission, commits,
+recovery, and reader visibility. The schema contract is canonical
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.3.0,
+shared with the Java importer.
 
-## At a glance
+> [!CAUTION]
+> Production import is not approved yet. Release both importers against model
+> v0.3.0 and finish cross-language migration, recovery, and full-dump validation
+> before starting or resuming one.
+
+## Decision table
 
 | Event | Result |
 | --- | --- |
-| Same successful manifest | Skip before downloading while checkpoints remain current |
-| Compatible interrupted run | Resume only verified committed chunks |
+| Same successful manifest | Skip before download only while selected checkpoints remain current and no later failed or abandoned run has dirtied them |
+| Compatible interrupted run | Resume verified committed chunks |
 | Different manifest or `--force` | Start from zero |
 | Older entity dump | Reject unless `--allow-downgrade` is set |
-| Failed import | Keep downloaded files and durable progress |
+| Failed import | Keep downloads and durable progress |
 | Successful import with `--cleanup` | Remove only files selected by that import |
 
-## Dump discovery
+## Catalog request budget
 
 Artist, label, master, and release select their newest dumps independently
-unless `--dump-month` requests an exact month. Every run records dump dates,
+unless `--dump-month` requests an exact month. Every run pins dump dates,
 SHA-256 checksums, source URIs, and stable identifiers in one immutable
-manifest.
+manifest before download.
 
-Discovery depends on the request:
+| Selection | Complete durable catalog | Upstream requests when needed |
+| --- | --- | --- |
+| Exact month, 2021 or newer | Reuse it; **0 requests** | Exactly **1** direct monthly checksum-manifest request |
+| Exact month, before 2021 | Reuse it; **0 requests** | Exactly **1** annual catalog request plus **1 checksum request per distinct selected dump date** |
+| Latest per entity | Refresh because local state cannot prove newest | Exactly **1** root-index request, **1** latest-year catalog request, and **1 checksum request per distinct selected dump date** |
 
-- An exact month first uses a complete matching PostgreSQL catalog entry.
-- Missing entities from 2021 onward require one monthly checksum request.
-- Older irregular publication dates require one annual catalog request and one
-  checksum request.
-- Latest-per-entity selection refreshes upstream because a local catalog cannot
-  prove that no newer dump exists.
+A document is requested once; HTTP 429, 5xx, timeout, and malformed content do
+not trigger speculative retries. If latest discovery fails, a durable catalog
+is accepted only when it contains a complete selection. Exact-month discovery
+fails after its single bounded refresh attempt.
 
-Selected URIs and checksums are stored before file download. Retries reuse this
-pinned catalog.
-
-Catalog and file access use the official `data.discogs.com` browser. Rounded
-catalog display sizes are stored as unknown (`size_bytes=0`); byte progress
-uses HTTP `Content-Length` or the exact local file size. A 429, 5xx, timeout, or
-malformed catalog response fails without speculative request retries. If a
-latest-catalog refresh fails, a locally stored catalog may be used only when it
-fully satisfies the request.
+Selected URIs and checksums are persisted before file download, so a retry
+reuses the pinned catalog. Rounded HTML sizes are stored as unknown
+(`size_bytes=0`); byte progress uses an exact HTTP `Content-Length` or local
+file size when available.
 
 ## Admission and locking
 
-A successful manifest is skipped before file download and checksum work only
-while all selected entity dumps remain current checkpoints and no later failed
-or abandoned run has dirtied those entities.
+A successful manifest is skippable only while every selected entity remains
+the current checkpoint and no newer failed or abandoned run has dirtied it.
 
 PostgreSQL advisory locks cover selected entities and their references:
 
@@ -56,60 +58,75 @@ PostgreSQL advisory locks cover selected entities and their references:
 | Master | Artist, Master |
 | Release | Artist, Label, Master, Release |
 
-Release takes the full set because it also updates `master.main_release_id`.
+Release takes all locks because it also updates `master.main_release_id`.
+Independent sets such as Artist and Label may run together; overlapping Go and
+Java imports cannot write concurrently. Schema migration takes the same shared
+lock family, so migration cannot race an active importer.
 
-Independent sets such as Artist and Label may run together. Overlapping Go and
-Java imports cannot write concurrently.
+A partial Master or Release import is admitted only when each omitted reference
+entity has a compatible successful checkpoint. A missing checkpoint, a stale
+checkpoint, or a same-date dump reissued with a different checksum fails before
+the batch writes data. Selecting the dependency in the same run satisfies this
+preflight.
 
-## Commit and convergence boundary
+## Atomicity and idempotency
 
-For every tracked chunk, one PostgreSQL transaction contains:
+For each tracked chunk, one PostgreSQL transaction contains:
 
-- canonical roots and each root's exact relation set;
+- canonical root rows and each root's exact supported relation set;
 - the committed-chunk ledger entry;
 - the processed-item counter.
 
-Missing relations are deleted, mutable values are updated, and unchanged rows
-retain their surrogate IDs. Root rows are upserted; roots absent from the
-complete dump are not currently deleted.
+The model v0.3.0 import contract is part of resume and success compatibility.
+An older successful Release contract cannot suppress the corrected Release
+import semantics published by that model.
 
-An entity completes only when chunk indexes cover the parsed stream with no
-gaps, overlaps, or out-of-range indexes and item and chunk totals match. A run
-becomes successful only after every selected entity completes.
+Missing supported relations are deleted, mutable values are updated, and
+unchanged rows retain their surrogate IDs. Exact relation duplicates collapse
+by canonical PostgreSQL conflict keys; conflicting payloads for one key fail
+before SQL instead of applying first- or last-write-wins. Root rows are
+upserted, but roots absent from the complete dump are not deleted.
 
-The schema still uses signed 32-bit Java hashes for several relation identities.
-Distinct values can collide within one root. Migration to collision-resistant
-identity is tracked in
+An entity completes only when chunk indexes cover the parsed stream without
+gaps, overlaps, or out-of-range values and all item and chunk totals match. A
+run succeeds only after every selected entity completes.
+
+Several relation identities still use signed 32-bit Java hashes. Distinct
+values can collide within one root; collision-resistant identity is tracked in
 [`open-discogs-model#43`](https://github.com/dsub-io/open-discogs-model/issues/43).
 
 ## Interruption and resume
 
 `SIGINT` and `SIGTERM` cancel download, parsing, and database work. The active
-chunk rolls back; run failure is recorded with a separate bounded completion
-context. `SIGKILL`, host loss, or a database disconnect may leave a run marked
+chunk rolls back; run failure is recorded through a separate bounded completion
+context. `SIGKILL`, host loss, or database loss may leave a run marked
 `running`.
 
-After acquiring the required locks, the next process marks an abandoned run
-failed and transfers its valid ledger atomically. Resume requires an exact
+After taking the required locks, the next process marks an abandoned run failed
+and atomically transfers its valid ledger. Resume requires an exact compatible
 match on:
 
-- manifest;
+- manifest and per-entity import contract revision;
 - processor name and version;
 - entity and dump identity;
 - chunk size.
 
 If transfer fails, the new run rolls back and the source ledger remains
-authoritative.
+authoritative. Each chunk fences on its owning run row, so a delayed worker
+cannot commit after abandonment. Failed ledgers remain until compatible current
+success checkpoints supersede every protected entity/dump pair.
 
-Every chunk fences on its owning run row. A delayed worker cannot commit after
-that run is abandoned. Failed ledgers remain until compatible current success
-checkpoints supersede every entity and dump pair they protect.
-
-## Snapshot visibility
+## Visibility and cleanup
 
 Atomicity is per chunk, not per monthly snapshot. Permanent full-dump staging
-is intentionally avoided because it would duplicate a catalog exceeding 200
-million records. Readers may observe committed chunks during an import.
+is avoided because it would duplicate a catalog exceeding 200 million records.
+Readers may observe committed chunks during import. Deployments requiring an
+all-at-once switch must import into a separate versioned database or replica,
+validate it, and then promote it.
 
-Deployments requiring an all-at-once switch must import into a separate
-versioned database or replica and promote it after validation.
+Downloaded data cleanup and test infrastructure cleanup are separate:
+
+- `--cleanup` removes only manifest-selected dump files after durable success.
+- Integration tests use per-run Docker labels and PostgreSQL tmpfs. In-process
+  cleanup and CI's always-run teardown remove only owned containers, networks,
+  and volumes, then verify zero residue.

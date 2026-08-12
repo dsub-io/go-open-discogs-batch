@@ -1,11 +1,17 @@
 # Go OpenDiscogs Batch
 
-Stream Discogs monthly public data dumps into PostgreSQL with bounded memory
-and resumable, idempotent imports.
+Stream Discogs monthly public data dumps into PostgreSQL with bounded memory,
+durable progress, and idempotent recovery.
 
-Go and Java consume the same canonical schema published by
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model). This is
-an independent project and is not endorsed by Discogs.
+This release consumes canonical
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.3.0.
+Go and Java therefore apply the same migration bytes and import contracts. This
+is an independent project and is not endorsed by Discogs.
+
+> [!CAUTION]
+> **Production import is not approved yet.** Publish both batch implementations
+> against model v0.3.0 and complete cross-language migration, recovery, and
+> full-dump validation before starting or resuming a production import.
 
 - [Import safety and recovery](docs/import-safety.md)
 - [Performance measurements](docs/performance.md)
@@ -14,8 +20,8 @@ an independent project and is not endorsed by Discogs.
 ## Quick start
 
 The PostgreSQL database must already exist. The importer creates the selected
-schema when permitted, applies canonical migrations, downloads the dumps, and
-imports them.
+schema when permitted, applies canonical migrations, resolves and downloads the
+selected dumps, then imports them.
 
 ```shell
 go-open-discogs-batch \
@@ -25,85 +31,114 @@ go-open-discogs-batch \
 ```
 
 Omit `--dump-month` to select the latest dump for each entity independently.
-Use `--dump-month=2026-07` when every selected entity must come from that month.
+Use `--dump-month=2026-07` to require every selected entity from that month.
+Exact-month runs use a complete durable catalog without an upstream request;
+otherwise discovery performs the bounded request sequence documented in
+[Import safety and recovery](docs/import-safety.md#catalog-request-budget).
 
-## What an import guarantees
+## Import contract
 
-- Artist, label, master, and release dumps are decompressed and parsed as
-  streams; the full dump is never held in memory.
-- A compatible interrupted run resumes committed chunks. `--force` starts the
-  same manifest from zero.
-- A root and its complete relation set commit atomically with durable progress.
-- Removed relations are reconciled; roots absent from a newer dump are not
-  deleted.
-- Older dumps require `--allow-downgrade`. Downloads are retained unless a
-  successful run uses `--cleanup`.
+| Boundary | Behavior |
+| --- | --- |
+| Source | Monthly public dumps only; no Discogs API, live hydration, or user writes |
+| Memory | Dumps are decompressed and parsed as streams; the full dump is never held in memory |
+| Commit | A root, its supported relations, and durable chunk progress commit atomically |
+| Retry | Compatible interrupted runs resume verified chunks; `--force` restarts the same manifest from zero |
+| Convergence | Supported missing relations are removed; roots absent from a newer dump are not deleted |
+| Visibility | Readers can observe committed chunks; a complete monthly import is not an atomic snapshot switch |
+| Files | Failed-run downloads remain; `--cleanup` removes only this run's selected files after success |
 
-See [Import safety and recovery](docs/import-safety.md) for exact discovery,
-locking, interruption, convergence, and snapshot-visibility semantics.
+Older dumps require `--allow-downgrade`. See
+[Import safety and recovery](docs/import-safety.md) for admission, locking,
+interruption, and resume rules.
+
+### Release data scope
+
+| Release data | Current behavior |
+| --- | --- |
+| Imported | Core fields; release artists; labels and catalog numbers; companies; formats; genres and styles; identifiers; top-level tracks; videos; release-level credited artist ID and role |
+| Not imported | Series membership; per-track artists and extra artists; sub-track/index-track hierarchy; `anv`, `join`, and credit `tracks` metadata not represented by the canonical schema |
+| Images | The audited 2026-08 public release dump has no image elements; no separate image source is used |
+
+Downstream services must review the current
+[Discogs API Terms of Use](https://support.discogs.com/hc/en-us/articles/360009334593-API-Terms-of-Use)
+for every source they combine. A monthly snapshot cannot satisfy live API
+freshness by itself; attribution, refresh, caching, and redistribution remain
+the downstream operator's responsibility.
 
 ## Database setup
 
-There is no separate `init` command and the database itself is never created.
+PostgreSQL 15 or newer is required. There is no separate `init` command, and
+the importer never creates the database.
 
-| Target state | Required authority |
+| Target | Required authority |
 | --- | --- |
-| Schema does not exist | `CREATE` on the database |
-| Schema exists | `USAGE` and `CREATE` on the schema, table writes, and migration DDL authority |
-| Batch role cannot migrate | A DBA must prepare the schema and grants first |
+| Missing schema | `CREATE` on the database; the importer creates the selected schema |
+| Existing schema | `USAGE` and `CREATE` on the schema, table writes, and migration DDL authority |
+| Restricted batch role | A DBA prepares the schema, extension, and grants first |
 
-The default schema is `public` and produces a warning on every startup. Prefer
-a dedicated schema such as `open_discogs`. Schema names must be 1–63 lowercase
-letters, digits, or underscores and begin with a letter or underscore.
+Model v0.3.0 migrations are the only schema source of truth. Migration V007
+uses `CREATE EXTENSION IF NOT EXISTS pg_trgm`; allow the migration role to
+install this trusted extension or have a DBA pre-install it in a stable schema
+visible to the migration role. Catalog tables are still created only in the
+selected database schema.
+
+> [!WARNING]
+> Omitting `--database-schema` uses `public` and emits a warning on every
+> startup. Prefer a dedicated schema such as `open_discogs`.
+
+Schema names must be 1–63 lowercase letters, digits, or underscores and begin
+with a letter or underscore.
 
 ## Configuration
 
 Precedence is `CLI > ENV > default`.
 
-| CLI | Environment | Default | Purpose |
-| --- | --- | --- | --- |
-| `--database-url` | `OPEN_DISCOGS_BATCH_DATABASE_URL` | required | PostgreSQL URI; percent-encode credentials |
-| `--database-schema` | `OPEN_DISCOGS_BATCH_DATABASE_SCHEMA` | `public` | Schema to create or migrate |
-| `--entities`, `-e` | `OPEN_DISCOGS_BATCH_ENTITIES` | all | Comma-separated entity list |
-| `--dump-month`, `-m` | `OPEN_DISCOGS_BATCH_DUMP_MONTH` | latest per entity | Exact month in `yyyy-MM` |
-| `--data-dir` | `OPEN_DISCOGS_BATCH_DATA_DIR` | `~/.cache/open-discogs-batch` | Download directory |
-| `--chunk-size`, `-b` | `OPEN_DISCOGS_BATCH_CHUNK_SIZE` | `5000` | Roots per transaction chunk |
-| `--max-workers` | `OPEN_DISCOGS_BATCH_MAX_WORKERS` | runtime CPU allocation | Concurrent import workers |
-| `--cleanup`, `-c` | `OPEN_DISCOGS_BATCH_CLEANUP` | `false` | Remove selected dumps after success |
-| `--force`, `-f` | `OPEN_DISCOGS_BATCH_FORCE` | `false` | Reprocess a successful manifest |
-| `--allow-downgrade` | `OPEN_DISCOGS_BATCH_ALLOW_DOWNGRADE` | `false` | Permit and audit older dumps |
-| `--help`, `-h` | — | — | Show help without connecting to PostgreSQL |
-| `--version`, `-v` | — | — | Show version without connecting to PostgreSQL |
+| CLI | Environment | Type | Default | Required | Valid values / purpose |
+| --- | --- | --- | --- | --- | --- |
+| `--database-url` | `OPEN_DISCOGS_BATCH_DATABASE_URL` | URI | none | yes | `postgres[ql]://user:password@host[:port]/database`; percent-encode credentials |
+| `--database-schema` | `OPEN_DISCOGS_BATCH_DATABASE_SCHEMA` | string | `public` | no | 1–63 lowercase letters, digits, or underscores; starts with a letter or underscore |
+| `--entities`, `-e` | `OPEN_DISCOGS_BATCH_ENTITIES` | string list | all four | no | Non-empty subset of `artist,label,master,release` |
+| `--dump-month`, `-m` | `OPEN_DISCOGS_BATCH_DUMP_MONTH` | `yyyy-MM` | latest per entity | no | `2008-03` through the current calendar month |
+| `--data-dir` | `OPEN_DISCOGS_BATCH_DATA_DIR` | path | `~/.cache/open-discogs-batch` | no | Writable download directory |
+| `--chunk-size`, `-b` | `OPEN_DISCOGS_BATCH_CHUNK_SIZE` | integer | `5000` | no | `1..2,147,483,647`; roots per transaction chunk |
+| `--max-workers` | `OPEN_DISCOGS_BATCH_MAX_WORKERS` | integer | visible CPU count | no | `1..2,147,483,647`; concurrent import workers |
+| `--cleanup`, `-c` | `OPEN_DISCOGS_BATCH_CLEANUP` | boolean | `false` | no | Remove only selected dumps after successful import |
+| `--force`, `-f` | `OPEN_DISCOGS_BATCH_FORCE` | boolean | `false` | no | Reprocess an otherwise skippable successful manifest from zero |
+| `--allow-downgrade` | `OPEN_DISCOGS_BATCH_ALLOW_DOWNGRADE` | boolean | `false` | no | Permit and audit an older dump than the entity checkpoint |
+| `--help`, `-h` | — | action | `false` | no | Show help without connecting to PostgreSQL |
+| `--version`, `-v` | — | action | `false` | no | Show version without connecting to PostgreSQL |
 
-Keep credentials out of command history and inject the database URI through
-your platform's secret mechanism.
+Boolean ENV values accept `true/false`, `1/0`, `yes/no`, and `on/off`
+case-insensitively. `OPEN_DISCOGS_BATCH_ENTITIES` is comma-separated. Inject
+the database URI through a secret mechanism instead of command history.
 
-## Operate it
+## Operations
 
 ### Progress output
 
-An interactive terminal gets one progress bar on stderr. Redirected or piped
-stdout gets line-delimited JSON instead:
+| Destination | Output |
+| --- | --- |
+| Interactive stderr | One visual byte-progress bar for download or source read |
+| Non-terminal stdout | JSON progress records: `byte_progress` plus durable `import_progress` |
+| Terminal stdout | Structured records are suppressed |
 
-```shell
-go-open-discogs-batch [options] | tee import.jsonl >/dev/null
-```
+Byte progress describes transfer/read activity. Import progress reports
+durably committed roots, not merely parsed rows; its percentage appears only
+after an exact entity total is stored. Progress records are one JSON object per
+line, but ordinary lifecycle messages can also use stdout; do not treat the
+entire stream as a JSON-only document. Keep stderr separate from collectors.
 
-Do not merge stderr into stdout when collecting JSON. Import counters represent
-durably committed roots; a percentage appears only after the exact stream total
-has been established.
+### Resources
 
-### CPU and memory
+`--max-workers` limits import concurrency, not CPU usage. The default is the Go
+runtime's visible CPU count; no percentage heuristic is applied. Use container
+or scheduler limits for a hard CPU quota.
 
-`--max-workers` limits importer concurrency, not CPU usage. Omitted means the Go
-runtime's visible CPU allocation; no percentage heuristic is applied. Use
-container or scheduler CPU limits for a hard quota.
-
-Working memory is governed by `chunk-size × max-workers × relation fan-out`.
-Release has the highest fan-out. Start with workers no higher than the CPU and
-database connections reserved for the job, then reduce chunk size for memory
-pressure or workers for database contention. See [Performance measurements](docs/performance.md)
-for measured results and reproduction commands.
+Working memory grows with `chunk-size × max-workers × relation fan-out`.
+Release has the highest fan-out. The PostgreSQL pool allows at most
+`max-workers + 1` open connections: one per worker plus one coordinator. Agree
+that budget with the DBA and reduce chunk size or workers under pressure.
 
 ### Container
 
@@ -120,12 +155,15 @@ docker run --rm --cpus=4 \
   ghcr.io/dsub-io/go-open-discogs-batch:latest
 ```
 
-Mount writable storage when downloads must survive container replacement.
+Mount writable storage only when downloads must survive container replacement.
 
 ## Development
 
-Source builds require Go 1.26. Integration tests require Docker and remove the
-exact containers, networks, and volumes they create on success or failure.
+Source builds require Go 1.26. Integration tests label every owned Docker
+resource with a per-run identity and use tmpfs for PostgreSQL. In-process
+cleanup and CI's always-run teardown remove only those containers, networks,
+and volumes, then verify that residue is zero. Persistent test volumes and bind
+mounts are not allowed.
 
 ```shell
 gofmt -w .
@@ -135,7 +173,7 @@ go test -race -coverprofile=coverage.out -covermode=atomic ./...
 ```
 
 CI checks formatting, module consistency, vet, race detection, PostgreSQL and
-dump E2E behavior, and 100% statement coverage.
+dump E2E behavior, cleanup residue, and 100% statement coverage.
 
 ## License
 
