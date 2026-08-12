@@ -20,6 +20,8 @@ jobs:
     name: Discogs data E2E
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      OPEN_DISCOGS_TEST_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -34,3 +36,8 @@ jobs:
           -run '^(TestBatchE2E|TestImportExecutionCoordinator)$'
           -count=1
           ./src/batch
+
+      - name: Verify test Docker cleanup
+        if: ${{ always() }}
+        shell: bash
+        run: scripts/verify-test-docker-cleanup.sh

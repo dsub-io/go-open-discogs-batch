@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -73,6 +74,69 @@ func validPostgresContainerStub() *postgresContainerStub {
 		host:       "127.0.0.1",
 		port:       network.MustParsePort("15432/tcp"),
 	}
+}
+
+func TestCurrentTestRunID(t *testing.T) {
+	t.Setenv(testRunIDEnv, "")
+	actual, err := currentTestRunID()
+	require.NoError(t, err)
+	require.Equal(t, localTestRunID, actual)
+
+	t.Setenv(testRunIDEnv, "ci-123.4_job")
+	actual, err = currentTestRunID()
+	require.NoError(t, err)
+	require.Equal(t, "ci-123.4_job", actual)
+
+	for _, invalid := range []string{
+		"contains/slash",
+		" contains-space",
+		strings.Repeat("a", testRunIDMaxLength+1),
+	} {
+		t.Setenv(testRunIDEnv, invalid)
+		_, err = currentTestRunID()
+		require.ErrorContains(t, err, testRunIDEnv)
+	}
+}
+
+func TestSetupPostgresAppliesExactOwnershipLabels(t *testing.T) {
+	originalCreate := createPostgresContainer
+	t.Cleanup(func() { createPostgresContainer = originalCreate })
+	t.Setenv(testRunIDEnv, "focused-test-run")
+	reporter := &reporterStub{}
+
+	createPostgresContainer = func(
+		_ context.Context,
+		req testcontainers.ContainerRequest,
+	) (postgresContainer, error) {
+		require.Equal(t, testOwnerLabelValue, req.Labels[testOwnerLabelKey])
+		require.Equal(t, "focused-test-run", req.Labels[testRunIDLabelKey])
+		return validPostgresContainerStub(), nil
+	}
+
+	require.NotEqual(t, Database{}, setupPostgres(reporter))
+	require.Empty(t, reporter.fatals)
+	require.Len(t, reporter.cleanups, 1)
+	reporter.cleanups[0]()
+}
+
+func TestSetupPostgresRejectsInvalidRunIdentityBeforeStartingContainer(t *testing.T) {
+	originalCreate := createPostgresContainer
+	t.Cleanup(func() { createPostgresContainer = originalCreate })
+	t.Setenv(testRunIDEnv, "invalid/run")
+	reporter := &reporterStub{}
+	started := false
+	createPostgresContainer = func(
+		context.Context,
+		testcontainers.ContainerRequest,
+	) (postgresContainer, error) {
+		started = true
+		return validPostgresContainerStub(), nil
+	}
+
+	require.Equal(t, Database{}, setupPostgres(reporter))
+	require.False(t, started)
+	require.Len(t, reporter.fatals, 1)
+	require.Empty(t, reporter.cleanups)
 }
 
 func TestSetupPostgresReportsStartAndResolutionFailures(t *testing.T) {

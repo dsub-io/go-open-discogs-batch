@@ -3,6 +3,8 @@ package testutils
 import (
 	"context"
 	"fmt"
+	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -28,7 +30,22 @@ const (
 	postgresWaitLog       = `database system is ready to accept connections`
 	testOwnerLabelKey     = "io.dsub.test-owner"
 	testOwnerLabelValue   = "go-open-discogs-batch"
+	testRunIDEnv          = "OPEN_DISCOGS_TEST_RUN_ID"
+	testRunIDLabelKey     = "io.dsub.test-run"
+	testRunIDLocalPrefix  = "local"
+	testRunIDMaxLength    = 128
 	postgresDataDirectory = "/var/lib/postgresql"
+)
+
+var (
+	createPostgresContainer = startPostgresContainer
+	localTestRunID          = fmt.Sprintf(
+		"%s-%d-%d",
+		testRunIDLocalPrefix,
+		os.Getpid(),
+		time.Now().UTC().UnixNano(),
+	)
+	testRunIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 )
 
 type Database struct {
@@ -53,8 +70,6 @@ type postgresContainer interface {
 	Host(context.Context) (string, error)
 	MappedPort(context.Context, string) (network.Port, error)
 }
-
-var createPostgresContainer = startPostgresContainer
 
 func startPostgresContainer(
 	ctx context.Context,
@@ -93,6 +108,11 @@ func GetDatabase(t testing.TB, db DatabaseType) Database {
 
 func setupPostgres(t testReporter) Database {
 	t.Helper()
+	testRunID, err := currentTestRunID()
+	if err != nil {
+		t.Fatalf("resolve PostgreSQL test run identity: %v", err)
+		return Database{}
+	}
 	ctx := context.Background()
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{},
@@ -106,6 +126,7 @@ func setupPostgres(t testReporter) Database {
 		ExposedPorts: []string{postgresPort},
 		Labels: map[string]string{
 			testOwnerLabelKey: testOwnerLabelValue,
+			testRunIDLabelKey: testRunID,
 		},
 		Tmpfs: map[string]string{
 			postgresDataDirectory: "rw,noexec,nosuid,size=512m",
@@ -131,6 +152,21 @@ func setupPostgres(t testReporter) Database {
 		return Database{}
 	}
 	return database
+}
+
+func currentTestRunID() (string, error) {
+	testRunID := os.Getenv(testRunIDEnv)
+	if testRunID == "" {
+		testRunID = localTestRunID
+	}
+	if len(testRunID) > testRunIDMaxLength || !testRunIDPattern.MatchString(testRunID) {
+		return "", fmt.Errorf(
+			"%s must be 1-%d characters using letters, digits, dot, underscore, or hyphen",
+			testRunIDEnv,
+			testRunIDMaxLength,
+		)
+	}
+	return testRunID, nil
 }
 
 func reportPostgresTermination(t testReporter, dbContainer postgresContainer) {
