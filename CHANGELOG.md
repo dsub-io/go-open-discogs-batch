@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.5](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.4...v2.3.5) (2026-08-12)
+
+
+### Bug Fixes
+
+* keep interactive progress output readable ([#62](https://github.com/dsub-io/go-open-discogs-batch/issues/62)) ([b568812](https://github.com/dsub-io/go-open-discogs-batch/commit/b568812b5ae17c0bba525e66f5bdf5a1f59813bf))
+
 ## [2.3.4](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.3...v2.3.4) (2026-08-12)
 
 
