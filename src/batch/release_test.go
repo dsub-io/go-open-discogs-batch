@@ -2,11 +2,31 @@ package batch
 
 import (
 	"context"
+	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/reader"
 	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 )
+
+func TestReleaseLabelsPreserveDistinctCatalogNumbers(t *testing.T) {
+	cache.LabelIDs.Add(5)
+	t.Cleanup(cache.ResetIDs)
+	release := XmlReleaseRelation{
+		ID: 2,
+		Labels: []XmlLabelRelease{
+			{LabelID: 5, CategoryNotation: "SK 026"},
+			{LabelID: 5, CategoryNotation: "SK026"},
+			{LabelID: 5, CategoryNotation: " SK026 "},
+		},
+	}
+
+	labels := release.GetLabels()
+
+	require.Len(t, labels, 2)
+	require.Equal(t, "SK 026", *labels[0].CategoryNotation)
+	require.Equal(t, "SK026", *labels[1].CategoryNotation)
+}
 
 func TestReleaseRead(t *testing.T) {
 	c := context.Background()

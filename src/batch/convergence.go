@@ -27,6 +27,13 @@ type twoIntegerKeyRelation struct {
 	secondKeyColumn string
 }
 
+type integerNullableTextKeyRelation struct {
+	table             string
+	parentColumn      string
+	integerKeyColumn  string
+	nullableKeyColumn string
+}
+
 func reconcileIntegerRelation[T comparable](
 	order Order,
 	relation integerRelation,
@@ -158,6 +165,67 @@ func reconcileTwoIntegerKeyRelation[T comparable](
 		postgresArray(parents),
 		postgresArray(firstKeys),
 		postgresArray(secondKeys),
+	)
+	if deleted.Error != nil {
+		return result.NewResult(0, fmt.Errorf("delete stale %s rows: %w", relation.table, deleted.Error))
+	}
+	written := doWrite(incoming, order.getChunkSize(), order.getDB())
+	return result.NewResult(int(deleted.RowsAffected), nil).Sum(written)
+}
+
+func reconcileIntegerNullableTextKeyRelation[T comparable](
+	order Order,
+	relation integerNullableTextKeyRelation,
+	deleteStale bool,
+	rootIDs []int32,
+	incoming []T,
+	parentID func(T) int32,
+	integerKey func(T) int32,
+	nullableTextKey func(T) *string,
+) result.Result {
+	if !deleteStale {
+		return doWrite(incoming, order.getChunkSize(), order.getDB())
+	}
+	parents := make([]int32, 0, len(incoming))
+	integerKeys := make([]int32, 0, len(incoming))
+	textKeys := make([]string, 0, len(incoming))
+	hasTextKeys := make([]bool, 0, len(incoming))
+	for _, item := range incoming {
+		parents = append(parents, parentID(item))
+		integerKeys = append(integerKeys, integerKey(item))
+		textKey := nullableTextKey(item)
+		hasTextKeys = append(hasTextKeys, textKey != nil)
+		if textKey == nil {
+			textKeys = append(textKeys, "")
+		} else {
+			textKeys = append(textKeys, *textKey)
+		}
+	}
+	deleted := order.getDB().Exec(
+		fmt.Sprintf(
+			`delete from %s current
+			  where current.%s = any(?::integer[])
+			    and not exists (
+			        select 1
+			          from unnest(?::integer[], ?::integer[], ?::text[], ?::boolean[])
+			               incoming(parent_id, integer_key, text_key, has_text_key)
+			         where incoming.parent_id = current.%s
+			           and incoming.integer_key = current.%s
+			           and incoming.has_text_key = (current.%s is not null)
+			           and (not incoming.has_text_key or incoming.text_key = current.%s)
+			    )`,
+			relation.table,
+			relation.parentColumn,
+			relation.parentColumn,
+			relation.integerKeyColumn,
+			relation.nullableKeyColumn,
+			relation.nullableKeyColumn,
+		),
+		postgresArray(rootIDs),
+		postgresArray(parents),
+		postgresArray(integerKeys),
+		postgresArray(textKeys),
+		postgresArray(hasTextKeys),
 	)
 	if deleted.Error != nil {
 		return result.NewResult(0, fmt.Errorf("delete stale %s rows: %w", relation.table, deleted.Error))

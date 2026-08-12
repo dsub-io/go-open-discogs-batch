@@ -632,11 +632,21 @@ func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItem
 
 func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
 	items := make([]*opendiscogsmodel.LabelReleaseItem, 0, len(r.Labels))
+	type identity struct {
+		labelID          int32
+		categoryNotation string
+	}
+	seen := make(map[identity]struct{}, len(r.Labels))
 	for _, label := range r.Labels {
 		if !cache.LabelIDs.Contains(label.LabelID) {
 			continue
 		}
 		categoryNotation := strings.TrimSpace(label.CategoryNotation)
+		key := identity{labelID: label.LabelID, categoryNotation: categoryNotation}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
 		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.LabelReleaseItem{
 			LabelID:          label.LabelID,

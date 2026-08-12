@@ -11,8 +11,11 @@ import (
 )
 
 var (
-	labelReleaseItemRelation = integerRelation{
-		table: "label_release_item", parentColumn: "release_item_id", keyColumn: "label_id",
+	labelReleaseItemRelation = integerNullableTextKeyRelation{
+		table:             "label_release_item",
+		parentColumn:      "release_item_id",
+		integerKeyColumn:  "label_id",
+		nullableKeyColumn: "category_notation",
 	}
 	releaseArtistRelation = integerRelation{
 		table: "release_item_artist", parentColumn: "release_item_id", keyColumn: "artist_id",
@@ -194,7 +197,7 @@ func writeReleaseRelationChunk(
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileIntegerNullableTextKeyRelation(
 					transactionOrder,
 					labelReleaseItemRelation,
 					deleteStale,
@@ -202,6 +205,7 @@ func writeReleaseRelationChunk(
 					labels,
 					func(item *model.LabelReleaseItem) int32 { return item.ReleaseItemID },
 					func(item *model.LabelReleaseItem) int32 { return item.LabelID },
+					func(item *model.LabelReleaseItem) *string { return item.CategoryNotation },
 				)
 			},
 			func() result.Result {

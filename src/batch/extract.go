@@ -48,11 +48,7 @@ func ExtractClause(item any) clause.OnConflict {
 			},
 		)
 	case *model.LabelReleaseItem:
-		return updateWhenChanged(
-			"label_release_item",
-			[]string{"release_item_id", "label_id"},
-			[]string{"category_notation"},
-		)
+		return doNothing("release_item_id", "label_id", "category_notation")
 	case *model.ReleaseItemFormat:
 		return updateWhenChanged(
 			"release_item_format",
