@@ -407,6 +407,25 @@ func TestWriterErrorControlFlow(t *testing.T) {
 	require.ErrorContains(t, doWrite([]*opendiscogsmodel.Artist{{ID: 1}}, 0, mockDB).Err(), "chunk size")
 }
 
+func TestReferenceEntitiesUseDeterministicLockOrder(t *testing.T) {
+	db, mock, _ := newMockGorm(t)
+	mock.ExpectExec(`INSERT INTO "genre"`).
+		WithArgs("Ambient", "Electronic").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(`INSERT INTO "style"`).
+		WithArgs("Dub", "Techno").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	order := NewOrder(context.Background(), 10, 1, "unused", db)
+
+	actual := writeReferenceEntities(
+		order,
+		[]*opendiscogsmodel.Genre{{Name: "Electronic"}, {Name: "Ambient"}},
+		[]*opendiscogsmodel.Style{{Name: "Techno"}, {Name: "Dub"}},
+	)
+
+	require.NoError(t, actual.Err())
+}
+
 func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	expected := errors.New("fixture")
 	db := poisonedGorm(t, expected)

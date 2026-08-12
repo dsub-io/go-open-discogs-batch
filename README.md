@@ -103,11 +103,16 @@ import.
 
 ### Progress observability
 
-Download bars use the upstream-reported compressed size. Source-reading bars
-use the exact local compressed file size as their byte denominator and display
-percentage, byte throughput, elapsed time, and source ETA. A source-reading
-percentage describes how much of the gzip stream has been consumed; it does not
-claim that the same percentage of PostgreSQL work has committed.
+When stderr is a terminal, downloads and source reads display an interactive
+progress bar on stderr. Line-delimited `byte_progress` JSON records are emitted
+on stdout at start, at most once every five seconds, and at completion or
+failure. The records include stage, resource, completed and total compressed
+bytes, percentage, byte throughput, and elapsed time. Redirecting or piping
+stdout through tools such as `tee` therefore remains parseable without removing
+the terminal bar. A source-read percentage describes how much of the gzip
+stream has been consumed; it does not claim that the same percentage of
+PostgreSQL work has committed. Do not merge stderr into stdout when collecting
+structured output.
 
 Tracked entity convergence also writes JSON progress records to stdout at
 start, at most once every five seconds while chunks finish, and at completion

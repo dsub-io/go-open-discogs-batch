@@ -3,23 +3,32 @@ package reader
 import (
 	"compress/gzip"
 	"errors"
-	"github.com/schollz/progressbar/v3"
+	"github.com/dsub-io/go-open-discogs-batch/internal/progress"
+	"golang.org/x/term"
 	"io"
 	"os"
 	"strings"
-	"time"
 )
 
-func NewProgressBarGzipReadCloser(f *os.File, progressBarText string) (io.ReadCloser, error) {
+func NewProgressGzipReadCloser(f *os.File, progressText string) (io.ReadCloser, error) {
 	fileInfo, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
 
-	pb := getProgressBar(GetFilename(progressBarText), fileInfo.Size())
-	pbReader := progressbar.NewReader(f, pb)
-	reader, err := gzip.NewReader(&pbReader)
+	progressReporter := progress.NewReporter(
+		os.Stdout,
+		os.Stderr,
+		term.IsTerminal(int(os.Stderr.Fd())),
+		progress.StageSourceRead,
+		GetFilename(progressText),
+		fileInfo.Size(),
+	)
+	progressReporter.Start()
+	trackedSource := &progressReader{source: f, reporter: progressReporter}
+	reader, err := gzip.NewReader(trackedSource)
 	if err != nil {
+		progressReporter.Fail(trackedSource.completedBytes)
 		return nil, err
 	}
 	return &readCloserImpl{
@@ -28,26 +37,20 @@ func NewProgressBarGzipReadCloser(f *os.File, progressBarText string) (io.ReadCl
 	}, nil
 }
 
-func getProgressBar(text string, size int64) *progressbar.ProgressBar {
-	pb := progressbar.NewOptions64(size,
-		progressbar.OptionEnableColorCodes(false),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetElapsedTime(true),
-		progressbar.OptionSetPredictTime(true),
-		progressbar.OptionThrottle(time.Millisecond*250),
-		progressbar.OptionSetWidth(15),
-		progressbar.OptionShowElapsedTimeOnFinish(),
-		progressbar.OptionSpinnerType(70),
-		progressbar.OptionSetDescription(text),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
-	return pb
+type progressReader struct {
+	source         io.Reader
+	reporter       *progress.Reporter
+	completedBytes int64
+}
+
+func (r *progressReader) Read(payload []byte) (int, error) {
+	readBytes, err := r.source.Read(payload)
+	r.completedBytes += int64(readBytes)
+	r.reporter.Set(r.completedBytes)
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.reporter.Fail(r.completedBytes)
+	}
+	return readBytes, err
 }
 
 func GetFilename(filepath string) string {

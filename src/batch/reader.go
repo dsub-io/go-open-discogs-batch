@@ -13,7 +13,7 @@ func newReadCloser(filepath string, progressBarText string) (io.ReadCloser, erro
 	if err != nil {
 		return nil, fmt.Errorf("open import file %s: %w", filepath, err)
 	}
-	readCloser, err := reader.NewProgressBarGzipReadCloser(file, progressBarText)
+	readCloser, err := reader.NewProgressGzipReadCloser(file, progressBarText)
 	if err != nil {
 		_ = file.Close()
 		return nil, fmt.Errorf("open gzip import file %s: %w", filepath, err)

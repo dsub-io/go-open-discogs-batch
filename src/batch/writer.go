@@ -8,6 +8,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"slices"
+	"strings"
 )
 
 func writeChunk(order Order, slices ...interface{}) result.Result {
@@ -19,6 +21,12 @@ func writeReferenceEntities(
 	genres []*model.Genre,
 	styles []*model.Style,
 ) result.Result {
+	slices.SortFunc(genres, func(left, right *model.Genre) int {
+		return strings.Compare(left.Name, right.Name)
+	})
+	slices.SortFunc(styles, func(left, right *model.Style) int {
+		return strings.Compare(left.Name, right.Name)
+	})
 	for _, items := range []interface{}{genres, styles} {
 		if err := order.getDB().
 			Clauses(clause.OnConflict{DoNothing: true}).
