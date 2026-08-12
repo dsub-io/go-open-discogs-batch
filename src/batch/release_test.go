@@ -2,13 +2,17 @@ package batch
 
 import (
 	"context"
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
-	"github.com/stretchr/testify/require"
+	"encoding/xml"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/dsub-io/go-open-discogs-batch/src/cache"
+	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/stretchr/testify/require"
 )
+
+const oversizedReleaseFormatQuantity = "1010487400000000000000000000000000000000000000000000"
 
 func TestReleaseLabelsPreserveDistinctCatalogNumbers(t *testing.T) {
 	cache.LabelIDs.Add(5)
@@ -61,8 +65,8 @@ func TestReleaseFormatsPreserveQuantityVariants(t *testing.T) {
 	release := &XmlReleaseRelation{
 		ID: 48967,
 		Formats: []XmlFormat{
-			{Name: &name, Quantity: &quantityOne, Descriptions: []string{"Compilation"}},
-			{Name: &name, Quantity: &quantityTwo, Descriptions: []string{"Compilation"}},
+			{Name: &name, Quantity: newXmlFormatQuantity(quantityOne), Descriptions: []string{"Compilation"}},
+			{Name: &name, Quantity: newXmlFormatQuantity(quantityTwo), Descriptions: []string{"Compilation"}},
 		},
 	}
 
@@ -72,6 +76,68 @@ func TestReleaseFormatsPreserveQuantityVariants(t *testing.T) {
 	deduplicated, err := deduplicateReleaseFormats(formats)
 	require.NoError(t, err)
 	require.Len(t, deduplicated, 2)
+}
+
+func TestReleaseFormatQuantityPreservesOversizedDiscogsValue(t *testing.T) {
+	var release XmlReleaseRelation
+	fixture := `<release id="6662697"><formats><format name="File" qty="` +
+		oversizedReleaseFormatQuantity + `" text="32 kbps"/></formats></release>`
+	require.NoError(t, xml.Unmarshal([]byte(fixture), &release))
+
+	formats := release.GetFormats()
+	require.Len(t, formats, 1)
+	require.Nil(t, formats[0].Quantity)
+	require.Equal(t, oversizedReleaseFormatQuantity, *formats[0].QuantityText)
+	deduplicated, err := deduplicateReleaseFormats(formats)
+	require.NoError(t, err)
+	require.Len(t, deduplicated[0].IdentitySHA256, 32)
+}
+
+func TestReleaseFormatQuantityCanonicalizesAndRejectsInvalidValues(t *testing.T) {
+	var omitted XmlReleaseRelation
+	require.NoError(t, xml.Unmarshal(
+		[]byte(`<release id="1"><formats><format name="CD" qty=" "/></formats></release>`),
+		&omitted,
+	))
+	omittedFormats := omitted.GetFormats()
+	require.Len(t, omittedFormats, 1)
+	require.Nil(t, omittedFormats[0].Quantity)
+	require.Nil(t, omittedFormats[0].QuantityText)
+
+	var canonical XmlReleaseRelation
+	require.NoError(t, xml.Unmarshal(
+		[]byte(`<release id="1"><formats><format name="CD" qty="0002"/></formats></release>`),
+		&canonical,
+	))
+	formats := canonical.GetFormats()
+	require.Len(t, formats, 1)
+	require.Equal(t, int32(2), *formats[0].Quantity)
+	require.Equal(t, "2", *formats[0].QuantityText)
+
+	for _, invalid := range []string{"-1", "not-a-number"} {
+		var release XmlReleaseRelation
+		err := xml.Unmarshal(
+			[]byte(`<release id="1"><formats><format name="CD" qty="`+invalid+`"/></formats></release>`),
+			&release,
+		)
+		require.ErrorContains(t, err, "invalid non-negative release format quantity")
+	}
+}
+
+func TestReleaseRelationChunkRejectsInvalidCanonicalQuantity(t *testing.T) {
+	db, mock, _ := newMockGorm(t)
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	order := NewOrder(context.Background(), 1, 1, "unused", db)
+	name := "CD"
+	invalid := XmlFormatQuantity{canonical: "-1", present: true}
+	actual := writeReleaseRelationChunk(
+		order,
+		ChunkMetadata{},
+		[]*XmlReleaseRelation{{ID: 1, Formats: []XmlFormat{{Name: &name, Quantity: invalid}}}},
+		true,
+	)
+	require.ErrorContains(t, actual.Err(), "invalid release_item_format quantity")
 }
 
 func readReleaseRelationDeduplicationFixture(t *testing.T) *XmlReleaseRelation {
@@ -95,7 +161,7 @@ func readReleaseRelationDeduplicationFixture(t *testing.T) *XmlReleaseRelation {
 	return release
 }
 
-func assertReleaseRelationCount[T comparable](
+func assertReleaseRelationCount[T any](
 	t *testing.T,
 	deduplicate func([]T) ([]T, error),
 	rows []T,

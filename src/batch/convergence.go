@@ -14,6 +14,13 @@ type integerRelation struct {
 	keyColumn    string
 }
 
+type digestIntegerRelation struct {
+	table          string
+	parentColumn   string
+	keyColumn      string
+	identityColumn string
+}
+
 type textRelation struct {
 	table        string
 	parentColumn string
@@ -27,6 +34,14 @@ type twoIntegerKeyRelation struct {
 	secondKeyColumn string
 }
 
+type digestTwoIntegerKeyRelation struct {
+	table           string
+	parentColumn    string
+	firstKeyColumn  string
+	secondKeyColumn string
+	identityColumn  string
+}
+
 type integerNullableTextKeyRelation struct {
 	table             string
 	parentColumn      string
@@ -34,7 +49,7 @@ type integerNullableTextKeyRelation struct {
 	nullableKeyColumn string
 }
 
-func reconcileIntegerRelation[T comparable](
+func reconcileIntegerRelation[T any](
 	order Order,
 	relation integerRelation,
 	deleteStale bool,
@@ -78,7 +93,58 @@ func reconcileIntegerRelation[T comparable](
 	return result.NewResult(int(deleted.RowsAffected), nil).Sum(written)
 }
 
-func reconcileTextRelation[T comparable](
+func reconcileDigestIntegerRelation[T any](
+	order Order,
+	relation digestIntegerRelation,
+	deleteStale bool,
+	rootIDs []int32,
+	incoming []T,
+	parentID func(T) int32,
+	key func(T) int32,
+	identity func(T) []byte,
+) result.Result {
+	if !deleteStale {
+		return doWrite(incoming, order.getChunkSize(), order.getDB())
+	}
+	parents := make([]int32, 0, len(incoming))
+	keys := make([]int32, 0, len(incoming))
+	identities := make([][]byte, 0, len(incoming))
+	for _, item := range incoming {
+		parents = append(parents, parentID(item))
+		keys = append(keys, key(item))
+		identities = append(identities, identity(item))
+	}
+	deleted := order.getDB().Exec(
+		fmt.Sprintf(
+			`delete from %s current
+			  where current.%s = any(?::integer[])
+			    and not exists (
+			        select 1
+			          from unnest(?::integer[], ?::integer[], ?::bytea[])
+			               incoming(parent_id, relation_key, identity_sha256)
+			         where incoming.parent_id = current.%s
+			           and incoming.relation_key = current.%s
+			           and incoming.identity_sha256 = current.%s
+			    )`,
+			relation.table,
+			relation.parentColumn,
+			relation.parentColumn,
+			relation.keyColumn,
+			relation.identityColumn,
+		),
+		postgresArray(rootIDs),
+		postgresArray(parents),
+		postgresArray(keys),
+		postgresArray(identities),
+	)
+	if deleted.Error != nil {
+		return result.NewResult(0, fmt.Errorf("delete stale %s rows: %w", relation.table, deleted.Error))
+	}
+	written := doWrite(incoming, order.getChunkSize(), order.getDB())
+	return result.NewResult(int(deleted.RowsAffected), nil).Sum(written)
+}
+
+func reconcileTextRelation[T any](
 	order Order,
 	relation textRelation,
 	deleteStale bool,
@@ -122,7 +188,7 @@ func reconcileTextRelation[T comparable](
 	return result.NewResult(int(deleted.RowsAffected), nil).Sum(written)
 }
 
-func reconcileTwoIntegerKeyRelation[T comparable](
+func reconcileTwoIntegerKeyRelation[T any](
 	order Order,
 	relation twoIntegerKeyRelation,
 	deleteStale bool,
@@ -173,7 +239,64 @@ func reconcileTwoIntegerKeyRelation[T comparable](
 	return result.NewResult(int(deleted.RowsAffected), nil).Sum(written)
 }
 
-func reconcileIntegerNullableTextKeyRelation[T comparable](
+func reconcileDigestTwoIntegerKeyRelation[T any](
+	order Order,
+	relation digestTwoIntegerKeyRelation,
+	deleteStale bool,
+	rootIDs []int32,
+	incoming []T,
+	parentID func(T) int32,
+	firstKey func(T) int32,
+	secondKey func(T) int32,
+	identity func(T) []byte,
+) result.Result {
+	if !deleteStale {
+		return doWrite(incoming, order.getChunkSize(), order.getDB())
+	}
+	parents := make([]int32, 0, len(incoming))
+	firstKeys := make([]int32, 0, len(incoming))
+	secondKeys := make([]int32, 0, len(incoming))
+	identities := make([][]byte, 0, len(incoming))
+	for _, item := range incoming {
+		parents = append(parents, parentID(item))
+		firstKeys = append(firstKeys, firstKey(item))
+		secondKeys = append(secondKeys, secondKey(item))
+		identities = append(identities, identity(item))
+	}
+	deleted := order.getDB().Exec(
+		fmt.Sprintf(
+			`delete from %s current
+			  where current.%s = any(?::integer[])
+			    and not exists (
+			        select 1
+			          from unnest(?::integer[], ?::integer[], ?::integer[], ?::bytea[])
+			               incoming(parent_id, first_key, second_key, identity_sha256)
+			         where incoming.parent_id = current.%s
+			           and incoming.first_key = current.%s
+			           and incoming.second_key = current.%s
+			           and incoming.identity_sha256 = current.%s
+			    )`,
+			relation.table,
+			relation.parentColumn,
+			relation.parentColumn,
+			relation.firstKeyColumn,
+			relation.secondKeyColumn,
+			relation.identityColumn,
+		),
+		postgresArray(rootIDs),
+		postgresArray(parents),
+		postgresArray(firstKeys),
+		postgresArray(secondKeys),
+		postgresArray(identities),
+	)
+	if deleted.Error != nil {
+		return result.NewResult(0, fmt.Errorf("delete stale %s rows: %w", relation.table, deleted.Error))
+	}
+	written := doWrite(incoming, order.getChunkSize(), order.getDB())
+	return result.NewResult(int(deleted.RowsAffected), nil).Sum(written)
+}
+
+func reconcileIntegerNullableTextKeyRelation[T any](
 	order Order,
 	relation integerNullableTextKeyRelation,
 	deleteStale bool,
@@ -234,7 +357,7 @@ func reconcileIntegerNullableTextKeyRelation[T comparable](
 	return result.NewResult(int(deleted.RowsAffected), nil).Sum(written)
 }
 
-func postgresArray[T comparable](values []T) pgtype.Array[T] {
+func postgresArray[T any](values []T) pgtype.Array[T] {
 	return pgtype.Array[T]{
 		Elements: values,
 		Dims: []pgtype.ArrayDimension{

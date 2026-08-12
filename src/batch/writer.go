@@ -129,7 +129,7 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 	return result.NewResult(updated, err)
 }
 
-func writeReleaseRelationBatch[T comparable](
+func writeReleaseRelationBatch[T any](
 	items []T,
 	chunkSize int,
 	db *gorm.DB,
@@ -142,7 +142,7 @@ func writeReleaseRelationBatch[T comparable](
 	return doWrite(deduplicated, chunkSize, db)
 }
 
-func doWrite[T comparable](items []T, chunkSize int, db *gorm.DB) result.Result {
+func doWrite[T any](items []T, chunkSize int, db *gorm.DB) result.Result {
 	if len(items) == 0 {
 		return result.NewResult(0, nil)
 	}

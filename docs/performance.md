@@ -3,7 +3,7 @@
 These are bounded measurements of named changes, not forecasts for a full dump
 or different hardware. They also do not approve a production import: both
 batch implementations still require release and cross-language validation
-against canonical `open-discogs-model` v0.3.0.
+against canonical `open-discogs-model` v0.3.1.
 
 ## Results at a glance
 
@@ -13,6 +13,7 @@ against canonical `open-discogs-model` v0.3.0.
 | Durable import contract | Higher fixed latency and allocation | 12-record PostgreSQL fixture |
 | Successful-manifest preflight | 95.4% lower p50; avoided 64 MiB file I/O | Cached sparse file |
 | Release Master lock order | Prevented deadlock in 10/10 concurrent regression runs | 4 writers × 4 overlapping Masters |
+| Format quantity parser | 89.3–95.0% lower median time; up to 100% fewer allocations | Typical and 52-digit values |
 
 Do not compare rows across these harnesses. Their inputs, paths, and units are
 different.
@@ -85,7 +86,33 @@ Peak RSS is not reported: the microbenchmark process includes test and
 container lifecycle overhead, while the fixture is too small to represent
 production memory.
 
+## Release format quantity parser
+
+The release dump contains 19,810,850 format rows, and release `6662697` has a
+quantity beyond signed 32-bit storage. Parsing each value with an
+arbitrary-precision integer was compared with the bounded-memory ASCII decimal
+normalizer now shared semantically by Go and Java. The Go microbenchmark ran on
+an Apple M2 Pro, five samples per path; the table reports medians.
+
+| Input | Metric | Big-integer baseline | Linear parser | Change |
+| --- | --- | ---: | ---: | ---: |
+| `0002` | time/op | 152.5 ns | 16.36 ns | 89.3% lower; 9.3× faster |
+| `0002` | bytes; allocations/op | 48 B; 4 | 4 B; 1 | 91.7%; 75.0% lower |
+| 52-digit dump value | time/op | 587.1 ns | 29.58 ns | 95.0% lower; 19.8× faster |
+| 52-digit dump value | bytes; allocations/op | 280 B; 6 | 0 B; 0 | eliminated |
+
+This isolates quantity parsing, not complete format transformation or database
+throughput. Java uses the same digit scan, zero trimming, and lexical int32
+boundary, but these Go timings are not presented as JVM measurements.
+
 ## Reproduce
+
+```shell
+go test ./src/batch -run '^$' \
+  -bench '^BenchmarkReleaseFormatQuantityParsing$' -benchmem -count=5
+```
+
+The quantity parser results above use the median of these five samples.
 
 ```shell
 go test ./src/batch -run '^$' \

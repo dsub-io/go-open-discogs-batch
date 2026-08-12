@@ -1,6 +1,8 @@
 package batch
 
 import (
+	"encoding/xml"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -419,10 +421,52 @@ type XmlCreditedArtist struct {
 }
 
 type XmlFormat struct {
-	Name         *string  `xml:"name,attr"`
-	Quantity     *int32   `xml:"qty,attr"`
-	Text         *string  `xml:"text,attr"`
-	Descriptions []string `xml:"descriptions>description"`
+	Name         *string           `xml:"name,attr"`
+	Quantity     XmlFormatQuantity `xml:"qty,attr"`
+	Text         *string           `xml:"text,attr"`
+	Descriptions []string          `xml:"descriptions>description"`
+}
+
+type XmlFormatQuantity struct {
+	canonical string
+	integer   *int32
+	present   bool
+}
+
+func (quantity *XmlFormatQuantity) UnmarshalXMLAttr(attribute xml.Attr) error {
+	normalized := strings.TrimSpace(attribute.Value)
+	if normalized == "" {
+		return nil
+	}
+	canonical, integer, err := canonicalReleaseFormatQuantity(normalized)
+	if err != nil {
+		return fmt.Errorf("invalid non-negative release format quantity %q", attribute.Value)
+	}
+	quantity.canonical = canonical
+	quantity.present = true
+	quantity.integer = integer
+	return nil
+}
+
+func (quantity XmlFormatQuantity) Canonical() *string {
+	if !quantity.present {
+		return nil
+	}
+	value := quantity.canonical
+	return &value
+}
+
+func (quantity XmlFormatQuantity) Integer() *int32 {
+	if quantity.integer == nil {
+		return nil
+	}
+	value := *quantity.integer
+	return &value
+}
+
+func newXmlFormatQuantity(value int32) XmlFormatQuantity {
+	canonical := strconv.FormatInt(int64(value), 10)
+	return XmlFormatQuantity{canonical: canonical, integer: &value, present: true}
 }
 
 type XmlTrack struct {
@@ -588,13 +632,16 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 		if name == nil && description == nil && text == nil {
 			continue
 		}
-		hashSource := releaseFormatHashSource(name, description, format.Quantity, text)
+		quantity := format.Quantity.Integer()
+		quantityText := format.Quantity.Canonical()
+		hashSource := releaseFormatHashSource(name, description, quantityText, text)
 		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemFormat{
 			ReleaseItemID:  r.ID,
 			Description:    description,
 			Name:           name,
-			Quantity:       format.Quantity,
+			Quantity:       quantity,
+			QuantityText:   quantityText,
 			Text:           text,
 			Hash:           helper.JavaStringHash(hashSource),
 			CreatedAt:      now,
@@ -604,10 +651,10 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 	return items
 }
 
-func releaseFormatHashSource(name, description *string, quantity *int32, text *string) string {
+func releaseFormatHashSource(name, description, quantity, text *string) string {
 	quantityValue := releaseFormatHashNullValue
 	if quantity != nil {
-		quantityValue = strconv.FormatInt(int64(*quantity), 10)
+		quantityValue = *quantity
 	}
 	return strings.Join([]string{
 		releaseFormatHashString(name),

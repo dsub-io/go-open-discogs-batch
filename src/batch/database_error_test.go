@@ -29,7 +29,7 @@ type postgresArrayValueConverter struct{}
 
 func (postgresArrayValueConverter) ConvertValue(value interface{}) (driver.Value, error) {
 	switch value.(type) {
-	case pgtype.Array[int32], pgtype.Array[string]:
+	case pgtype.Array[int32], pgtype.Array[string], pgtype.Array[[]byte]:
 		return "array", nil
 	default:
 		return driver.DefaultParameterConverter.ConvertValue(value)
@@ -1025,15 +1025,41 @@ func TestGormErrorPropagationBoundaries(t *testing.T) {
 		func(item *opendiscogsmodel.MasterGenre) int32 { return item.MasterID },
 		func(item *opendiscogsmodel.MasterGenre) string { return item.Genre },
 	).Err(), expected)
+	require.ErrorIs(t, reconcileDigestIntegerRelation(
+		order,
+		digestIntegerRelation{table: "fixture", parentColumn: "parent", keyColumn: "key", identityColumn: "identity"},
+		true,
+		[]int32{1},
+		[]*opendiscogsmodel.ReleaseItemIdentifier{{ReleaseItemID: 1, Hash: 2, IdentitySHA256: make([]byte, 32)}},
+		func(item *opendiscogsmodel.ReleaseItemIdentifier) int32 { return item.ReleaseItemID },
+		func(item *opendiscogsmodel.ReleaseItemIdentifier) int32 { return item.Hash },
+		func(item *opendiscogsmodel.ReleaseItemIdentifier) []byte { return item.IdentitySHA256 },
+	).Err(), expected)
 	require.ErrorIs(t, reconcileTwoIntegerKeyRelation(
 		order,
 		twoIntegerKeyRelation{table: "fixture", parentColumn: "parent", firstKeyColumn: "first", secondKeyColumn: "second"},
 		true,
 		[]int32{1},
-		[]*opendiscogsmodel.ReleaseItemWork{},
+		[]*opendiscogsmodel.ReleaseItemWork{{ReleaseItemID: 1, LabelID: 2, Hash: 3}},
 		func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.ReleaseItemID },
 		func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.LabelID },
 		func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.Hash },
+	).Err(), expected)
+	require.ErrorIs(t, reconcileDigestTwoIntegerKeyRelation(
+		order,
+		digestTwoIntegerKeyRelation{
+			table: "fixture", parentColumn: "parent", firstKeyColumn: "first",
+			secondKeyColumn: "second", identityColumn: "identity",
+		},
+		true,
+		[]int32{1},
+		[]*opendiscogsmodel.ReleaseItemCreditedArtist{{
+			ReleaseItemID: 1, ArtistID: 2, Hash: 3, IdentitySHA256: make([]byte, 32),
+		}},
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.ReleaseItemID },
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.ArtistID },
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.Hash },
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) []byte { return item.IdentitySHA256 },
 	).Err(), expected)
 	_, err := relationTablesContainRows(order, "fixture")
 	require.ErrorIs(t, err, expected)
@@ -1043,6 +1069,32 @@ func TestGormErrorPropagationBoundaries(t *testing.T) {
 	require.ErrorIs(t, completeEntityProgress(NewTrackedOrder(
 		context.Background(), 1, 1, "unused", db, 1, "artist", false,
 	), 0, 0), expected)
+}
+
+func TestTwoIntegerReconciliationDeleteModes(t *testing.T) {
+	db, mock, _ := newMockGorm(t)
+	order := NewOrder(context.Background(), 1, 1, "unused", db)
+	relation := twoIntegerKeyRelation{
+		table: "fixture", parentColumn: "parent", firstKeyColumn: "first", secondKeyColumn: "second",
+	}
+	parentID := func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.ReleaseItemID }
+	firstKey := func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.LabelID }
+	secondKey := func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.Hash }
+
+	notDeleted := reconcileTwoIntegerKeyRelation(
+		order, relation, false, nil, nil, parentID, firstKey, secondKey,
+	)
+	require.NoError(t, notDeleted.Err())
+	require.Zero(t, notDeleted.Count())
+
+	mock.ExpectExec("delete from fixture current").
+		WithArgs("array", "array", "array", "array").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	deleted := reconcileTwoIntegerKeyRelation(
+		order, relation, true, []int32{1}, nil, parentID, firstKey, secondKey,
+	)
+	require.NoError(t, deleted.Err())
+	require.Equal(t, 2, deleted.Count())
 }
 
 func TestProgressTransactionErrorBoundaries(t *testing.T) {

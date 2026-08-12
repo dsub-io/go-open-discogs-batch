@@ -2,12 +2,12 @@
 
 This is the operational contract for dump discovery, admission, commits,
 recovery, and reader visibility. The schema contract is canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.3.0,
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.3.1,
 shared with the Java importer.
 
 > [!CAUTION]
 > Production import is not approved yet. Release both importers against model
-> v0.3.0 and finish cross-language migration, recovery, and full-dump validation
+> v0.3.1 and finish cross-language migration, recovery, and full-dump validation
 > before starting or resuming one.
 
 ## Decision table
@@ -83,7 +83,7 @@ For each tracked chunk, one PostgreSQL transaction contains:
 - the committed-chunk ledger entry;
 - the processed-item counter.
 
-The model v0.3.0 import contract is part of resume and success compatibility.
+The model v0.3.1 import contract is part of resume and success compatibility.
 An older successful Release contract cannot suppress the corrected Release
 import semantics published by that model.
 
@@ -97,14 +97,26 @@ An entity completes only when chunk indexes cover the parsed stream without
 gaps, overlaps, or out-of-range values and all item and chunk totals match. A
 run succeeds only after every selected entity completes.
 
-Several relation identities still use signed 32-bit Java hashes. Distinct
-values can collide within one root; collision-resistant identity is tracked in
-[`open-discogs-model#43`](https://github.com/dsub-io/open-discogs-model/issues/43).
+Release contract revision 3 stores a model-defined SHA-256 identity for
+credited artists, formats, identifiers, tracks, videos, and label/company work
+relations. The legacy signed 32-bit hash remains only as a deterministic
+compatibility slot.
+Exact semantic duplicates collapse, while distinct payloads sharing the old
+hash receive separate slots. Stale reconciliation compares both values, so a
+legacy null digest or a changed slot assignment is replaced transactionally.
 
-Release format identity includes name, reduced descriptions, quantity, and
-text. Discogs release `48967` contains otherwise identical `CD`/`Compilation`
-formats with quantities `1` and `2`; both rows must be retained. Go and Java
-use the same null-aware, field-delimited hash source for this relation.
+Release `4846884` proves that tracks `6/Яд` and `7/Ад` share legacy hash
+`86171`; both must survive. Format identity includes name, reduced
+descriptions, canonical quantity, and text. Release `48967` has otherwise
+identical `CD`/`Compilation` formats with quantities `1` and `2`, and release
+`6662697` has a quantity larger than signed 32-bit storage. The canonical
+decimal is retained in `quantity_text`; `quantity` is populated only when it
+fits.
+
+The 2026-08 dump audit streamed all 19,341,287 release roots in 2,132.79
+seconds with zero duplicate or non-monotonic roots. The corrected allocator
+accepted every root, including four conflicting identifier rows and 14
+conflicting track rows that the legacy 32-bit keys could not distinguish.
 
 ## Interruption and resume
 

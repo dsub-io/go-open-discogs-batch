@@ -12,7 +12,9 @@ import (
 	"github.com/dsub-io/open-discogs-model/model"
 )
 
-const releaseMasterLockSQL = `select target.id
+const (
+	releaseIdentityColumn = "identity_sha256"
+	releaseMasterLockSQL  = `select target.id
 	from master as target
 	where target.id = any(?::integer[])
 	   or target.main_release_id = any(?::integer[])
@@ -24,6 +26,7 @@ const releaseMasterLockSQL = `select target.id
 	   )
 	order by target.id
 	for update`
+)
 
 var (
 	labelReleaseItemRelation = integerNullableTextKeyRelation{
@@ -35,31 +38,35 @@ var (
 	releaseArtistRelation = integerRelation{
 		table: "release_item_artist", parentColumn: "release_item_id", keyColumn: "artist_id",
 	}
-	releaseCreditedArtistRelation = twoIntegerKeyRelation{
+	releaseCreditedArtistRelation = digestTwoIntegerKeyRelation{
 		table: "release_item_credited_artist", parentColumn: "release_item_id",
-		firstKeyColumn: "artist_id", secondKeyColumn: "hash",
+		firstKeyColumn: "artist_id", secondKeyColumn: "hash", identityColumn: releaseIdentityColumn,
 	}
-	releaseFormatRelation = integerRelation{
-		table: "release_item_format", parentColumn: "release_item_id", keyColumn: "hash",
+	releaseFormatRelation = digestIntegerRelation{
+		table: "release_item_format", parentColumn: "release_item_id",
+		keyColumn: "hash", identityColumn: releaseIdentityColumn,
 	}
 	releaseGenreRelation = textRelation{
 		table: "release_item_genre", parentColumn: "release_item_id", keyColumn: "genre",
 	}
-	releaseIdentifierRelation = integerRelation{
-		table: "release_item_identifier", parentColumn: "release_item_id", keyColumn: "hash",
+	releaseIdentifierRelation = digestIntegerRelation{
+		table: "release_item_identifier", parentColumn: "release_item_id",
+		keyColumn: "hash", identityColumn: releaseIdentityColumn,
 	}
 	releaseStyleRelation = textRelation{
 		table: "release_item_style", parentColumn: "release_item_id", keyColumn: "style",
 	}
-	releaseTrackRelation = integerRelation{
-		table: "release_item_track", parentColumn: "release_item_id", keyColumn: "hash",
+	releaseTrackRelation = digestIntegerRelation{
+		table: "release_item_track", parentColumn: "release_item_id",
+		keyColumn: "hash", identityColumn: releaseIdentityColumn,
 	}
-	releaseVideoRelation = integerRelation{
-		table: "release_item_video", parentColumn: "release_item_id", keyColumn: "hash",
+	releaseVideoRelation = digestIntegerRelation{
+		table: "release_item_video", parentColumn: "release_item_id",
+		keyColumn: "hash", identityColumn: releaseIdentityColumn,
 	}
-	releaseWorkRelation = twoIntegerKeyRelation{
+	releaseWorkRelation = digestTwoIntegerKeyRelation{
 		table: "release_item_work", parentColumn: "release_item_id",
-		firstKeyColumn: "label_id", secondKeyColumn: "hash",
+		firstKeyColumn: "label_id", secondKeyColumn: "hash", identityColumn: releaseIdentityColumn,
 	}
 )
 
@@ -205,7 +212,7 @@ func writeReleaseRelationChunk(
 				)
 			},
 			func() result.Result {
-				return reconcileTwoIntegerKeyRelation(
+				return reconcileDigestTwoIntegerKeyRelation(
 					transactionOrder,
 					releaseCreditedArtistRelation,
 					deleteStale,
@@ -214,10 +221,11 @@ func writeReleaseRelationChunk(
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.ArtistID },
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.Hash },
+					func(item *model.ReleaseItemCreditedArtist) []byte { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
-				return reconcileTwoIntegerKeyRelation(
+				return reconcileDigestTwoIntegerKeyRelation(
 					transactionOrder,
 					releaseWorkRelation,
 					deleteStale,
@@ -226,6 +234,7 @@ func writeReleaseRelationChunk(
 					func(item *model.ReleaseItemWork) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemWork) int32 { return item.LabelID },
 					func(item *model.ReleaseItemWork) int32 { return item.Hash },
+					func(item *model.ReleaseItemWork) []byte { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
@@ -263,7 +272,7 @@ func writeReleaseRelationChunk(
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseFormatRelation,
 					deleteStale,
@@ -271,10 +280,11 @@ func writeReleaseRelationChunk(
 					formats,
 					func(item *model.ReleaseItemFormat) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemFormat) int32 { return item.Hash },
+					func(item *model.ReleaseItemFormat) []byte { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseIdentifierRelation,
 					deleteStale,
@@ -282,10 +292,11 @@ func writeReleaseRelationChunk(
 					identifiers,
 					func(item *model.ReleaseItemIdentifier) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemIdentifier) int32 { return item.Hash },
+					func(item *model.ReleaseItemIdentifier) []byte { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseTrackRelation,
 					deleteStale,
@@ -293,10 +304,11 @@ func writeReleaseRelationChunk(
 					tracks,
 					func(item *model.ReleaseItemTrack) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemTrack) int32 { return item.Hash },
+					func(item *model.ReleaseItemTrack) []byte { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseVideoRelation,
 					deleteStale,
@@ -304,6 +316,7 @@ func writeReleaseRelationChunk(
 					videos,
 					func(item *model.ReleaseItemVideo) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemVideo) int32 { return item.Hash },
+					func(item *model.ReleaseItemVideo) []byte { return item.IdentitySHA256 },
 				)
 			},
 		}

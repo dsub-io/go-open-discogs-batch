@@ -81,7 +81,7 @@ func TestConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T) {
 	require.Equal(t, int64(masterCount), linkedMasters)
 }
 
-func TestReleaseRelationWriterPreventsPostgresSQLState21000AndRetriesIdempotently(t *testing.T) {
+func TestReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(t *testing.T) {
 	postgres := testutils.GetDatabase(t, testutils.Postgres)
 	dsn := testutils.GetDsn(testutils.Postgres, postgres)
 	db, err := database.GetConnect(dsn)
@@ -120,21 +120,30 @@ func TestReleaseRelationWriterPreventsPostgresSQLState21000AndRetriesIdempotentl
 		},
 	}
 
-	conflictResult := writeReleaseRelationBatch(
+	collisionResult := writeReleaseRelationBatch(
 		conflicting,
 		len(conflicting),
 		db,
 		deduplicateReleaseFormats,
 	)
-	require.ErrorContains(t, conflictResult.Err(), "conflicting release_item_format rows")
-	require.ErrorContains(t, conflictResult.Err(), "canonical key")
-	require.NotContains(t, conflictResult.Err().Error(), "SQLSTATE 21000")
-	requireRelationRowCount(t, db, &model.ReleaseItemFormat{}, releaseItemID, 0)
+	require.NoError(t, collisionResult.Err())
+	require.Equal(t, 2, collisionResult.Count())
+	requireRelationRowCount(t, db, &model.ReleaseItemFormat{}, releaseItemID, 2)
+
+	collisionRetry := writeReleaseRelationBatch(
+		conflicting,
+		len(conflicting),
+		db,
+		deduplicateReleaseFormats,
+	)
+	require.NoError(t, collisionRetry.Err())
+	require.Zero(t, collisionRetry.Count())
+	requireRelationRowCount(t, db, &model.ReleaseItemFormat{}, releaseItemID, 2)
 
 	exactDuplicates := []*model.ReleaseItemFormat{
 		{
 			ReleaseItemID:  releaseItemID,
-			Hash:           101,
+			Hash:           202,
 			Name:           &name,
 			Quantity:       &quantityOne,
 			CreatedAt:      now,
@@ -143,7 +152,7 @@ func TestReleaseRelationWriterPreventsPostgresSQLState21000AndRetriesIdempotentl
 		{
 			ID:             99,
 			ReleaseItemID:  releaseItemID,
-			Hash:           101,
+			Hash:           202,
 			Name:           &name,
 			Quantity:       &quantityOne,
 			CreatedAt:      now.Add(time.Minute),
@@ -159,12 +168,12 @@ func TestReleaseRelationWriterPreventsPostgresSQLState21000AndRetriesIdempotentl
 	)
 	require.NoError(t, firstWrite.Err())
 	require.Equal(t, 1, firstWrite.Count())
-	requireRelationRowCount(t, db, &model.ReleaseItemFormat{}, releaseItemID, 1)
+	requireRelationRowCount(t, db, &model.ReleaseItemFormat{}, releaseItemID, 3)
 
 	retry := writeReleaseRelationBatch(exactDuplicates, 1, db, deduplicateReleaseFormats)
 	require.NoError(t, retry.Err())
 	require.Zero(t, retry.Count())
-	requireRelationRowCount(t, db, &model.ReleaseItemFormat{}, releaseItemID, 1)
+	requireRelationRowCount(t, db, &model.ReleaseItemFormat{}, releaseItemID, 3)
 
 	cache.ArtistIDs.Add(1)
 	cache.LabelIDs.Add(5)
@@ -191,6 +200,120 @@ func TestReleaseRelationWriterPreventsPostgresSQLState21000AndRetriesIdempotentl
 	require.NoError(t, fixtureRetry.Err())
 	require.Zero(t, fixtureRetry.Count())
 	requireReleaseFixtureRelationCounts(t, db, fixture.ID)
+}
+
+func TestReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(t *testing.T) {
+	postgres := testutils.GetDatabase(t, testutils.Postgres)
+	dsn := testutils.GetDsn(testutils.Postgres, postgres)
+	db, err := database.GetConnect(dsn)
+	require.NoError(t, err)
+	require.NoError(t, RunDDL(db))
+	db, err = database.GetConnect(dsn)
+	require.NoError(t, err)
+
+	const (
+		releaseItemID = int32(2_000_000_002)
+		legacyHash    = int32(86_171)
+	)
+	now := time.Now().UTC()
+	require.NoError(t, db.Create(&model.ReleaseItem{
+		ID:             releaseItemID,
+		CreatedAt:      now,
+		LastModifiedAt: now,
+	}).Error)
+	firstPosition := "6"
+	firstTitle := "Яд"
+	require.NoError(t, db.Create(&model.ReleaseItemTrack{
+		ID:             2_000_000_100,
+		ReleaseItemID:  releaseItemID,
+		Hash:           legacyHash,
+		Position:       &firstPosition,
+		Title:          &firstTitle,
+		CreatedAt:      now,
+		LastModifiedAt: now,
+	}).Error)
+
+	secondPosition := "7"
+	secondTitle := "Ад"
+	release := &XmlReleaseRelation{
+		ID: releaseItemID,
+		Tracks: []XmlTrack{
+			{Position: firstPosition, Title: firstTitle},
+			{Position: secondPosition, Title: secondTitle},
+		},
+	}
+	firstWrite := writeReleaseRelationChunk(
+		NewOrder(context.Background(), 10, 1, "unused", db),
+		ChunkMetadata{ItemCount: 1},
+		[]*XmlReleaseRelation{release},
+		true,
+	)
+	require.NoError(t, firstWrite.Err())
+
+	var firstIDs []int32
+	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
+		Where("release_item_id = ?", releaseItemID).
+		Order("id").
+		Pluck("id", &firstIDs).Error)
+	require.Len(t, firstIDs, 2)
+	var identities [][]byte
+	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
+		Where("release_item_id = ?", releaseItemID).
+		Order("id").
+		Pluck("identity_sha256", &identities).Error)
+	require.Len(t, identities, 2)
+	require.Len(t, identities[0], 32)
+	require.Len(t, identities[1], 32)
+	require.NotEqual(t, identities[0], identities[1])
+
+	retry := writeReleaseRelationChunk(
+		NewOrder(context.Background(), 10, 1, "unused", db),
+		ChunkMetadata{ItemCount: 1},
+		[]*XmlReleaseRelation{release},
+		true,
+	)
+	require.NoError(t, retry.Err())
+	var retryIDs []int32
+	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
+		Where("release_item_id = ?", releaseItemID).
+		Order("id").
+		Pluck("id", &retryIDs).Error)
+	require.Equal(t, firstIDs, retryIDs)
+
+	var collidedID int32
+	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
+		Where("release_item_id = ? and title = ?", releaseItemID, secondTitle).
+		Select("id").Scan(&collidedID).Error)
+	reducedRelease := &XmlReleaseRelation{
+		ID: releaseItemID,
+		Tracks: []XmlTrack{
+			{Position: secondPosition, Title: secondTitle},
+		},
+	}
+	reassigned := writeReleaseRelationChunk(
+		NewOrder(context.Background(), 10, 1, "unused", db),
+		ChunkMetadata{ItemCount: 1},
+		[]*XmlReleaseRelation{reducedRelease},
+		true,
+	)
+	require.NoError(t, reassigned.Err())
+	var remaining model.ReleaseItemTrack
+	require.NoError(t, db.Where("release_item_id = ?", releaseItemID).First(&remaining).Error)
+	require.NotEqual(t, collidedID, remaining.ID)
+	require.Equal(t, legacyHash, remaining.Hash)
+
+	stable := writeReleaseRelationChunk(
+		NewOrder(context.Background(), 10, 1, "unused", db),
+		ChunkMetadata{ItemCount: 1},
+		[]*XmlReleaseRelation{reducedRelease},
+		true,
+	)
+	require.NoError(t, stable.Err())
+	var stableID int32
+	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
+		Where("release_item_id = ?", releaseItemID).
+		Select("id").Scan(&stableID).Error)
+	require.Equal(t, remaining.ID, stableID)
 }
 
 func requireRelationRowCount(
