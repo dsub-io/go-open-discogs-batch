@@ -2,6 +2,7 @@ package batch
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -10,6 +11,19 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 )
+
+const releaseMasterLockSQL = `select target.id
+	from master as target
+	where target.id = any(?::integer[])
+	   or target.main_release_id = any(?::integer[])
+	   or exists (
+	       select 1
+	       from release_item as existing
+	       where existing.id = any(?::integer[])
+	         and existing.master_id = target.id
+	   )
+	order by target.id
+	for update`
 
 var (
 	labelReleaseItemRelation = integerNullableTextKeyRelation{
@@ -164,6 +178,9 @@ func writeReleaseRelationChunk(
 			return result.NewResult(0, deduplicateError)
 		}
 		rootIDs = unique.Slice(rootIDs)
+		if lockError := lockReleaseMasterRows(transactionOrder, rootIDs, items); lockError != nil {
+			return result.NewResult(0, lockError)
+		}
 		if referenceResult := writeReferenceEntities(
 			transactionOrder,
 			filterGenres(genres),
@@ -298,6 +315,40 @@ func writeReleaseRelationChunk(
 		}
 		return written.Sum(updateMasterMainReleases(transactionOrder, items))
 	})
+}
+
+func lockReleaseMasterRows(
+	order Order,
+	releaseIDs []int32,
+	releases []*XmlReleaseRelation,
+) error {
+	if len(releaseIDs) == 0 {
+		return nil
+	}
+	masterIDs := make([]int32, 0, len(releases))
+	for _, release := range releases {
+		if release == nil || release.MasterInfo.MasterID == nil {
+			continue
+		}
+		masterIDs = append(masterIDs, *release.MasterInfo.MasterID)
+	}
+	masterIDs = unique.Slice(masterIDs)
+	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
+
+	type lockedMaster struct {
+		ID int32
+	}
+	locked := make([]lockedMaster, 0, len(masterIDs))
+	query := order.getDB().Raw(
+		releaseMasterLockSQL,
+		postgresArray(masterIDs),
+		postgresArray(releaseIDs),
+		postgresArray(releaseIDs),
+	).Scan(&locked)
+	if query.Error != nil {
+		return fmt.Errorf("lock release master rows: %w", query.Error)
+	}
+	return nil
 }
 
 func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) result.Result {

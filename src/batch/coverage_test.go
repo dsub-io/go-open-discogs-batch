@@ -345,6 +345,18 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 		actual := write(NewOrder(context.Background(), 1, 1, "unused", db))
 		require.Equal(t, wantError, actual.IsErr())
 	}
+	runRelease := func(t *testing.T, wantError bool, write func(Order) result.Result) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectBegin()
+		expectReleaseMasterLock(mock)
+		if wantError {
+			mock.ExpectRollback()
+		} else {
+			mock.ExpectCommit()
+		}
+		actual := write(NewOrder(context.Background(), 1, 1, "unused", db))
+		require.Equal(t, wantError, actual.IsErr())
+	}
 
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
 	run(t, false, func(order Order) result.Result {
@@ -370,7 +382,7 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 	run(t, true, func(order Order) result.Result {
 		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}}, false)
 	})
-	run(t, true, func(order Order) result.Result {
+	runRelease(t, true, func(order Order) result.Result {
 		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}}, false)
 	})
 
@@ -384,7 +396,7 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 	run(t, true, func(order Order) result.Result {
 		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}}, true)
 	})
-	run(t, true, func(order Order) result.Result {
+	runRelease(t, true, func(order Order) result.Result {
 		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}}, true)
 	})
 }
@@ -428,9 +440,27 @@ func TestReferenceEntitiesUseDeterministicLockOrder(t *testing.T) {
 
 func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	expected := errors.New("fixture")
-	db := poisonedGorm(t, expected)
+	poisonedDB := poisonedGorm(t, expected)
+	releaseID := int32(1)
+	require.ErrorIs(t, lockReleaseMasterRows(
+		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
+		[]int32{releaseID},
+		[]*XmlReleaseRelation{{ID: releaseID}, nil},
+	), expected)
+	mockDB, mock, _ := newMockGorm(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery("select target.id").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnError(expected)
+	mock.ExpectRollback()
+	require.ErrorIs(t, writeReleaseRelationChunk(
+		NewOrder(context.Background(), 1, 1, "unused", mockDB),
+		ChunkMetadata{},
+		[]*XmlReleaseRelation{{ID: releaseID}},
+		false,
+	).Err(), expected)
 	actual := updateMasterMainReleases(
-		NewOrder(context.Background(), 1, 1, "unused", db),
+		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
 		[]*XmlReleaseRelation{nil},
 	)
 	require.ErrorIs(t, actual.Err(), expected)
@@ -459,26 +489,37 @@ func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
 	expected := errors.New("fixture")
 
-	for _, write := range []func(Order) result.Result{
-		func(order Order) result.Result {
+	writes := []struct {
+		prepare func(sqlmock.Sqlmock)
+		write   func(Order) result.Result
+	}{
+		{write: func(order Order) result.Result {
 			return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{
-				ID:     1,
-				Genres: []string{"genre"},
+				ID: 1, Genres: []string{"genre"},
 			}}, false)
-		},
-		func(order Order) result.Result {
+		}},
+		{prepare: expectReleaseMasterLock, write: func(order Order) result.Result {
 			return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{
-				ID:     1,
-				Genres: []string{"genre"},
+				ID: 1, Genres: []string{"genre"},
 			}}, false)
-		},
-	} {
+		}},
+	}
+	for _, fixture := range writes {
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
+		if fixture.prepare != nil {
+			fixture.prepare(mock)
+		}
 		mock.ExpectExec(`INSERT INTO .*genre`).WithArgs("genre").WillReturnError(expected)
 		mock.ExpectRollback()
-		require.ErrorIs(t, write(NewOrder(context.Background(), 1, 1, "unused", db)).Err(), expected)
+		require.ErrorIs(t, fixture.write(NewOrder(context.Background(), 1, 1, "unused", db)).Err(), expected)
 	}
+}
+
+func expectReleaseMasterLock(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery("select target.id").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 }
 
 func TestLabelSubLabelReconcileAccessors(t *testing.T) {
