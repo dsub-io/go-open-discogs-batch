@@ -46,6 +46,11 @@ func processRelationChunks[T any](
 ) result.Result {
 	reporter := newEntityProgressReporter(order)
 	reporter.Start()
+	completedChunks, completedChunksError := loadCompletedChunkInventory(order)
+	if completedChunksError != nil {
+		reporter.Finish(false)
+		return result.NewResult(0, completedChunksError)
+	}
 	ctx, cancel := context.WithCancel(order.getContext())
 	defer cancel()
 	results := make(chan result.Result)
@@ -79,6 +84,15 @@ func processRelationChunks[T any](
 				}
 				totalChunks++
 				totalItems += int64(len(items))
+				completed, completedError := completedChunks.contains(chunk)
+				if completedError != nil {
+					sourceErrors.record(completedError)
+					cancel()
+					return
+				}
+				if completed {
+					return
+				}
 				workers.Add(1)
 				if order.submitWorker(ctx, func() {
 					defer workers.Done()

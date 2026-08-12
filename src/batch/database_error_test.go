@@ -1174,6 +1174,52 @@ func TestProgressTransactionErrorBoundaries(t *testing.T) {
 	})
 }
 
+func TestCompletedChunkInventoryPreloadAndValidation(t *testing.T) {
+	t.Run("disabled", func(t *testing.T) {
+		inventory, err := loadCompletedChunkInventory(
+			NewOrder(context.Background(), 1, 1, "unused", nil),
+		)
+		require.NoError(t, err)
+		require.Empty(t, inventory)
+	})
+
+	t.Run("query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(1), "artist").
+			WillReturnError(expected)
+		inventory, err := loadCompletedChunkInventory(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true),
+		)
+		require.Nil(t, inventory)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("loaded ranges", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(1), "artist").
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"chunk_index", "first_item_index", "item_count"},
+			).AddRow(2, 10, 5))
+		inventory, err := loadCompletedChunkInventory(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.NoError(t, err)
+
+		completed, err := inventory.contains(ChunkMetadata{Index: 2, FirstItemIndex: 10, ItemCount: 5})
+		require.True(t, completed)
+		require.NoError(t, err)
+		completed, err = inventory.contains(ChunkMetadata{Index: 3, FirstItemIndex: 15, ItemCount: 5})
+		require.False(t, completed)
+		require.NoError(t, err)
+		completed, err = inventory.contains(ChunkMetadata{Index: 2, FirstItemIndex: 11, ItemCount: 5})
+		require.False(t, completed)
+		require.ErrorContains(t, err, "does not match source range")
+	})
+}
+
 func newMockTransaction(t *testing.T) (sqlmock.Sqlmock, *sql.Tx) {
 	t.Helper()
 	_, mock, sqlDB := newMockGorm(t)
