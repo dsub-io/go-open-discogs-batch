@@ -6,6 +6,25 @@
 ### Bug Fixes
 
 * prevent batch deadlocks and preserve progress bars ([#60](https://github.com/dsub-io/go-open-discogs-batch/issues/60)) ([9d76b04](https://github.com/dsub-io/go-open-discogs-batch/commit/9d76b04a5070d94807b9c738938ce1626f7052dc))
+* sort shared genre and style reference inserts so concurrent workers acquire
+  PostgreSQL uniqueness locks in one deterministic order for both Master and
+  Release imports
+* keep interactive progress bars on stderr when it is a TTY, while emitting
+  line-delimited `byte_progress` JSON on stdout for pipelines and log collectors
+* suppress ANSI-formatted GORM SQL dumps while preserving the bounded returned
+  error at the CLI boundary
+
+### Production Recovery and Measured Output
+
+* the failure that prompted this fix occurred with `max-workers=4` after Artist
+  and Label completed; the durable ledger retained Master's first `30,000`
+  items in `6` chunks, so the corrected importer can resume without rewriting
+  completed entities or requesting Discogs metadata again
+* non-TTY source progress is bounded from up to `4` carriage-return renders per
+  second to `0.2` JSON records per second (`95%` fewer progress writes), and
+  download progress from up to `2` renders per second to `0.2` (`90%` fewer)
+* the race-enabled full suite passed at `100.0%` statement coverage and the
+  PostgreSQL E2E passed with no residual test container, network, or volume
 
 ## [2.3.3](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.2...v2.3.3) (2026-08-12)
 
