@@ -450,7 +450,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	mockDB, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
 	mock.ExpectQuery("select target.id").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnError(expected)
 	mock.ExpectRollback()
 	require.ErrorIs(t, writeReleaseRelationChunk(
@@ -486,7 +486,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 func TestReleaseMasterLockUsesIndexedCandidateSets(t *testing.T) {
 	require.Contains(t, releaseMasterLockSQL, "with candidate_master_ids")
 	require.Contains(t, releaseMasterLockSQL, "current.main_release_id = any")
-	require.Contains(t, releaseMasterLockSQL, "existing.id = any")
+	require.NotContains(t, releaseMasterLockSQL, "release_item")
 	require.NotContains(t, releaseMasterLockSQL, "where target.id = any")
 	require.NotContains(t, releaseMasterLockSQL, " or ")
 }
@@ -526,7 +526,7 @@ func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
 
 func expectReleaseMasterLock(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("select target.id").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 }
 

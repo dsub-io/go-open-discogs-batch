@@ -20,11 +20,6 @@ const (
 	    select current.id
 	      from master as current
 	     where current.main_release_id = any(?::integer[])
-	    union
-	    select existing.master_id
-	      from release_item as existing
-	     where existing.id = any(?::integer[])
-	       and existing.master_id is not null
 	)
 	select target.id
 	  from master as target
@@ -344,15 +339,7 @@ func lockReleaseMasterRows(
 	if len(releaseIDs) == 0 {
 		return nil
 	}
-	masterIDs := make([]int32, 0, len(releases))
-	for _, release := range releases {
-		if release == nil || release.MasterInfo.MasterID == nil {
-			continue
-		}
-		masterIDs = append(masterIDs, *release.MasterInfo.MasterID)
-	}
-	masterIDs = unique.Slice(masterIDs)
-	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
+	masterIDs := releaseMasterIDsToLock(releases)
 
 	type lockedMaster struct {
 		ID int32
@@ -362,12 +349,24 @@ func lockReleaseMasterRows(
 		releaseMasterLockSQL,
 		postgresArray(masterIDs),
 		postgresArray(releaseIDs),
-		postgresArray(releaseIDs),
 	).Scan(&locked)
 	if query.Error != nil {
 		return fmt.Errorf("lock release master rows: %w", query.Error)
 	}
 	return nil
+}
+
+func releaseMasterIDsToLock(releases []*XmlReleaseRelation) []int32 {
+	masterIDs := make([]int32, 0, len(releases))
+	for _, release := range releases {
+		if release == nil || !release.MasterInfo.IsMaster || release.MasterInfo.MasterID == nil {
+			continue
+		}
+		masterIDs = append(masterIDs, *release.MasterInfo.MasterID)
+	}
+	masterIDs = unique.Slice(masterIDs)
+	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
+	return masterIDs
 }
 
 func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) result.Result {
@@ -412,16 +411,12 @@ func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) resul
 	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
 
 	updated := int(cleared.RowsAffected)
-	batchSize := min(order.getChunkSize(), 32_767)
-	for start := 0; start < len(masterIDs); start += batchSize {
-		end := min(start+batchSize, len(masterIDs))
-		query, arguments := masterMainReleaseUpdateStatement(masterIDs[start:end], updates)
-		tx := order.getDB().Exec(query, arguments...)
-		if tx.Error != nil {
-			return result.NewResult(updated, tx.Error)
-		}
-		updated += int(tx.RowsAffected)
+	query, arguments := masterMainReleaseUpdateStatement(masterIDs, updates)
+	tx := order.getDB().Exec(query, arguments...)
+	if tx.Error != nil {
+		return result.NewResult(updated, tx.Error)
 	}
+	updated += int(tx.RowsAffected)
 	return result.NewResult(updated, nil)
 }
 
@@ -429,19 +424,20 @@ func masterMainReleaseUpdateStatement(
 	masterIDs []int32,
 	updates map[int32]int32,
 ) (string, []any) {
-	rows := make([]string, len(masterIDs))
-	arguments := make([]any, 0, 1+len(masterIDs)*2)
-	arguments = append(arguments, time.Now().UTC())
+	releaseIDs := make([]int32, len(masterIDs))
 	for index, masterID := range masterIDs {
-		rows[index] = "(?::integer, ?::integer)"
-		arguments = append(arguments, masterID, updates[masterID])
+		releaseIDs[index] = updates[masterID]
 	}
 	return `UPDATE master AS target
 		SET main_release_id = incoming.release_id,
 			last_modified_at = ?
-		FROM (VALUES ` + strings.Join(rows, ", ") + `) AS incoming(master_id, release_id)
+		FROM unnest(?::integer[], ?::integer[]) AS incoming(master_id, release_id)
 		WHERE target.id = incoming.master_id
-			AND target.main_release_id IS DISTINCT FROM incoming.release_id`, arguments
+			AND target.main_release_id IS DISTINCT FROM incoming.release_id`, []any{
+			time.Now().UTC(),
+			postgresArray(masterIDs),
+			postgresArray(releaseIDs),
+		}
 }
 
 func filterGenres(genres []*model.Genre) []*model.Genre {

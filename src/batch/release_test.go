@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/xml"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -197,18 +197,32 @@ func TestReleaseRead(t *testing.T) {
 	require.False(t, s[2].MasterInfo.IsMaster)
 }
 
-func TestMasterMainReleaseUpdateStatementBatchesMappings(t *testing.T) {
+func TestMasterMainReleaseUpdateStatementUsesTypedArrays(t *testing.T) {
 	updates := map[int32]int32{10: 100, 20: 200, 30: 300}
 
 	query, arguments := masterMainReleaseUpdateStatement([]int32{10, 20, 30}, updates)
 
 	require.Contains(t, query, "UPDATE master AS target")
-	require.Equal(t, 3, strings.Count(query, "(?::integer, ?::integer)"))
-	require.Len(t, arguments, 7)
-	require.Equal(t, int32(10), arguments[1])
-	require.Equal(t, int32(100), arguments[2])
-	require.Equal(t, int32(30), arguments[5])
-	require.Equal(t, int32(300), arguments[6])
+	require.Contains(t, query, "unnest(?::integer[], ?::integer[])")
+	require.Len(t, arguments, 3)
+	require.Equal(t, []int32{10, 20, 30}, arguments[1].(pgtype.Array[int32]).Elements)
+	require.Equal(t, []int32{100, 200, 300}, arguments[2].(pgtype.Array[int32]).Elements)
+}
+
+func TestReleaseMasterIDsToLockOnlyIncludesMainAssignments(t *testing.T) {
+	mainMasterA := int32(20)
+	mainMasterB := int32(10)
+	nonMainMaster := int32(30)
+
+	actual := releaseMasterIDsToLock([]*XmlReleaseRelation{
+		{MasterInfo: XmlReleaseMasterInfo{MasterID: &mainMasterA, IsMaster: true}},
+		{MasterInfo: XmlReleaseMasterInfo{MasterID: &nonMainMaster}},
+		nil,
+		{MasterInfo: XmlReleaseMasterInfo{MasterID: &mainMasterB, IsMaster: true}},
+		{MasterInfo: XmlReleaseMasterInfo{MasterID: &mainMasterA, IsMaster: true}},
+	})
+
+	require.Equal(t, []int32{10, 20}, actual)
 }
 
 func TestReleaseRelationRead(t *testing.T) {
