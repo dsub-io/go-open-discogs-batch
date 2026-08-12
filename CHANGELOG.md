@@ -6,6 +6,19 @@
 ### Bug Fixes
 
 * keep interactive progress output readable ([#62](https://github.com/dsub-io/go-open-discogs-batch/issues/62)) ([b568812](https://github.com/dsub-io/go-open-discogs-batch/commit/b568812b5ae17c0bba525e66f5bdf5a1f59813bf))
+* make a normal interactive invocation show only the stderr progress bar by
+  suppressing `byte_progress` and `import_progress` JSON on terminal stdout
+* preserve line-delimited JSON when stdout is redirected or piped, including
+  the documented `| tee import.jsonl >/dev/null` pattern for log capture without
+  replaying structured records beside the bar
+
+### Measured Output and Validation
+
+* interactive structured progress falls from up to `0.2` records per second per
+  active reporter to `0` (`100%` reduction); redirected and piped output remains
+  bounded at `0.2` records per second plus start and finish records
+* the stderr TTY progress bar remains enabled, and the race-enabled full suite,
+  PostgreSQL E2E, and `100.0%` statement coverage gate passed
 
 ## [2.3.4](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.3...v2.3.4) (2026-08-12)
 
