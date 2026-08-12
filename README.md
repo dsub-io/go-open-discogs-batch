@@ -104,19 +104,21 @@ import.
 ### Progress observability
 
 When stderr is a terminal, downloads and source reads display an interactive
-progress bar on stderr. Line-delimited `byte_progress` JSON records are emitted
-on stdout at start, at most once every five seconds, and at completion or
+progress bar on stderr. A normal interactive invocation suppresses structured
+progress on terminal stdout, so the bar is the only live progress display.
+When stdout is redirected or piped, line-delimited `byte_progress` JSON records
+are emitted at start, at most once every five seconds, and at completion or
 failure. The records include stage, resource, completed and total compressed
-bytes, percentage, byte throughput, and elapsed time. Redirecting or piping
-stdout through tools such as `tee` therefore remains parseable without removing
-the terminal bar. A source-read percentage describes how much of the gzip
-stream has been consumed; it does not claim that the same percentage of
-PostgreSQL work has committed. Do not merge stderr into stdout when collecting
-structured output.
+bytes, percentage, byte throughput, and elapsed time. A source-read percentage
+describes how much of the gzip stream has been consumed; it does not claim that
+the same percentage of PostgreSQL work has committed. Do not merge stderr into
+stdout when collecting structured output. If `tee` should persist JSON without
+replaying it beside the bar, use `| tee import.jsonl >/dev/null`.
 
-Tracked entity convergence also writes JSON progress records to stdout at
-start, at most once every five seconds while chunks finish, and at completion
-or failure. `committed_items` comes from `discogs_import_run_dump.processed_items`
+When stdout is redirected or piped, tracked entity convergence also writes JSON
+progress records at start, at most once every five seconds while chunks finish,
+and at completion or failure. `committed_items` comes from
+`discogs_import_run_dump.processed_items`
 and therefore counts only roots whose canonical entity and complete relation
 set committed atomically with the chunk ledger. `initial_committed_items` makes
 resumed work explicit, `rows_per_second` covers newly committed roots in the

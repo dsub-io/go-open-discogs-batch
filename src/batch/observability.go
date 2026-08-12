@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/dsub-io/go-open-discogs-batch/internal/progress"
 	"io"
 	"os"
 	"sync"
@@ -80,7 +81,7 @@ func newEntityProgressReporter(order Order) entityProgressReporter {
 		readSummary: func() (committedProgress, error) {
 			return readCommittedProgress(order)
 		},
-		output: os.Stdout,
+		output: progress.StructuredOutput(os.Stdout),
 	}
 }
 
