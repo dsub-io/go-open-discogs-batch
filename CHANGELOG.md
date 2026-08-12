@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.4](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.3...v2.3.4) (2026-08-12)
+
+
+### Bug Fixes
+
+* prevent batch deadlocks and preserve progress bars ([#60](https://github.com/dsub-io/go-open-discogs-batch/issues/60)) ([9d76b04](https://github.com/dsub-io/go-open-discogs-batch/commit/9d76b04a5070d94807b9c738938ce1626f7052dc))
+
 ## [2.3.3](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.2...v2.3.3) (2026-08-12)
 
 
