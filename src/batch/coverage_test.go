@@ -483,6 +483,14 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	require.ErrorIs(t, actual.Err(), expected)
 }
 
+func TestReleaseMasterLockUsesIndexedCandidateSets(t *testing.T) {
+	require.Contains(t, releaseMasterLockSQL, "with candidate_master_ids")
+	require.Contains(t, releaseMasterLockSQL, "current.main_release_id = any")
+	require.Contains(t, releaseMasterLockSQL, "existing.id = any")
+	require.NotContains(t, releaseMasterLockSQL, "where target.id = any")
+	require.NotContains(t, releaseMasterLockSQL, " or ")
+}
+
 func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
 	originalWriter := NewWriter
 	t.Cleanup(func() { NewWriter = originalWriter })

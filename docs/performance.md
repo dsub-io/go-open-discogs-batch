@@ -13,6 +13,7 @@ against canonical `open-discogs-model` v0.3.1.
 | Durable import contract | Higher fixed latency and allocation | 12-record PostgreSQL fixture |
 | Successful-manifest preflight | 95.4% lower p50; avoided 64 MiB file I/O | Cached sparse file |
 | Release Master lock order | Prevented deadlock in 10/10 concurrent regression runs | 4 writers × 4 overlapping Masters |
+| Release Master lock candidates | 161 s observed maximum to 158.144 ms; about 1,018× faster | One real 5,000-Release production chunk |
 | Format quantity parser | 89.3–95.0% lower median time; up to 100% fewer allocations | Typical and 52-digit values |
 
 Do not compare rows across these harnesses. Their inputs, paths, and units are
@@ -35,6 +36,35 @@ the small regression was not run against the old binary, so this is a
 correctness result rather than a latency or throughput improvement claim. A
 successful full-dump retry is required before reporting end-to-end throughput,
 latency distribution, or RSS.
+
+## Release Master lock candidates
+
+The first production retry exposed a separate problem in the ordered lock
+query. A predicate combining target IDs, current main-release IDs, and an
+`EXISTS` branch with `OR` made PostgreSQL scan all 2,579,897 Master rows for
+each Release worker. Four concurrent backends reached 1.20--1.29 GiB PSS each;
+three waited in a transaction-lock chain while the running query reached 161
+seconds. PostgreSQL cgroup memory reached 12.7 GiB, including about 5.0 GiB
+anonymous memory and 7.6 GiB file cache.
+
+The production host had 8 vCPUs, 15.62 GiB RAM, rotational PostgreSQL storage,
+PostgreSQL 17.7, `chunk-size=5000`, and `max-workers=4`. The replacement first
+unions candidate Master IDs from the primary key,
+`master.main_release_id`, and `release_item.id`, then joins and locks only those
+Master rows in ascending order. On the same production database, a real
+5,000-Release chunk covering IDs 840001--845000 produced 2,275 candidate
+Masters and completed `EXPLAIN (ANALYZE, BUFFERS, WAL)` in 158.144 ms. The plan
+used indexed primary-key lookups, with 1.270 ms planning time, 6,832 shared
+buffer hits, 2,268 shared buffer reads, 7.558 ms read time, and no full Master
+scan. Compared with the observed 161-second query, execution latency fell about
+99.90%, or 1,018×.
+
+This is a bounded production diagnosis, not a controlled latency distribution:
+the old query was stopped to protect the shared database, so p50/p95/p99 and a
+same-run before/after RSS comparison are unavailable. The after measurement
+ran once inside a rolled-back transaction after refreshing planner statistics
+and applying production PostgreSQL limits. Full-import throughput and steady
+state RSS remain to be measured during the next import.
 
 ## Reference ID cache
 

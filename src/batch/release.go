@@ -14,18 +14,24 @@ import (
 
 const (
 	releaseIdentityColumn = "identity_sha256"
-	releaseMasterLockSQL  = `select target.id
-	from master as target
-	where target.id = any(?::integer[])
-	   or target.main_release_id = any(?::integer[])
-	   or exists (
-	       select 1
-	       from release_item as existing
-	       where existing.id = any(?::integer[])
-	         and existing.master_id = target.id
-	   )
-	order by target.id
-	for update`
+	releaseMasterLockSQL  = `with candidate_master_ids as (
+	    select unnest(?::integer[]) as id
+	    union
+	    select current.id
+	      from master as current
+	     where current.main_release_id = any(?::integer[])
+	    union
+	    select existing.master_id
+	      from release_item as existing
+	     where existing.id = any(?::integer[])
+	       and existing.master_id is not null
+	)
+	select target.id
+	  from master as target
+	  join candidate_master_ids as candidate
+	    on candidate.id = target.id
+	 order by target.id
+	 for update of target`
 )
 
 var (

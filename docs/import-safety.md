@@ -67,7 +67,10 @@ Concurrent Release chunks may touch the same Master when a main release changes
 or when several releases for one Master cross chunk boundaries. Each chunk
 therefore locks every affected Master row in ascending ID order before writing
 Release roots or reconciling `main_release_id`. This database lock order is
-independent of XML and worker scheduling order.
+independent of XML and worker scheduling order. Candidate IDs are collected by
+three indexed lookups and then joined to `master`; do not combine those paths
+with `OR` in the locking query because PostgreSQL may scan the entire Master
+table once per worker.
 
 A partial Master or Release import is admitted only when each omitted reference
 entity has a compatible completed checkpoint at the current import contract
