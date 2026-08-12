@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -31,6 +32,15 @@ func TestConnect(t *testing.T) {
 		connectionPool, poolErr := connection.DB()
 		assert.NoError(t, poolErr)
 		assert.NoError(t, connectionPool.Close())
+
+		expected := errors.New("unsupported fixture version")
+		unsupportedConnection, unsupportedErr := getConnectInSchema(
+			dsn,
+			DefaultSchemaName,
+			func(*gorm.DB) error { return expected },
+		)
+		assert.Nil(t, unsupportedConnection)
+		assert.ErrorIs(t, unsupportedErr, expected)
 	})
 	t.Run("reject invalid pool limit", func(t *testing.T) {
 		assert.Error(t, ConfigurePool(DB, 0))

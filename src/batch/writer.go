@@ -82,7 +82,7 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 		case []*model.LabelSubLabel:
 			r = doWrite[*model.LabelSubLabel](o, chunkSize, g.db)
 		case []*model.LabelReleaseItem:
-			r = doWrite[*model.LabelReleaseItem](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateLabelReleaseItems)
 		case []*model.Master:
 			r = doWrite[*model.Master](o, chunkSize, g.db)
 		case []*model.MasterArtist:
@@ -96,25 +96,25 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 		case []*model.ReleaseItem:
 			r = doWrite[*model.ReleaseItem](o, chunkSize, g.db)
 		case []*model.ReleaseItemArtist:
-			r = doWrite[*model.ReleaseItemArtist](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseArtists)
 		case []*model.ReleaseItemWork:
-			r = doWrite[*model.ReleaseItemWork](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseWorks)
 		case []*model.ReleaseItemFormat:
-			r = doWrite[*model.ReleaseItemFormat](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseFormats)
 		case []*model.ReleaseItemCreditedArtist:
-			r = doWrite[*model.ReleaseItemCreditedArtist](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseCreditedArtists)
 		case []*model.ReleaseItemGenre:
-			r = doWrite[*model.ReleaseItemGenre](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseGenres)
 		case []*model.ReleaseItemStyle:
-			r = doWrite[*model.ReleaseItemStyle](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseStyles)
 		case []*model.ReleaseItemIdentifier:
-			r = doWrite[*model.ReleaseItemIdentifier](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseIdentifiers)
 		case []*model.ReleaseItemImage:
-			r = doWrite[*model.ReleaseItemImage](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseImages)
 		case []*model.ReleaseItemTrack:
-			r = doWrite[*model.ReleaseItemTrack](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseTracks)
 		case []*model.ReleaseItemVideo:
-			r = doWrite[*model.ReleaseItemVideo](o, chunkSize, g.db)
+			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseVideos)
 		case []*model.Style:
 			r = doWrite[*model.Style](o, chunkSize, g.db)
 		case []*model.Genre:
@@ -127,6 +127,19 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 	}
 
 	return result.NewResult(updated, err)
+}
+
+func writeReleaseRelationBatch[T comparable](
+	items []T,
+	chunkSize int,
+	db *gorm.DB,
+	deduplicate func([]T) ([]T, error),
+) result.Result {
+	deduplicated, err := deduplicate(items)
+	if err != nil {
+		return result.NewResult(0, err)
+	}
+	return doWrite(deduplicated, chunkSize, db)
 }
 
 func doWrite[T comparable](items []T, chunkSize int, db *gorm.DB) result.Result {

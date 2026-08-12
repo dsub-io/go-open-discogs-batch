@@ -46,6 +46,7 @@ var openSQLDatabase = func(db *gorm.DB) (*sql.DB, error) { return db.DB() }
 var newExecutionCoordinator = func(db *sql.DB, version string) importExecutionCoordinator {
 	return NewImportExecutionCoordinator(db, version)
 }
+var validateImportDependencies = preflightImportDependencies
 var preloadImportReferenceIDs = preloadReferenceIDs
 var newImportBatch = New
 var closeIdentifierRows = func(rows *sql.Rows) error { return rows.Close() }
@@ -91,6 +92,9 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	if err != nil {
 		return fmt.Errorf("open SQL connection pool: %w", err)
 	}
+	if err := validateImportDependencies(ctx, sqlDB, plan.Dumps); err != nil {
+		return err
+	}
 	coordinator := newExecutionCoordinator(sqlDB, runner.Version)
 	preparation, err := coordinator.Prepare(
 		ctx,
@@ -112,6 +116,9 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 			return cleanupImportFiles(plan)
 		}
 		return nil
+	}
+	if err := validateImportDependencies(ctx, sqlDB, plan.Dumps); err != nil {
+		return finalizeImport(ctx, coordinator, plan, false, err)
 	}
 	if err := fetchImportResources(ctx, plan); err != nil {
 		return finalizeImport(ctx, coordinator, plan, false, err)

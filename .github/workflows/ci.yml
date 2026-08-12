@@ -1,6 +1,7 @@
 name: Build
 
 on:
+  merge_group:
   push:
     branches:
       - main
@@ -18,6 +19,8 @@ jobs:
     name: Build, test, race, and coverage
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      OPEN_DISCOGS_TEST_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -49,10 +52,7 @@ jobs:
           fi
 
       - name: Verify module metadata
-        run: |
-          set -euo pipefail
-          go mod tidy
-          git diff --exit-code -- go.mod go.sum
+        run: go mod tidy -diff
 
       - name: Vet packages
         run: go vet ./...
@@ -62,18 +62,27 @@ jobs:
 
       - name: Enforce coverage gate
         shell: bash
-        env:
-          MINIMUM_COVERAGE: '100.0'
         run: |
           set -euo pipefail
           total="$(
             go tool cover -func=coverage.out |
               awk '/^total:/ { gsub("%", "", $3); print $3 }'
           )"
-          awk -v total="$total" -v minimum="$MINIMUM_COVERAGE" 'BEGIN {
-            if (total + 0 < minimum) {
-              printf "coverage %.1f%% is below %.1f%%\n", total, minimum
-              exit 1
-            }
-            printf "coverage %.1f%% meets %.1f%% gate\n", total, minimum
-          }'
+          if [[ -z "$total" ]]; then
+            echo "::error::Coverage profile has no total."
+            exit 1
+          fi
+          uncovered="$(
+            awk 'NR > 1 && $2 > 0 && $3 == 0 { print }' coverage.out
+          )"
+          if [[ -n "$uncovered" ]]; then
+            printf 'coverage %s%% has uncovered statements:\n%s\n' \
+              "$total" "$uncovered"
+            exit 1
+          fi
+          printf 'coverage %s%% has no uncovered statements\n' "$total"
+
+      - name: Remove owned test resources and verify no residue
+        if: ${{ always() }}
+        shell: bash
+        run: scripts/verify-test-docker-cleanup.sh

@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -11,8 +12,11 @@ import (
 )
 
 var (
-	labelReleaseItemRelation = integerRelation{
-		table: "label_release_item", parentColumn: "release_item_id", keyColumn: "label_id",
+	labelReleaseItemRelation = integerNullableTextKeyRelation{
+		table:             "label_release_item",
+		parentColumn:      "release_item_id",
+		integerKeyColumn:  "label_id",
+		nullableKeyColumn: "category_notation",
 	}
 	releaseArtistRelation = integerRelation{
 		table: "release_item_artist", parentColumn: "release_item_id", keyColumn: "artist_id",
@@ -123,6 +127,42 @@ func writeReleaseRelationChunk(
 			videos = append(videos, item.GetVideos()...)
 			creditedArtists = append(creditedArtists, item.GetCreditedArtists()...)
 		}
+		var (
+			artistError         error
+			creditedArtistError error
+			workError           error
+			styleError          error
+			genreError          error
+			labelError          error
+			formatError         error
+			identifierError     error
+			trackError          error
+			videoError          error
+		)
+		artists, artistError = deduplicateReleaseArtists(artists)
+		creditedArtists, creditedArtistError = deduplicateReleaseCreditedArtists(creditedArtists)
+		works, workError = deduplicateReleaseWorks(works)
+		releaseStyles, styleError = deduplicateReleaseStyles(releaseStyles)
+		releaseGenres, genreError = deduplicateReleaseGenres(releaseGenres)
+		labels, labelError = deduplicateLabelReleaseItems(labels)
+		formats, formatError = deduplicateReleaseFormats(formats)
+		identifiers, identifierError = deduplicateReleaseIdentifiers(identifiers)
+		tracks, trackError = deduplicateReleaseTracks(tracks)
+		videos, videoError = deduplicateReleaseVideos(videos)
+		if deduplicateError := errors.Join(
+			artistError,
+			creditedArtistError,
+			workError,
+			styleError,
+			genreError,
+			labelError,
+			formatError,
+			identifierError,
+			trackError,
+			videoError,
+		); deduplicateError != nil {
+			return result.NewResult(0, deduplicateError)
+		}
 		rootIDs = unique.Slice(rootIDs)
 		if referenceResult := writeReferenceEntities(
 			transactionOrder,
@@ -194,7 +234,7 @@ func writeReleaseRelationChunk(
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileIntegerNullableTextKeyRelation(
 					transactionOrder,
 					labelReleaseItemRelation,
 					deleteStale,
@@ -202,6 +242,7 @@ func writeReleaseRelationChunk(
 					labels,
 					func(item *model.LabelReleaseItem) int32 { return item.ReleaseItemID },
 					func(item *model.LabelReleaseItem) int32 { return item.LabelID },
+					func(item *model.LabelReleaseItem) *string { return item.CategoryNotation },
 				)
 			},
 			func() result.Result {

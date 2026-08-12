@@ -1,6 +1,7 @@
 name: Conventional Commits
 
 on:
+  merge_group:
   pull_request:
     types:
       - opened
@@ -28,6 +29,8 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -57,6 +60,17 @@ jobs:
               failed=1
             fi
             range="$PR_BASE_SHA..$PR_HEAD_SHA"
+          elif [[ "$EVENT_NAME" == "merge_group" ]]; then
+            if [[ -z "$MERGE_GROUP_BASE_SHA" || -z "$MERGE_GROUP_HEAD_SHA" ]]; then
+              echo "::error::Merge group event is missing its commit range."
+              exit 1
+            fi
+            if ! git cat-file -e "$MERGE_GROUP_BASE_SHA^{commit}" 2>/dev/null ||
+              ! git cat-file -e "$MERGE_GROUP_HEAD_SHA^{commit}" 2>/dev/null; then
+              echo "::error::Merge group commit range is unavailable."
+              exit 1
+            fi
+            range="$MERGE_GROUP_BASE_SHA..$MERGE_GROUP_HEAD_SHA"
           elif [[ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] &&
             git cat-file -e "$PUSH_BEFORE_SHA^{commit}" 2>/dev/null &&
             git merge-base --is-ancestor "$PUSH_BEFORE_SHA" "$PUSH_HEAD_SHA"; then

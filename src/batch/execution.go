@@ -10,13 +10,46 @@ import (
 
 	opendiscogsmanifest "github.com/dsub-io/open-discogs-model/manifest"
 	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const processorName = "go-open-discogs-batch"
+type importContractRevision int32
+
+const (
+	processorName                         = "go-open-discogs-batch"
+	artistEntityType                      = "artist"
+	labelEntityType                       = "label"
+	masterEntityType                      = "master"
+	releaseEntityType                     = "release"
+	undefinedColumnSQLState               = "42703"
+	importContractRevisionMigration       = "V009"
+	importContractRevisionColumnReference = "discogs_import_run_dump.import_contract_revision"
+)
 
 var fingerprintImportManifest = opendiscogsmanifest.Fingerprint
 var orderImportEntityTypes = opendiscogsmanifest.OrderedEntityTypes
 var requiredImportLockTypes = opendiscogsmanifest.RequiredLockEntityTypes
+var currentImportContractRevisions = map[string]importContractRevision{
+	artistEntityType:  mustImportContractRevision(artistEntityType),
+	labelEntityType:   mustImportContractRevision(labelEntityType),
+	masterEntityType:  mustImportContractRevision(masterEntityType),
+	releaseEntityType: mustImportContractRevision(releaseEntityType),
+}
+
+func mustImportContractRevision(entityType string) importContractRevision {
+	revision, err := opendiscogsmanifest.ImportContractRevision(entityType)
+	if err != nil {
+		panic(fmt.Sprintf("load model import contract revision for %s: %v", entityType, err))
+	}
+	return importContractRevision(revision)
+}
+
+type importCheckpointCompatibility struct {
+	ExactRunID              int64
+	CompatibleEntityCount   int
+	SelectedEntityCount     int
+	IncompatibleEntityTypes []string
+}
 
 type ImportPreparation struct {
 	ManifestSHA256   string
@@ -90,6 +123,10 @@ func (c *ImportExecutionCoordinator) Prepare(
 	if err != nil {
 		return nil, err
 	}
+	revisions, err := resolveImportContractRevisions(entityTypes)
+	if err != nil {
+		return nil, err
+	}
 	lockTypes, err := requiredImportLockTypes(orderedTypes)
 	if err != nil {
 		return nil, err
@@ -128,13 +165,53 @@ func (c *ImportExecutionCoordinator) Prepare(
 		return nil, err
 	}
 
-	successfulRunID, err := findSuccessfulRun(ctx, tx, fingerprint)
+	dumpIDs := make([]int64, len(dumps))
+	for index, dump := range dumps {
+		dumpIDs[index], err = findOrInsertDump(ctx, tx, dump)
+		if err != nil {
+			_ = tx.Rollback()
+			c.release(ctx)
+			return nil, err
+		}
+	}
+
+	compatibility, err := findSuccessfulRun(
+		ctx,
+		tx,
+		fingerprint,
+	)
 	if err != nil {
 		_ = tx.Rollback()
 		c.release(ctx)
 		return nil, err
 	}
-	if successfulRunID != 0 && !force {
+	if !force && compatibility.SelectedEntityCount == len(dumps) &&
+		compatibility.CompatibleEntityCount > 0 &&
+		compatibility.CompatibleEntityCount < compatibility.SelectedEntityCount {
+		_ = tx.Rollback()
+		c.release(ctx)
+		return nil, fmt.Errorf(
+			"import plan is partially satisfied; preserve compatible checkpoints and rerun only --entities %s",
+			strings.Join(compatibility.IncompatibleEntityTypes, ","),
+		)
+	}
+	if !force && compatibility.SelectedEntityCount == len(dumps) &&
+		compatibility.CompatibleEntityCount == compatibility.SelectedEntityCount {
+		successfulRunID := compatibility.ExactRunID
+		if successfulRunID == 0 {
+			successfulRunID, err = consolidateSuccessfulImportRun(
+				ctx,
+				tx,
+				fingerprint,
+				c.processorVersion,
+				len(dumps),
+			)
+			if err != nil {
+				_ = tx.Rollback()
+				c.release(ctx)
+				return nil, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			_ = tx.Rollback()
 			c.release(ctx)
@@ -147,16 +224,6 @@ func (c *ImportExecutionCoordinator) Prepare(
 			RunID:          successfulRunID,
 			Skipped:        true,
 		}, nil
-	}
-
-	dumpIDs := make([]int64, len(dumps))
-	for index, dump := range dumps {
-		dumpIDs[index], err = findOrInsertDump(ctx, tx, dump)
-		if err != nil {
-			_ = tx.Rollback()
-			c.release(ctx)
-			return nil, err
-		}
 	}
 
 	resumedFromRunID := int64(0)
@@ -191,19 +258,18 @@ func (c *ImportExecutionCoordinator) Prepare(
 		return nil, err
 	}
 	for index, dump := range dumps {
-		if _, err := tx.ExecContext(
+		if err := insertImportRunDump(
 			ctx,
-			`insert into discogs_import_run_dump
-			    (import_run_id, entity_type, dump_id, chunk_size)
-			 values ($1, $2, $3, $4)`,
+			tx,
 			runID,
 			dump.EntityType,
 			dumpIDs[index],
 			chunkSize,
+			revisions[index],
 		); err != nil {
 			_ = tx.Rollback()
 			c.release(ctx)
-			return nil, fmt.Errorf("record import run dump %s: %w", dump.EntityType, err)
+			return nil, err
 		}
 	}
 	if resumedFromRunID != 0 {
@@ -429,53 +495,218 @@ func assertNotDowngrade(
 	return nil
 }
 
+func resolveImportContractRevisions(
+	entityTypes []string,
+) ([]importContractRevision, error) {
+	revisions := make([]importContractRevision, len(entityTypes))
+	for index, entityType := range entityTypes {
+		revision, exists := currentImportContractRevisions[entityType]
+		if !exists || revision < 1 {
+			return nil, fmt.Errorf(
+				"import contract revision is unavailable for entity %s",
+				entityType,
+			)
+		}
+		revisions[index] = revision
+	}
+	return revisions, nil
+}
+
+func importContractRevisionSQL(entityTypeColumn string) string {
+	return fmt.Sprintf(
+		"case %s when '%s' then %d when '%s' then %d when '%s' then %d when '%s' then %d end",
+		entityTypeColumn,
+		artistEntityType,
+		currentImportContractRevisions[artistEntityType],
+		labelEntityType,
+		currentImportContractRevisions[labelEntityType],
+		masterEntityType,
+		currentImportContractRevisions[masterEntityType],
+		releaseEntityType,
+		currentImportContractRevisions[releaseEntityType],
+	)
+}
+
 func findSuccessfulRun(
 	ctx context.Context,
 	tx *sql.Tx,
 	fingerprint string,
-) (int64, error) {
-	var runID int64
+) (importCheckpointCompatibility, error) {
+	var exactRunID sql.NullInt64
+	var compatibleEntityCount int
+	var selectedEntityCount int
+	var incompatibleEntityTypes string
+	query := fmt.Sprintf(
+		`with candidate_run as (
+		    select candidate.id
+		      from discogs_import_run candidate
+		     where candidate.manifest_sha256 = $1
+		       and candidate.status = 'success'
+		     order by candidate.completed_at desc, candidate.id desc
+		     limit 1
+		), expected as (
+		    select candidate_dump.entity_type,
+		           candidate_dump.dump_id,
+		           candidate_dump.import_contract_revision as candidate_revision,
+		           %s as expected_revision
+		      from candidate_run
+		      join discogs_import_run_dump candidate_dump
+		        on candidate_dump.import_run_id = candidate_run.id
+		), compatibility as (
+		    select expected.entity_type,
+		           checkpoint.import_run_id,
+		           coalesce(
+		               current_dump.dump_id = expected.dump_id
+		               and current_dump.import_contract_revision = expected.expected_revision
+		               and not exists (
+		                   select 1
+		                     from discogs_import_run_dump failed_dump
+		                     join discogs_import_run failed_run
+		                       on failed_run.id = failed_dump.import_run_id
+		                    where failed_dump.entity_type = expected.entity_type
+		                      and failed_run.status = 'failed'
+		                      and (failed_run.completed_at > checkpoint.applied_at
+		                           or (failed_run.completed_at = checkpoint.applied_at
+		                               and failed_run.id > checkpoint.import_run_id))
+		               ),
+		               false
+		           ) as compatible
+		      from expected
+		      left join discogs_import_checkpoint checkpoint
+		        on checkpoint.entity_type = expected.entity_type
+		      left join discogs_import_run_dump current_dump
+		        on current_dump.import_run_id = checkpoint.import_run_id
+		       and current_dump.entity_type = checkpoint.entity_type
+		), exact_run as (
+		    select candidate_run.id
+		      from candidate_run
+		     where not exists (
+		         select 1
+		           from expected
+		          where candidate_revision is distinct from expected_revision
+		     )
+		)
+		select (select id from exact_run),
+		       count(*) filter (where compatible),
+		       count(*),
+		       coalesce(
+		           string_agg(entity_type, ',' order by entity_type)
+		               filter (where not compatible),
+		           ''
+		       )
+		  from compatibility`,
+		importContractRevisionSQL("candidate_dump.entity_type"),
+	)
 	err := tx.QueryRowContext(
 		ctx,
-		`select candidate_run.id
-		   from discogs_import_run candidate_run
-		  where candidate_run.manifest_sha256 = $1
-		    and candidate_run.status = 'success'
-		    and not exists (
-		        select 1
-		          from discogs_import_run_dump candidate_dump
-		          left join discogs_import_checkpoint checkpoint
-		            on checkpoint.entity_type = candidate_dump.entity_type
-		          left join discogs_import_run_dump current_dump
-		            on current_dump.import_run_id = checkpoint.import_run_id
-		           and current_dump.entity_type = checkpoint.entity_type
-		         where candidate_dump.import_run_id = candidate_run.id
-		           and current_dump.dump_id is distinct from candidate_dump.dump_id
-		    )
-		    and not exists (
-		        select 1
-		          from discogs_import_run_dump candidate_dump
-		          join discogs_import_checkpoint checkpoint
-		            on checkpoint.entity_type = candidate_dump.entity_type
-		          join discogs_import_run_dump failed_dump
-		            on failed_dump.entity_type = candidate_dump.entity_type
-		          join discogs_import_run failed_run
-		            on failed_run.id = failed_dump.import_run_id
-		         where candidate_dump.import_run_id = candidate_run.id
-		           and failed_run.status = 'failed'
-		           and (failed_run.completed_at > checkpoint.applied_at
-		                or (failed_run.completed_at = checkpoint.applied_at
-		                    and failed_run.id > checkpoint.import_run_id))
-		    )
-		  order by candidate_run.completed_at desc, candidate_run.id desc
-		  limit 1`,
+		query,
 		fingerprint,
-	).Scan(&runID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil
-	}
+	).Scan(
+		&exactRunID,
+		&compatibleEntityCount,
+		&selectedEntityCount,
+		&incompatibleEntityTypes,
+	)
 	if err != nil {
-		return 0, fmt.Errorf("find successful import manifest: %w", err)
+		return importCheckpointCompatibility{}, importContractRevisionQueryError(
+			"find successful import manifest",
+			err,
+		)
+	}
+	compatibility := importCheckpointCompatibility{
+		CompatibleEntityCount: compatibleEntityCount,
+		SelectedEntityCount:   selectedEntityCount,
+	}
+	if exactRunID.Valid {
+		compatibility.ExactRunID = exactRunID.Int64
+	}
+	if incompatibleEntityTypes != "" {
+		compatibility.IncompatibleEntityTypes = strings.Split(
+			incompatibleEntityTypes,
+			",",
+		)
+	}
+	return compatibility, nil
+}
+
+func consolidateSuccessfulImportRun(
+	ctx context.Context,
+	tx *sql.Tx,
+	fingerprint string,
+	processorVersion string,
+	expectedEntityCount int,
+) (int64, error) {
+	var runID int64
+	if err := tx.QueryRowContext(
+		ctx,
+		`insert into discogs_import_run
+		    (manifest_sha256, status, completed_at, force_requested,
+		     allow_downgrade_requested, processor, processor_version)
+		 values ($1, 'success', now(), false, false, $2, $3)
+		 returning id`,
+		fingerprint,
+		processorName,
+		processorVersion,
+	).Scan(&runID); err != nil {
+		return 0, fmt.Errorf("record consolidated successful import run: %w", err)
+	}
+	query := fmt.Sprintf(
+		`with candidate_run as (
+		    select candidate.id
+		      from discogs_import_run candidate
+		     where candidate.manifest_sha256 = $2
+		       and candidate.status = 'success'
+		       and candidate.id <> $1
+		     order by candidate.completed_at desc, candidate.id desc
+		     limit 1
+		), expected as (
+		    select candidate_dump.entity_type,
+		           candidate_dump.dump_id,
+		           %s as import_contract_revision
+		      from candidate_run
+		      join discogs_import_run_dump candidate_dump
+		        on candidate_dump.import_run_id = candidate_run.id
+		)
+		insert into discogs_import_run_dump
+		    (import_run_id, entity_type, dump_id, processed_items,
+		     last_progress_at, completed_at, chunk_size, total_items,
+		     total_chunks, import_contract_revision)
+		select $1, source.entity_type, source.dump_id, source.processed_items,
+		       source.last_progress_at, source.completed_at, source.chunk_size,
+		       source.total_items, source.total_chunks,
+		       expected.import_contract_revision
+		  from expected
+		  join discogs_import_checkpoint checkpoint
+		    on checkpoint.entity_type = expected.entity_type
+		  join discogs_import_run_dump source
+		    on source.import_run_id = checkpoint.import_run_id
+		   and source.entity_type = checkpoint.entity_type
+		   and source.dump_id = expected.dump_id
+		   and source.import_contract_revision = expected.import_contract_revision`,
+		importContractRevisionSQL("candidate_dump.entity_type"),
+	)
+	result, err := tx.ExecContext(
+		ctx,
+		query,
+		runID,
+		fingerprint,
+	)
+	if err != nil {
+		return 0, importContractRevisionQueryError(
+			"record consolidated successful import run dumps",
+			err,
+		)
+	}
+	recorded, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count consolidated successful import run dumps: %w", err)
+	}
+	if recorded != int64(expectedEntityCount) {
+		return 0, fmt.Errorf(
+			"record consolidated successful import run dumps: recorded %d of %d entities",
+			recorded,
+			expectedEntityCount,
+		)
 	}
 	return runID, nil
 }
@@ -489,8 +720,7 @@ func findResumableRun(
 	entityCount int,
 ) (int64, error) {
 	var runID int64
-	err := tx.QueryRowContext(
-		ctx,
+	query := fmt.Sprintf(
 		`select import_run.id
 		   from discogs_import_run import_run
 		  where import_run.manifest_sha256 = $1
@@ -501,6 +731,12 @@ func findResumableRun(
 		    and (select count(*)
 		           from discogs_import_run_dump run_dump
 		          where run_dump.import_run_id = import_run.id) = $4
+		    and not exists (
+		        select 1
+		          from discogs_import_run_dump run_dump
+		         where run_dump.import_run_id = import_run.id
+		           and run_dump.import_contract_revision is distinct from %s
+		    )
 		    and not exists (
 		        select 1
 		          from discogs_import_run_dump run_dump
@@ -541,13 +777,20 @@ func findResumableRun(
 		         where failed_dump.import_run_id = import_run.id
 		           and (current_dump.dump_id <> failed_dump.dump_id
 		                or current_run.processor <> import_run.processor
-		                or current_run.processor_version <> import_run.processor_version)
+		                or current_run.processor_version <> import_run.processor_version
+		                or current_dump.import_contract_revision <>
+		                   failed_dump.import_contract_revision)
 		           and (checkpoint.applied_at > import_run.completed_at
 		                or (checkpoint.applied_at = import_run.completed_at
 		                    and checkpoint.import_run_id > import_run.id))
 		    )
 		  order by import_run.completed_at desc, import_run.id desc
 		  limit 1`,
+		importContractRevisionSQL("run_dump.entity_type"),
+	)
+	err := tx.QueryRowContext(
+		ctx,
+		query,
 		fingerprint,
 		processorName,
 		processorVersion,
@@ -558,7 +801,10 @@ func findResumableRun(
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("find resumable import run: %w", err)
+		return 0, importContractRevisionQueryError(
+			"find resumable import run",
+			err,
+		)
 	}
 	return runID, nil
 }
@@ -661,10 +907,12 @@ func pruneSupersededFailedProgress(ctx context.Context, tx *sql.Tx) error {
 		               left join discogs_import_run_dump current_dump
 		                 on current_dump.import_run_id = checkpoint.import_run_id
 		                and current_dump.entity_type = checkpoint.entity_type
-		              where failed_dump.import_run_id = failed_run.id
-		                and (current_dump.dump_id is distinct from failed_dump.dump_id
-		                     or current_run.processor is distinct from failed_run.processor
-		                     or current_run.processor_version is distinct from failed_run.processor_version)
+			              where failed_dump.import_run_id = failed_run.id
+			                and (current_dump.dump_id is distinct from failed_dump.dump_id
+			                     or current_run.processor is distinct from failed_run.processor
+			                     or current_run.processor_version is distinct from failed_run.processor_version
+			                     or current_dump.import_contract_revision is distinct from
+			                        failed_dump.import_contract_revision)
 		         )
 		  )`,
 	); err != nil {
@@ -716,6 +964,34 @@ func findOrInsertDump(
 	return dumpID, nil
 }
 
+func insertImportRunDump(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID int64,
+	entityType string,
+	dumpID int64,
+	chunkSize int,
+	revision importContractRevision,
+) error {
+	if _, err := tx.ExecContext(
+		ctx,
+		`insert into discogs_import_run_dump
+		    (import_run_id, entity_type, dump_id, chunk_size, import_contract_revision)
+		 values ($1, $2, $3, $4, $5)`,
+		runID,
+		entityType,
+		dumpID,
+		chunkSize,
+		revision,
+	); err != nil {
+		return importContractRevisionQueryError(
+			"record import run dump "+entityType,
+			err,
+		)
+	}
+	return nil
+}
+
 func insertImportRun(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -734,7 +1010,8 @@ func insertImportRun(
 		ctx,
 		`insert into discogs_import_run
 		    (manifest_sha256, status, force_requested,
-		     allow_downgrade_requested, processor, processor_version, resumed_from_run_id)
+		     allow_downgrade_requested, processor, processor_version,
+		     resumed_from_run_id)
 		 values ($1, 'running', $2, $3, $4, $5, $6)
 		 returning id`,
 		fingerprint,
@@ -745,7 +1022,21 @@ func insertImportRun(
 		resumedFrom,
 	).Scan(&runID)
 	if err != nil {
-		return 0, fmt.Errorf("start import run: %w", err)
+		return 0, importContractRevisionQueryError("start import run", err)
 	}
 	return runID, nil
+}
+
+func importContractRevisionQueryError(operation string, err error) error {
+	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) && postgresError.Code == undefinedColumnSQLState {
+		return fmt.Errorf(
+			"%s: %s is unavailable; apply canonical model migration %s: %w",
+			operation,
+			importContractRevisionColumnReference,
+			importContractRevisionMigration,
+			err,
+		)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
