@@ -1,43 +1,5 @@
 # Changelog
 
-## [2.3.6](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.5...v2.3.6) (2026-08-12)
-
-
-### Bug Fixes
-
-* enforce canonical dump recovery ([50fe133](https://github.com/dsub-io/go-open-discogs-batch/commit/50fe1338808dfcaf9ced0431cfb88fa8f65754dc))
-* enforce canonical import recovery ([6a3afe2](https://github.com/dsub-io/go-open-discogs-batch/commit/6a3afe27295e08564518c874540c4d36e7b0c8b5))
-* preserve release label catalog identities ([7c35ee7](https://github.com/dsub-io/go-open-discogs-batch/commit/7c35ee784168a07e09b995e5c2270acdf16776d6))
-* serialize canonical schema migrations ([be3fb66](https://github.com/dsub-io/go-open-discogs-batch/commit/be3fb66d5b1be35a5dc19bc882ab5e38a311a313))
-
-### Reliability and Data Correctness
-
-* consume the exact migration bytes, checksums, lock graph, and per-entity
-  import revisions from `open-discogs-model` `0.3.0`, including verified
-  adoption of compatible legacy Go and Liquibase migration state
-* serialize schema migration with the same advisory-lock family used by Go and
-  Java imports, preventing DDL from racing active data writes
-* reject partial Master or Release imports before writing when an omitted
-  Artist, Label, or Master checkpoint is missing, stale, or was reissued with a
-  different checksum
-* deduplicate every supported Release relation by its canonical PostgreSQL
-  conflict key and fail a same-key/different-payload chunk instead of silently
-  choosing first- or last-write-wins
-* preserve catalog number in the Release-label identity. The bounded 2026-08
-  dump audit found `1,380,015` same-release/label pairs with distinct catalog
-  numbers that the old key could collapse, plus `7,706` exact duplicates that
-  remain safely deduplicated
-
-### Validation and Distribution
-
-* pass the race-enabled full suite, PostgreSQL dump E2E, and `100.0%` statement
-  coverage gate with no owned test container, network, or volume remaining
-* publish signed versioned binaries and checksums plus verified `linux/amd64`
-  and `linux/arm64` GHCR manifests; Release Please commits are GPG-signed
-* no production-sized throughput or memory improvement is claimed: this release
-  changes correctness and recovery boundaries, and the first full import
-  remains intentionally blocked pending cross-language validation
-
 ## [2.3.5](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.4...v2.3.5) (2026-08-12)
 
 
