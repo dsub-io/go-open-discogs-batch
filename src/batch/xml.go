@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +11,11 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
 	"github.com/reactivex/rxgo/v2"
+)
+
+const (
+	releaseFormatHashFieldSeparator = "\x00"
+	releaseFormatHashNullValue      = "\x01"
 )
 
 type XmlRef struct {
@@ -579,10 +585,10 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 		description := reducedDescription(format.Descriptions)
 		name := helper.FilterStr(format.Name)
 		text := helper.FilterStr(format.Text)
-		hashSource := stringValue(name) + stringValue(description) + stringValue(text)
-		if strings.TrimSpace(hashSource) == "" {
+		if name == nil && description == nil && text == nil {
 			continue
 		}
+		hashSource := releaseFormatHashSource(name, description, format.Quantity, text)
 		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemFormat{
 			ReleaseItemID:  r.ID,
@@ -596,6 +602,26 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 		})
 	}
 	return items
+}
+
+func releaseFormatHashSource(name, description *string, quantity *int32, text *string) string {
+	quantityValue := releaseFormatHashNullValue
+	if quantity != nil {
+		quantityValue = strconv.FormatInt(int64(*quantity), 10)
+	}
+	return strings.Join([]string{
+		releaseFormatHashString(name),
+		releaseFormatHashString(description),
+		quantityValue,
+		releaseFormatHashString(text),
+	}, releaseFormatHashFieldSeparator)
+}
+
+func releaseFormatHashString(value *string) string {
+	if value == nil {
+		return releaseFormatHashNullValue
+	}
+	return *value
 }
 
 func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseItemCreditedArtist {

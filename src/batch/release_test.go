@@ -54,6 +54,26 @@ func TestReleaseRelationDeduplicationFixture(t *testing.T) {
 	require.Equal(t, "SK026", *labels[2].CategoryNotation)
 }
 
+func TestReleaseFormatsPreserveQuantityVariants(t *testing.T) {
+	name := "CD"
+	quantityOne := int32(1)
+	quantityTwo := int32(2)
+	release := &XmlReleaseRelation{
+		ID: 48967,
+		Formats: []XmlFormat{
+			{Name: &name, Quantity: &quantityOne, Descriptions: []string{"Compilation"}},
+			{Name: &name, Quantity: &quantityTwo, Descriptions: []string{"Compilation"}},
+		},
+	}
+
+	formats := release.GetFormats()
+	require.Len(t, formats, 2)
+	require.NotEqual(t, formats[0].Hash, formats[1].Hash)
+	deduplicated, err := deduplicateReleaseFormats(formats)
+	require.NoError(t, err)
+	require.Len(t, deduplicated, 2)
+}
+
 func readReleaseRelationDeduplicationFixture(t *testing.T) *XmlReleaseRelation {
 	t.Helper()
 	file, err := os.Open("testdata/release-relations-dedup.xml")
