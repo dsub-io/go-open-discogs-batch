@@ -55,19 +55,19 @@ func writeLabelRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlLabelRelation,
 ) result.Result {
-	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
-		rootIDs := make([]int32, 0, len(items))
-		urls := make([]*model.LabelURL, 0)
-		subLabels := make([]*model.LabelSubLabel, 0)
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			rootIDs = append(rootIDs, item.ID)
-			urls = append(urls, item.GetUrls()...)
-			subLabels = append(subLabels, item.GetSubLabels()...)
+	rootIDs := make([]int32, 0, len(items))
+	urls := make([]*model.LabelURL, 0)
+	subLabels := make([]*model.LabelSubLabel, 0)
+	for _, item := range items {
+		if item == nil {
+			continue
 		}
-		rootIDs = unique.Slice(rootIDs)
+		rootIDs = append(rootIDs, item.ID)
+		urls = append(urls, item.GetUrls()...)
+		subLabels = append(subLabels, item.GetSubLabels()...)
+	}
+	rootIDs = unique.Slice(rootIDs)
+	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		existingRoots, err := findExistingRelationRoots(
 			transactionOrder,
 			rootIDs,

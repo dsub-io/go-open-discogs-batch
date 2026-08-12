@@ -452,11 +452,14 @@ func TestReferenceEntitiesUseDeterministicLockOrder(t *testing.T) {
 		WithArgs("Dub", "Techno").
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	order := NewOrder(context.Background(), 10, 1, "unused", db)
+	genres := []*opendiscogsmodel.Genre{{Name: "Electronic"}, {Name: "Ambient"}}
+	styles := []*opendiscogsmodel.Style{{Name: "Techno"}, {Name: "Dub"}}
+	sortReferenceEntities(genres, styles)
 
 	actual := writeReferenceEntities(
 		order,
-		[]*opendiscogsmodel.Genre{{Name: "Electronic"}, {Name: "Ambient"}},
-		[]*opendiscogsmodel.Style{{Name: "Techno"}, {Name: "Dub"}},
+		genres,
+		styles,
 	)
 
 	require.NoError(t, actual.Err())

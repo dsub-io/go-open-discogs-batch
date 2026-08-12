@@ -98,77 +98,80 @@ func writeReleaseRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlReleaseRelation,
 ) result.Result {
+	genres := make([]*model.Genre, 0)
+	styles := make([]*model.Style, 0)
+	rootIDs := make([]int32, 0, len(items))
+	releases := make([]*model.ReleaseItem, 0, len(items))
+	artists := make([]*model.ReleaseItemArtist, 0)
+	creditedArtists := make([]*model.ReleaseItemCreditedArtist, 0)
+	works := make([]*model.ReleaseItemWork, 0)
+	formats := make([]*model.ReleaseItemFormat, 0)
+	releaseStyles := make([]*model.ReleaseItemStyle, 0)
+	releaseGenres := make([]*model.ReleaseItemGenre, 0)
+	identifiers := make([]*model.ReleaseItemIdentifier, 0)
+	tracks := make([]*model.ReleaseItemTrack, 0)
+	videos := make([]*model.ReleaseItemVideo, 0)
+	labels := make([]*model.LabelReleaseItem, 0)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		rootIDs = append(rootIDs, item.ID)
+		genres = append(genres, item.GetGenres()...)
+		styles = append(styles, item.GetStyles()...)
+		releases = append(releases, item.GetRelease())
+		artists = append(artists, item.GetReleaseArtists()...)
+		releaseGenres = append(releaseGenres, item.GetReleaseGenres()...)
+		releaseStyles = append(releaseStyles, item.GetReleaseStyles()...)
+		works = append(works, item.GetWorks()...)
+		labels = append(labels, item.GetLabels()...)
+		formats = append(formats, item.GetFormats()...)
+		identifiers = append(identifiers, item.GetIdentifiers()...)
+		tracks = append(tracks, item.GetTracks()...)
+		videos = append(videos, item.GetVideos()...)
+		creditedArtists = append(creditedArtists, item.GetCreditedArtists()...)
+	}
+	var (
+		artistError         error
+		creditedArtistError error
+		workError           error
+		styleError          error
+		genreError          error
+		labelError          error
+		formatError         error
+		identifierError     error
+		trackError          error
+		videoError          error
+	)
+	artists, artistError = deduplicateReleaseArtists(artists)
+	creditedArtists, creditedArtistError = deduplicateReleaseCreditedArtists(creditedArtists)
+	works, workError = deduplicateReleaseWorks(works)
+	releaseStyles, styleError = deduplicateReleaseStyles(releaseStyles)
+	releaseGenres, genreError = deduplicateReleaseGenres(releaseGenres)
+	labels, labelError = deduplicateLabelReleaseItems(labels)
+	formats, formatError = deduplicateReleaseFormats(formats)
+	identifiers, identifierError = deduplicateReleaseIdentifiers(identifiers)
+	tracks, trackError = deduplicateReleaseTracks(tracks)
+	videos, videoError = deduplicateReleaseVideos(videos)
+	if deduplicateError := errors.Join(
+		artistError,
+		creditedArtistError,
+		workError,
+		styleError,
+		genreError,
+		labelError,
+		formatError,
+		identifierError,
+		trackError,
+		videoError,
+	); deduplicateError != nil {
+		return result.NewResult(0, deduplicateError)
+	}
+	rootIDs = unique.Slice(rootIDs)
+	genres = filterGenres(genres)
+	styles = filterStyles(styles)
+	sortReferenceEntities(genres, styles)
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
-		genres := make([]*model.Genre, 0)
-		styles := make([]*model.Style, 0)
-		rootIDs := make([]int32, 0, len(items))
-		releases := make([]*model.ReleaseItem, 0, len(items))
-		artists := make([]*model.ReleaseItemArtist, 0)
-		creditedArtists := make([]*model.ReleaseItemCreditedArtist, 0)
-		works := make([]*model.ReleaseItemWork, 0)
-		formats := make([]*model.ReleaseItemFormat, 0)
-		releaseStyles := make([]*model.ReleaseItemStyle, 0)
-		releaseGenres := make([]*model.ReleaseItemGenre, 0)
-		identifiers := make([]*model.ReleaseItemIdentifier, 0)
-		tracks := make([]*model.ReleaseItemTrack, 0)
-		videos := make([]*model.ReleaseItemVideo, 0)
-		labels := make([]*model.LabelReleaseItem, 0)
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			rootIDs = append(rootIDs, item.ID)
-			genres = append(genres, item.GetGenres()...)
-			styles = append(styles, item.GetStyles()...)
-			releases = append(releases, item.GetRelease())
-			artists = append(artists, item.GetReleaseArtists()...)
-			releaseGenres = append(releaseGenres, item.GetReleaseGenres()...)
-			releaseStyles = append(releaseStyles, item.GetReleaseStyles()...)
-			works = append(works, item.GetWorks()...)
-			labels = append(labels, item.GetLabels()...)
-			formats = append(formats, item.GetFormats()...)
-			identifiers = append(identifiers, item.GetIdentifiers()...)
-			tracks = append(tracks, item.GetTracks()...)
-			videos = append(videos, item.GetVideos()...)
-			creditedArtists = append(creditedArtists, item.GetCreditedArtists()...)
-		}
-		var (
-			artistError         error
-			creditedArtistError error
-			workError           error
-			styleError          error
-			genreError          error
-			labelError          error
-			formatError         error
-			identifierError     error
-			trackError          error
-			videoError          error
-		)
-		artists, artistError = deduplicateReleaseArtists(artists)
-		creditedArtists, creditedArtistError = deduplicateReleaseCreditedArtists(creditedArtists)
-		works, workError = deduplicateReleaseWorks(works)
-		releaseStyles, styleError = deduplicateReleaseStyles(releaseStyles)
-		releaseGenres, genreError = deduplicateReleaseGenres(releaseGenres)
-		labels, labelError = deduplicateLabelReleaseItems(labels)
-		formats, formatError = deduplicateReleaseFormats(formats)
-		identifiers, identifierError = deduplicateReleaseIdentifiers(identifiers)
-		tracks, trackError = deduplicateReleaseTracks(tracks)
-		videos, videoError = deduplicateReleaseVideos(videos)
-		if deduplicateError := errors.Join(
-			artistError,
-			creditedArtistError,
-			workError,
-			styleError,
-			genreError,
-			labelError,
-			formatError,
-			identifierError,
-			trackError,
-			videoError,
-		); deduplicateError != nil {
-			return result.NewResult(0, deduplicateError)
-		}
-		rootIDs = unique.Slice(rootIDs)
 		existingRoots, existingRootsError := findExistingRelationRoots(
 			transactionOrder,
 			rootIDs,
@@ -191,8 +194,8 @@ func writeReleaseRelationChunk(
 		}
 		if referenceResult := writeReferenceEntities(
 			transactionOrder,
-			filterGenres(genres),
-			filterStyles(styles),
+			genres,
+			styles,
 		); referenceResult.IsErr() {
 			return referenceResult
 		}

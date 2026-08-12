@@ -2,14 +2,15 @@ package batch
 
 import (
 	"fmt"
+	"slices"
+	"strings"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"slices"
-	"strings"
 )
 
 func writeChunk(order Order, slices ...interface{}) result.Result {
@@ -21,12 +22,6 @@ func writeReferenceEntities(
 	genres []*model.Genre,
 	styles []*model.Style,
 ) result.Result {
-	slices.SortFunc(genres, func(left, right *model.Genre) int {
-		return strings.Compare(left.Name, right.Name)
-	})
-	slices.SortFunc(styles, func(left, right *model.Style) int {
-		return strings.Compare(left.Name, right.Name)
-	})
 	for _, items := range []interface{}{genres, styles} {
 		if err := order.getDB().
 			Clauses(clause.OnConflict{DoNothing: true}).
@@ -35,6 +30,15 @@ func writeReferenceEntities(
 		}
 	}
 	return result.NewResult(0, nil)
+}
+
+func sortReferenceEntities(genres []*model.Genre, styles []*model.Style) {
+	slices.SortFunc(genres, func(left, right *model.Genre) int {
+		return strings.Compare(left.Name, right.Name)
+	})
+	slices.SortFunc(styles, func(left, right *model.Style) int {
+		return strings.Compare(left.Name, right.Name)
+	})
 }
 
 type Writer interface {

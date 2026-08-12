@@ -125,9 +125,7 @@ func TestReleaseFormatQuantityCanonicalizesAndRejectsInvalidValues(t *testing.T)
 }
 
 func TestReleaseRelationChunkRejectsInvalidCanonicalQuantity(t *testing.T) {
-	db, mock, _ := newMockGorm(t)
-	mock.ExpectBegin()
-	mock.ExpectRollback()
+	db, _, _ := newMockGorm(t)
 	order := NewOrder(context.Background(), 1, 1, "unused", db)
 	name := "CD"
 	invalid := XmlFormatQuantity{canonical: "-1", present: true}

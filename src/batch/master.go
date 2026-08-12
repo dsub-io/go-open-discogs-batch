@@ -47,35 +47,33 @@ func writeMasterRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlMasterRelation,
 ) result.Result {
+	styles := make([]*model.Style, 0)
+	genres := make([]*model.Genre, 0)
+	rootIDs := make([]int32, 0, len(items))
+	masters := make([]*model.Master, 0, len(items))
+	videos := make([]*model.MasterVideo, 0)
+	masterStyles := make([]*model.MasterStyle, 0)
+	masterGenres := make([]*model.MasterGenre, 0)
+	artists := make([]*model.MasterArtist, 0)
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
 		cache.MasterIDs.Add(item.ID)
+		rootIDs = append(rootIDs, item.ID)
+		genres = append(genres, item.GetGenres()...)
+		styles = append(styles, item.GetStyles()...)
+		masters = append(masters, item.GetMaster())
+		masterStyles = append(masterStyles, item.GetMasterStyles()...)
+		masterGenres = append(masterGenres, item.GetMasterGenres()...)
+		videos = append(videos, item.GetMasterVideos()...)
+		artists = append(artists, item.GetMasterArtists()...)
 	}
+	rootIDs = unique.Slice(rootIDs)
+	genres = filterGenres(genres)
+	styles = filterStyles(styles)
+	sortReferenceEntities(genres, styles)
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
-		styles := make([]*model.Style, 0)
-		genres := make([]*model.Genre, 0)
-		rootIDs := make([]int32, 0, len(items))
-		masters := make([]*model.Master, 0, len(items))
-		videos := make([]*model.MasterVideo, 0)
-		masterStyles := make([]*model.MasterStyle, 0)
-		masterGenres := make([]*model.MasterGenre, 0)
-		artists := make([]*model.MasterArtist, 0)
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			rootIDs = append(rootIDs, item.ID)
-			genres = append(genres, item.GetGenres()...)
-			styles = append(styles, item.GetStyles()...)
-			masters = append(masters, item.GetMaster())
-			masterStyles = append(masterStyles, item.GetMasterStyles()...)
-			masterGenres = append(masterGenres, item.GetMasterGenres()...)
-			videos = append(videos, item.GetMasterVideos()...)
-			artists = append(artists, item.GetMasterArtists()...)
-		}
-		rootIDs = unique.Slice(rootIDs)
 		existingRoots, err := findExistingRelationRoots(
 			transactionOrder,
 			rootIDs,
@@ -89,8 +87,8 @@ func writeMasterRelationChunk(
 		}
 		if referenceResult := writeReferenceEntities(
 			transactionOrder,
-			filterGenres(genres),
-			filterStyles(styles),
+			genres,
+			styles,
 		); referenceResult.IsErr() {
 			return referenceResult
 		}

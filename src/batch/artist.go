@@ -62,25 +62,25 @@ func writeArtistRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlArtistRelation,
 ) result.Result {
-	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
-		rootIDs := make([]int32, 0, len(items))
-		nameVariations := make([]*model.ArtistNameVariation, 0)
-		aliases := make([]*model.ArtistAlias, 0)
-		groups := make([]*model.ArtistGroup, 0)
-		members := make([]*model.ArtistMember, 0)
-		urls := make([]*model.ArtistURL, 0)
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			rootIDs = append(rootIDs, item.ID)
-			aliases = append(aliases, item.GetAliases()...)
-			groups = append(groups, item.GetGroups()...)
-			members = append(members, item.GetMembers()...)
-			nameVariations = append(nameVariations, item.GetNameVars()...)
-			urls = append(urls, item.GetUrls()...)
+	rootIDs := make([]int32, 0, len(items))
+	nameVariations := make([]*model.ArtistNameVariation, 0)
+	aliases := make([]*model.ArtistAlias, 0)
+	groups := make([]*model.ArtistGroup, 0)
+	members := make([]*model.ArtistMember, 0)
+	urls := make([]*model.ArtistURL, 0)
+	for _, item := range items {
+		if item == nil {
+			continue
 		}
-		rootIDs = unique.Slice(rootIDs)
+		rootIDs = append(rootIDs, item.ID)
+		aliases = append(aliases, item.GetAliases()...)
+		groups = append(groups, item.GetGroups()...)
+		members = append(members, item.GetMembers()...)
+		nameVariations = append(nameVariations, item.GetNameVars()...)
+		urls = append(urls, item.GetUrls()...)
+	}
+	rootIDs = unique.Slice(rootIDs)
+	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		existingRoots, err := findExistingRelationRoots(
 			transactionOrder,
 			rootIDs,
