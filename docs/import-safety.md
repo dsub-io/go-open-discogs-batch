@@ -1,6 +1,19 @@
 # Import safety and recovery
 
-This document defines the operational boundary behind the shorter README.
+This is the detailed contract for dump selection, concurrent runs, commits,
+recovery, and reader visibility. For normal setup, start with the
+[README](../README.md).
+
+## At a glance
+
+| Event | Result |
+| --- | --- |
+| Same successful manifest | Skip before downloading while checkpoints remain current |
+| Compatible interrupted run | Resume only verified committed chunks |
+| Different manifest or `--force` | Start from zero |
+| Older entity dump | Reject unless `--allow-downgrade` is set |
+| Failed import | Keep downloaded files and durable progress |
+| Successful import with `--cleanup` | Remove only files selected by that import |
 
 ## Dump discovery
 
@@ -9,12 +22,17 @@ unless `--dump-month` requests an exact month. Every run records dump dates,
 SHA-256 checksums, source URIs, and stable identifiers in one immutable
 manifest.
 
-An exact month first uses a complete matching PostgreSQL catalog entry. Missing
-entities from 2021 onward require one monthly checksum request; older irregular
-publication dates require one annual catalog request and one checksum request.
+Discovery depends on the request:
+
+- An exact month first uses a complete matching PostgreSQL catalog entry.
+- Missing entities from 2021 onward require one monthly checksum request.
+- Older irregular publication dates require one annual catalog request and one
+  checksum request.
+- Latest-per-entity selection refreshes upstream because a local catalog cannot
+  prove that no newer dump exists.
+
 Selected URIs and checksums are stored before file download. Retries reuse this
-pinned catalog. Latest-per-entity selection refreshes upstream because the
-local catalog cannot prove that no newer dump exists.
+pinned catalog.
 
 Catalog and file access use the official `data.discogs.com` browser. Rounded
 catalog display sizes are stored as unknown (`size_bytes=0`); byte progress
@@ -31,22 +49,29 @@ or abandoned run has dirtied those entities.
 
 PostgreSQL advisory locks cover selected entities and their references:
 
-- Artist locks Artist.
-- Label locks Label.
-- Master locks Artist and Master.
-- Release locks Artist, Label, Master, and Release because it also updates
-  `master.main_release_id`.
+| Import | Locks |
+| --- | --- |
+| Artist | Artist |
+| Label | Label |
+| Master | Artist, Master |
+| Release | Artist, Label, Master, Release |
+
+Release takes the full set because it also updates `master.main_release_id`.
 
 Independent sets such as Artist and Label may run together. Overlapping Go and
 Java imports cannot write concurrently.
 
 ## Commit and convergence boundary
 
-For every tracked chunk, canonical roots, each root's exact relations, the
-committed-chunk ledger, and the processed-item counter share one PostgreSQL
-transaction. Missing relations are deleted, mutable values are updated, and
-unchanged rows retain their surrogate IDs. Root rows are upserted; roots absent
-from the complete dump are not currently deleted.
+For every tracked chunk, one PostgreSQL transaction contains:
+
+- canonical roots and each root's exact relation set;
+- the committed-chunk ledger entry;
+- the processed-item counter.
+
+Missing relations are deleted, mutable values are updated, and unchanged rows
+retain their surrogate IDs. Root rows are upserted; roots absent from the
+complete dump are not currently deleted.
 
 An entity completes only when chunk indexes cover the parsed stream with no
 gaps, overlaps, or out-of-range indexes and item and chunk totals match. A run
@@ -65,8 +90,14 @@ context. `SIGKILL`, host loss, or a database disconnect may leave a run marked
 `running`.
 
 After acquiring the required locks, the next process marks an abandoned run
-failed and transfers its valid ledger atomically. Resume requires the same
-manifest, processor name and version, entity and dump identity, and chunk size.
+failed and transfers its valid ledger atomically. Resume requires an exact
+match on:
+
+- manifest;
+- processor name and version;
+- entity and dump identity;
+- chunk size.
+
 If transfer fails, the new run rolls back and the source ledger remains
 authoritative.
 
