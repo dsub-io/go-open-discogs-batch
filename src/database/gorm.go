@@ -3,8 +3,6 @@ package database
 import (
 	"errors"
 	"fmt"
-	"log"
-	"os"
 	"regexp"
 	"time"
 
@@ -80,17 +78,8 @@ func GetConnectInSchema(dsn, schemaName string) (*gorm.DB, error) {
 	connectionConfig.RuntimeParams[searchPathParameter] = schema.SearchPath()
 	sqlDB := stdlib.OpenDB(*connectionConfig)
 
-	newLogger := logger.New(
-		log.New(os.Stdout, "\r\n", log.LstdFlags),
-		logger.Config{
-			SlowThreshold:             time.Second,
-			Colorful:                  true,
-			IgnoreRecordNotFoundError: false,
-			LogLevel:                  logger.Error,
-		})
-
 	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
-		Logger:                 newLogger,
+		Logger:                 logger.Discard,
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {

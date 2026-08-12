@@ -8,8 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cavaliergopher/grab/v3"
+	"github.com/dsub-io/go-open-discogs-batch/internal/progress"
 	"github.com/dsub-io/go-open-discogs-batch/src/reader"
-	"github.com/schollz/progressbar/v3"
+	"golang.org/x/term"
 	"io"
 	"os"
 	"time"
@@ -245,40 +246,32 @@ func (h *handlerImpl) execGrabReq(req *grab.Request) error {
 	resp := client.Do(req)
 
 	// monitor
-	pb := getProgressBar(reader.GetFilename(req.Filename), resp.Size())
+	progressReporter := progress.NewReporter(
+		os.Stdout,
+		os.Stderr,
+		term.IsTerminal(int(os.Stderr.Fd())),
+		progress.StageDownload,
+		reader.GetFilename(req.Filename),
+		resp.Size(),
+	)
+	progressReporter.Start()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 Loop:
 	for {
 		select {
 		case <-ticker.C:
-			_ = pb.Set64(resp.BytesComplete())
+			progressReporter.Set(resp.BytesComplete())
 		case <-resp.Done:
-			_ = pb.Finish()
 			break Loop
 		}
 	}
-	fmt.Println()
 	if err := resp.Err(); err != nil {
+		progressReporter.Fail(resp.BytesComplete())
 		defer func() { _ = os.Remove(req.Filename) }()
 		return fmt.Errorf("failed to download %w", err)
 	}
+	progressReporter.Complete(resp.BytesComplete())
 	fmt.Printf("download completed for %+v (took: %.2fs)\n", req.Filename, time.Since(begin).Seconds())
 	return nil
-}
-
-func getProgressBar(filename string, size int64) *progressbar.ProgressBar {
-	pb := progressbar.NewOptions64(size,
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(15),
-		progressbar.OptionSetDescription(fmt.Sprintf("[reset]writing %+v...", filename)),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
-	return pb
 }
