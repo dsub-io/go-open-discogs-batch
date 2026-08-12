@@ -1,10 +1,12 @@
 package unique
 
 import (
+	"errors"
+	"testing"
+
 	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func Test_getUniqueSlice(t *testing.T) {
@@ -32,4 +34,20 @@ func TestSlicePanicsWhenComparableValueCannotBeHashed(t *testing.T) {
 	}
 
 	require.Panics(t, func() { Slice([]unsupported{{Channel: make(chan int)}}) })
+}
+
+func TestSlicePreservesDistinctValuesWhenHashesCollide(t *testing.T) {
+	items := []string{"first", "second", "first"}
+	actual := sliceWithHasher(items, func(string) (uint64, error) { return 1, nil })
+
+	require.Equal(t, []string{"first", "second"}, actual)
+}
+
+func TestSlicePanicsWhenHasherFails(t *testing.T) {
+	expected := errors.New("fixture")
+	require.PanicsWithError(t, expected.Error(), func() {
+		sliceWithHasher([]string{"value"}, func(string) (uint64, error) {
+			return 0, expected
+		})
+	})
 }
