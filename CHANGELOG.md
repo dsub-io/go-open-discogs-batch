@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.3.3](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.2...v2.3.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* cache pinned dump catalogs before refresh ([#58](https://github.com/dsub-io/go-open-discogs-batch/issues/58)) ([922cdbe](https://github.com/dsub-io/go-open-discogs-batch/commit/922cdbe672bca57dc61ee3dd7001cbcadefb1a24))
+* reduce metadata traffic for an exact dump month from two upstream requests to
+  one for uncached 2021+ dumps, and from two requests to zero after the catalog
+  has been stored in PostgreSQL
+* derive all selected dump URIs and SHA-256 values from the single monthly
+  checksum document before starting file downloads
+* stop after the first 429, 5xx, timeout, or malformed modern checksum response
+  instead of issuing a speculative catalog fallback request
+* retain the two-request annual catalog path only for pre-2021 dumps whose
+  publication dates were not consistently the first day of the month
+
 ## [2.3.2](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.1...v2.3.2) (2026-08-11)
 
 
