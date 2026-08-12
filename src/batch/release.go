@@ -82,29 +82,13 @@ func GetReleaseStep(order Order) Step {
 }
 
 func insertReleases(order Order) result.Result {
-	deleteStale, err := relationTablesContainRows(
-		order,
-		labelReleaseItemRelation.table,
-		releaseArtistRelation.table,
-		releaseCreditedArtistRelation.table,
-		releaseFormatRelation.table,
-		releaseGenreRelation.table,
-		releaseIdentifierRelation.table,
-		releaseStyleRelation.table,
-		releaseTrackRelation.table,
-		releaseVideoRelation.table,
-		releaseWorkRelation.table,
-	)
-	if err != nil {
-		return result.NewResult(0, err)
-	}
 	return processRelationChunks(
 		order,
 		"release relations",
 		"release",
 		"source-read release relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlReleaseRelation) result.Result {
-			return writeReleaseRelationChunk(order, chunk, items, deleteStale)
+			return writeReleaseRelationChunk(order, chunk, items)
 		},
 	)
 }
@@ -113,7 +97,6 @@ func writeReleaseRelationChunk(
 	order Order,
 	chunk ChunkMetadata,
 	items []*XmlReleaseRelation,
-	deleteStale bool,
 ) result.Result {
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		genres := make([]*model.Genre, 0)
@@ -186,6 +169,23 @@ func writeReleaseRelationChunk(
 			return result.NewResult(0, deduplicateError)
 		}
 		rootIDs = unique.Slice(rootIDs)
+		existingRoots, existingRootsError := findExistingRelationRoots(
+			transactionOrder,
+			rootIDs,
+			relationRootTable{releaseArtistRelation.table, releaseArtistRelation.parentColumn},
+			relationRootTable{releaseCreditedArtistRelation.table, releaseCreditedArtistRelation.parentColumn},
+			relationRootTable{releaseWorkRelation.table, releaseWorkRelation.parentColumn},
+			relationRootTable{releaseStyleRelation.table, releaseStyleRelation.parentColumn},
+			relationRootTable{releaseGenreRelation.table, releaseGenreRelation.parentColumn},
+			relationRootTable{labelReleaseItemRelation.table, labelReleaseItemRelation.parentColumn},
+			relationRootTable{releaseFormatRelation.table, releaseFormatRelation.parentColumn},
+			relationRootTable{releaseIdentifierRelation.table, releaseIdentifierRelation.parentColumn},
+			relationRootTable{releaseTrackRelation.table, releaseTrackRelation.parentColumn},
+			relationRootTable{releaseVideoRelation.table, releaseVideoRelation.parentColumn},
+		)
+		if existingRootsError != nil {
+			return result.NewResult(0, existingRootsError)
+		}
 		if lockError := lockReleaseMasterRows(transactionOrder, rootIDs, items); lockError != nil {
 			return result.NewResult(0, lockError)
 		}
@@ -205,8 +205,8 @@ func writeReleaseRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					releaseArtistRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseArtistRelation.table)) > 0,
+					existingRoots.forTable(releaseArtistRelation.table),
 					artists,
 					func(item *model.ReleaseItemArtist) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemArtist) int32 { return item.ArtistID },
@@ -216,8 +216,8 @@ func writeReleaseRelationChunk(
 				return reconcileDigestTwoIntegerKeyRelation(
 					transactionOrder,
 					releaseCreditedArtistRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseCreditedArtistRelation.table)) > 0,
+					existingRoots.forTable(releaseCreditedArtistRelation.table),
 					creditedArtists,
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.ArtistID },
@@ -229,8 +229,8 @@ func writeReleaseRelationChunk(
 				return reconcileDigestTwoIntegerKeyRelation(
 					transactionOrder,
 					releaseWorkRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseWorkRelation.table)) > 0,
+					existingRoots.forTable(releaseWorkRelation.table),
 					works,
 					func(item *model.ReleaseItemWork) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemWork) int32 { return item.LabelID },
@@ -242,8 +242,8 @@ func writeReleaseRelationChunk(
 				return reconcileTextRelation(
 					transactionOrder,
 					releaseStyleRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseStyleRelation.table)) > 0,
+					existingRoots.forTable(releaseStyleRelation.table),
 					releaseStyles,
 					func(item *model.ReleaseItemStyle) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemStyle) string { return item.Style },
@@ -253,8 +253,8 @@ func writeReleaseRelationChunk(
 				return reconcileTextRelation(
 					transactionOrder,
 					releaseGenreRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseGenreRelation.table)) > 0,
+					existingRoots.forTable(releaseGenreRelation.table),
 					releaseGenres,
 					func(item *model.ReleaseItemGenre) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemGenre) string { return item.Genre },
@@ -264,8 +264,8 @@ func writeReleaseRelationChunk(
 				return reconcileIntegerNullableTextKeyRelation(
 					transactionOrder,
 					labelReleaseItemRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(labelReleaseItemRelation.table)) > 0,
+					existingRoots.forTable(labelReleaseItemRelation.table),
 					labels,
 					func(item *model.LabelReleaseItem) int32 { return item.ReleaseItemID },
 					func(item *model.LabelReleaseItem) int32 { return item.LabelID },
@@ -276,8 +276,8 @@ func writeReleaseRelationChunk(
 				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseFormatRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseFormatRelation.table)) > 0,
+					existingRoots.forTable(releaseFormatRelation.table),
 					formats,
 					func(item *model.ReleaseItemFormat) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemFormat) int32 { return item.Hash },
@@ -288,8 +288,8 @@ func writeReleaseRelationChunk(
 				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseIdentifierRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseIdentifierRelation.table)) > 0,
+					existingRoots.forTable(releaseIdentifierRelation.table),
 					identifiers,
 					func(item *model.ReleaseItemIdentifier) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemIdentifier) int32 { return item.Hash },
@@ -300,8 +300,8 @@ func writeReleaseRelationChunk(
 				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseTrackRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseTrackRelation.table)) > 0,
+					existingRoots.forTable(releaseTrackRelation.table),
 					tracks,
 					func(item *model.ReleaseItemTrack) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemTrack) int32 { return item.Hash },
@@ -312,8 +312,8 @@ func writeReleaseRelationChunk(
 				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					releaseVideoRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(releaseVideoRelation.table)) > 0,
+					existingRoots.forTable(releaseVideoRelation.table),
 					videos,
 					func(item *model.ReleaseItemVideo) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemVideo) int32 { return item.Hash },

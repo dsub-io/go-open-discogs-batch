@@ -46,24 +46,13 @@ func insertArtists(order Order) result.Result {
 }
 
 func insertArtistRelations(order Order) result.Result {
-	deleteStale, err := relationTablesContainRows(
-		order,
-		artistAliasRelation.table,
-		artistGroupRelation.table,
-		artistMemberRelation.table,
-		artistNameVariationRelation.table,
-		artistURLRelation.table,
-	)
-	if err != nil {
-		return result.NewResult(0, err)
-	}
 	return processRelationChunks(
 		order,
 		"artist relations",
 		"artist",
 		"source-read artist relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlArtistRelation) result.Result {
-			return writeArtistRelationChunk(order, chunk, items, deleteStale)
+			return writeArtistRelationChunk(order, chunk, items)
 		},
 	)
 }
@@ -72,7 +61,6 @@ func writeArtistRelationChunk(
 	order Order,
 	chunk ChunkMetadata,
 	items []*XmlArtistRelation,
-	deleteStale bool,
 ) result.Result {
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		rootIDs := make([]int32, 0, len(items))
@@ -93,14 +81,26 @@ func writeArtistRelationChunk(
 			urls = append(urls, item.GetUrls()...)
 		}
 		rootIDs = unique.Slice(rootIDs)
+		existingRoots, err := findExistingRelationRoots(
+			transactionOrder,
+			rootIDs,
+			relationRootTable{artistAliasRelation.table, artistAliasRelation.parentColumn},
+			relationRootTable{artistGroupRelation.table, artistGroupRelation.parentColumn},
+			relationRootTable{artistMemberRelation.table, artistMemberRelation.parentColumn},
+			relationRootTable{artistNameVariationRelation.table, artistNameVariationRelation.parentColumn},
+			relationRootTable{artistURLRelation.table, artistURLRelation.parentColumn},
+		)
+		if err != nil {
+			return result.NewResult(0, err)
+		}
 		written := result.NewResult(0, nil)
 		reconcile := []func() result.Result{
 			func() result.Result {
 				return reconcileIntegerRelation(
 					transactionOrder,
 					artistAliasRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(artistAliasRelation.table)) > 0,
+					existingRoots.forTable(artistAliasRelation.table),
 					aliases,
 					func(item *model.ArtistAlias) int32 { return item.ArtistID },
 					func(item *model.ArtistAlias) int32 { return item.AliasID },
@@ -110,8 +110,8 @@ func writeArtistRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					artistGroupRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(artistGroupRelation.table)) > 0,
+					existingRoots.forTable(artistGroupRelation.table),
 					groups,
 					func(item *model.ArtistGroup) int32 { return item.ArtistID },
 					func(item *model.ArtistGroup) int32 { return item.GroupID },
@@ -121,8 +121,8 @@ func writeArtistRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					artistMemberRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(artistMemberRelation.table)) > 0,
+					existingRoots.forTable(artistMemberRelation.table),
 					members,
 					func(item *model.ArtistMember) int32 { return item.ArtistID },
 					func(item *model.ArtistMember) int32 { return item.MemberID },
@@ -132,8 +132,8 @@ func writeArtistRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					artistNameVariationRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(artistNameVariationRelation.table)) > 0,
+					existingRoots.forTable(artistNameVariationRelation.table),
 					nameVariations,
 					func(item *model.ArtistNameVariation) int32 { return item.ArtistID },
 					func(item *model.ArtistNameVariation) int32 { return item.Hash },
@@ -143,8 +143,8 @@ func writeArtistRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					artistURLRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(artistURLRelation.table)) > 0,
+					existingRoots.forTable(artistURLRelation.table),
 					urls,
 					func(item *model.ArtistURL) int32 { return item.ArtistID },
 					func(item *model.ArtistURL) int32 { return item.Hash },

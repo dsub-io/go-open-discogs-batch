@@ -31,23 +31,13 @@ func GetMasterStep(order Order) Step {
 }
 
 func InsertMasterRelations(order Order) result.Result {
-	deleteStale, err := relationTablesContainRows(
-		order,
-		masterArtistRelation.table,
-		masterGenreRelation.table,
-		masterStyleRelation.table,
-		masterVideoRelation.table,
-	)
-	if err != nil {
-		return result.NewResult(0, err)
-	}
 	return processRelationChunks(
 		order,
 		"master relations",
 		"master",
 		"source-read master relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlMasterRelation) result.Result {
-			return writeMasterRelationChunk(order, chunk, items, deleteStale)
+			return writeMasterRelationChunk(order, chunk, items)
 		},
 	)
 }
@@ -56,7 +46,6 @@ func writeMasterRelationChunk(
 	order Order,
 	chunk ChunkMetadata,
 	items []*XmlMasterRelation,
-	deleteStale bool,
 ) result.Result {
 	for _, item := range items {
 		if item == nil {
@@ -87,6 +76,17 @@ func writeMasterRelationChunk(
 			artists = append(artists, item.GetMasterArtists()...)
 		}
 		rootIDs = unique.Slice(rootIDs)
+		existingRoots, err := findExistingRelationRoots(
+			transactionOrder,
+			rootIDs,
+			relationRootTable{masterArtistRelation.table, masterArtistRelation.parentColumn},
+			relationRootTable{masterGenreRelation.table, masterGenreRelation.parentColumn},
+			relationRootTable{masterStyleRelation.table, masterStyleRelation.parentColumn},
+			relationRootTable{masterVideoRelation.table, masterVideoRelation.parentColumn},
+		)
+		if err != nil {
+			return result.NewResult(0, err)
+		}
 		if referenceResult := writeReferenceEntities(
 			transactionOrder,
 			filterGenres(genres),
@@ -103,8 +103,8 @@ func writeMasterRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					masterArtistRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterArtistRelation.table)) > 0,
+					existingRoots.forTable(masterArtistRelation.table),
 					artists,
 					func(item *model.MasterArtist) int32 { return item.MasterID },
 					func(item *model.MasterArtist) int32 { return item.ArtistID },
@@ -114,8 +114,8 @@ func writeMasterRelationChunk(
 				return reconcileTextRelation(
 					transactionOrder,
 					masterGenreRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterGenreRelation.table)) > 0,
+					existingRoots.forTable(masterGenreRelation.table),
 					masterGenres,
 					func(item *model.MasterGenre) int32 { return item.MasterID },
 					func(item *model.MasterGenre) string { return item.Genre },
@@ -125,8 +125,8 @@ func writeMasterRelationChunk(
 				return reconcileTextRelation(
 					transactionOrder,
 					masterStyleRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterStyleRelation.table)) > 0,
+					existingRoots.forTable(masterStyleRelation.table),
 					masterStyles,
 					func(item *model.MasterStyle) int32 { return item.MasterID },
 					func(item *model.MasterStyle) string { return item.Style },
@@ -136,8 +136,8 @@ func writeMasterRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					masterVideoRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterVideoRelation.table)) > 0,
+					existingRoots.forTable(masterVideoRelation.table),
 					videos,
 					func(item *model.MasterVideo) int32 { return item.MasterID },
 					func(item *model.MasterVideo) int32 { return item.Hash },

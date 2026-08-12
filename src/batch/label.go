@@ -39,21 +39,13 @@ func insertLabels(order Order) result.Result {
 }
 
 func insertLabelRelations(order Order) result.Result {
-	deleteStale, err := relationTablesContainRows(
-		order,
-		labelSubLabelRelation.table,
-		labelURLRelation.table,
-	)
-	if err != nil {
-		return result.NewResult(0, err)
-	}
 	return processRelationChunks(
 		order,
 		"label relations",
 		"label",
 		"source-read label relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlLabelRelation) result.Result {
-			return writeLabelRelationChunk(order, chunk, items, deleteStale)
+			return writeLabelRelationChunk(order, chunk, items)
 		},
 	)
 }
@@ -62,7 +54,6 @@ func writeLabelRelationChunk(
 	order Order,
 	chunk ChunkMetadata,
 	items []*XmlLabelRelation,
-	deleteStale bool,
 ) result.Result {
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		rootIDs := make([]int32, 0, len(items))
@@ -77,14 +68,23 @@ func writeLabelRelationChunk(
 			subLabels = append(subLabels, item.GetSubLabels()...)
 		}
 		rootIDs = unique.Slice(rootIDs)
+		existingRoots, err := findExistingRelationRoots(
+			transactionOrder,
+			rootIDs,
+			relationRootTable{labelURLRelation.table, labelURLRelation.parentColumn},
+			relationRootTable{labelSubLabelRelation.table, labelSubLabelRelation.parentColumn},
+		)
+		if err != nil {
+			return result.NewResult(0, err)
+		}
 		written := result.NewResult(0, nil)
 		reconcile := []func() result.Result{
 			func() result.Result {
 				return reconcileIntegerRelation(
 					transactionOrder,
 					labelURLRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(labelURLRelation.table)) > 0,
+					existingRoots.forTable(labelURLRelation.table),
 					urls,
 					func(item *model.LabelURL) int32 { return item.LabelID },
 					func(item *model.LabelURL) int32 { return item.Hash },
@@ -94,8 +94,8 @@ func writeLabelRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					labelSubLabelRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(labelSubLabelRelation.table)) > 0,
+					existingRoots.forTable(labelSubLabelRelation.table),
 					subLabels,
 					func(item *model.LabelSubLabel) int32 { return item.ParentLabelID },
 					func(item *model.LabelSubLabel) int32 { return item.SubLabelID },

@@ -20,6 +20,23 @@ import (
 
 func testString(value string) *string { return &value }
 
+type existingRelationRootFixture struct {
+	table  string
+	rootID int32
+}
+
+func expectExistingRelationRoots(
+	mock sqlmock.Sqlmock,
+	firstTable string,
+	fixtures ...existingRelationRootFixture,
+) {
+	rows := sqlmock.NewRows([]string{"relation_table", "root_id"})
+	for _, fixture := range fixtures {
+		rows.AddRow(fixture.table, fixture.rootID)
+	}
+	mock.ExpectQuery("select '" + firstTable + "'").WithArgs(sqlmock.AnyArg()).WillReturnRows(rows)
+}
+
 func TestBatchConstructor(t *testing.T) {
 	require.NotNil(t, New())
 }
@@ -288,15 +305,15 @@ func TestEntityStepRelationFailures(t *testing.T) {
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(1, nil)} }
 
 	artistOrder := NewOrder(context.Background(), 2, 1, "testdata/artist.xml.gz", db)
-	require.ErrorIs(t, GetArtistStep(artistOrder)().Err(), expected)
+	require.ErrorContains(t, GetArtistStep(artistOrder)().Err(), expected.Error())
 	labelOrder := NewOrder(context.Background(), 2, 1, "testdata/label.xml.gz", db)
-	require.ErrorIs(t, GetLabelStep(labelOrder)().Err(), expected)
-	require.ErrorIs(t, InsertMasterRelations(NewOrder(
+	require.ErrorContains(t, GetLabelStep(labelOrder)().Err(), expected.Error())
+	require.ErrorContains(t, InsertMasterRelations(NewOrder(
 		context.Background(), 1, 1, "testdata/master.xml.gz", db,
-	)).Err(), expected)
-	require.ErrorIs(t, insertReleases(NewOrder(
+	)).Err(), expected.Error())
+	require.ErrorContains(t, insertReleases(NewOrder(
 		context.Background(), 1, 1, "testdata/release.xml.gz", db,
-	)).Err(), expected)
+	)).Err(), expected.Error())
 }
 
 func TestProcessRelationChunksWorkerAndProgressFailures(t *testing.T) {
@@ -334,21 +351,17 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 	originalWriter := NewWriter
 	t.Cleanup(func() { NewWriter = originalWriter })
 
-	run := func(t *testing.T, wantError bool, write func(Order) result.Result) {
+	run := func(
+		t *testing.T,
+		wantError bool,
+		prepare func(sqlmock.Sqlmock),
+		write func(Order) result.Result,
+	) {
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
-		if wantError {
-			mock.ExpectRollback()
-		} else {
-			mock.ExpectCommit()
+		if prepare != nil {
+			prepare(mock)
 		}
-		actual := write(NewOrder(context.Background(), 1, 1, "unused", db))
-		require.Equal(t, wantError, actual.IsErr())
-	}
-	runRelease := func(t *testing.T, wantError bool, write func(Order) result.Result) {
-		db, mock, _ := newMockGorm(t)
-		mock.ExpectBegin()
-		expectReleaseMasterLock(mock)
 		if wantError {
 			mock.ExpectRollback()
 		} else {
@@ -362,40 +375,53 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 		t.Fatal("Artist and Label relation passes must not write root records")
 		return nil
 	}
-	run(t, false, func(order Order) result.Result {
-		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{nil}, false)
+	run(t, false, nil, func(order Order) result.Result {
+		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{nil})
 	})
-	run(t, false, func(order Order) result.Result {
-		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{nil}, false)
+	run(t, false, nil, func(order Order) result.Result {
+		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{nil})
 	})
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
-	run(t, false, func(order Order) result.Result {
-		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{nil}, false)
+	run(t, false, nil, func(order Order) result.Result {
+		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{nil})
 	})
-	run(t, true, func(order Order) result.Result {
-		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{nil}, false)
+	run(t, true, nil, func(order Order) result.Result {
+		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{nil})
 	})
 
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, errors.New("writer"))} }
-	run(t, true, func(order Order) result.Result {
-		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}}, false)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		expectExistingRelationRoots(mock, masterArtistRelation.table)
+	}, func(order Order) result.Result {
+		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}})
 	})
-	runRelease(t, true, func(order Order) result.Result {
-		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}}, false)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		expectExistingRelationRoots(mock, releaseArtistRelation.table)
+		expectReleaseMasterLock(mock)
+	}, func(order Order) result.Result {
+		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}})
 	})
 
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
-	run(t, true, func(order Order) result.Result {
-		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + artistAliasRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{{ID: 1}})
 	})
-	run(t, true, func(order Order) result.Result {
-		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + labelURLRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{{ID: 1}})
 	})
-	run(t, true, func(order Order) result.Result {
-		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + masterArtistRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}})
 	})
-	runRelease(t, true, func(order Order) result.Result {
-		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + releaseArtistRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}})
 	})
 }
 
@@ -447,6 +473,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	), expected)
 	mockDB, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
+	expectExistingRelationRoots(mock, releaseArtistRelation.table)
 	mock.ExpectQuery("select target.id").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnError(expected)
@@ -455,7 +482,6 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 		NewOrder(context.Background(), 1, 1, "unused", mockDB),
 		ChunkMetadata{},
 		[]*XmlReleaseRelation{{ID: releaseID}},
-		false,
 	).Err(), expected)
 	actual := updateMasterMainReleases(
 		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
@@ -502,17 +528,22 @@ func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
 		{write: func(order Order) result.Result {
 			return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{
 				ID: 1, Genres: []string{"genre"},
-			}}, false)
+			}})
 		}},
 		{prepare: expectReleaseMasterLock, write: func(order Order) result.Result {
 			return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{
 				ID: 1, Genres: []string{"genre"},
-			}}, false)
+			}})
 		}},
 	}
 	for _, fixture := range writes {
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
+		if fixture.prepare == nil {
+			expectExistingRelationRoots(mock, masterArtistRelation.table)
+		} else {
+			expectExistingRelationRoots(mock, releaseArtistRelation.table)
+		}
 		if fixture.prepare != nil {
 			fixture.prepare(mock)
 		}
@@ -552,6 +583,12 @@ func TestLabelChunkUsesSubLabelKeys(t *testing.T) {
 	t.Cleanup(cache.ResetIDs)
 	db, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
+	expectExistingRelationRoots(
+		mock,
+		labelURLRelation.table,
+		existingRelationRootFixture{table: labelURLRelation.table, rootID: 1},
+		existingRelationRootFixture{table: labelSubLabelRelation.table, rootID: 1},
+	)
 	mock.ExpectExec("delete from label_url").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -564,7 +601,6 @@ func TestLabelChunkUsesSubLabelKeys(t *testing.T) {
 		NewOrder(context.Background(), 1, 1, "unused", db),
 		ChunkMetadata{},
 		[]*XmlLabelRelation{{ID: 1, SubLabels: []XmlRef{{ID: 2}}}},
-		true,
 	)
 	require.Error(t, actual.Err())
 }

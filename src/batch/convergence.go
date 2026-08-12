@@ -49,6 +49,55 @@ type integerNullableTextKeyRelation struct {
 	nullableKeyColumn string
 }
 
+type relationRootTable struct {
+	table        string
+	parentColumn string
+}
+
+type existingRelationRoots map[string][]int32
+
+func (roots existingRelationRoots) forTable(table string) []int32 {
+	return roots[table]
+}
+
+func findExistingRelationRoots(
+	order Order,
+	rootIDs []int32,
+	relations ...relationRootTable,
+) (existingRelationRoots, error) {
+	result := make(existingRelationRoots, len(relations))
+	if len(rootIDs) == 0 || len(relations) == 0 {
+		return result, nil
+	}
+	queries := make([]string, len(relations))
+	for index, relation := range relations {
+		queries[index] = fmt.Sprintf(
+			`select '%s' as relation_table, current.%s as root_id
+			   from %s current
+			  where current.%s = any($1::integer[])
+			  group by current.%s`,
+			relation.table,
+			relation.parentColumn,
+			relation.table,
+			relation.parentColumn,
+			relation.parentColumn,
+		)
+	}
+	type existingRoot struct {
+		RelationTable string
+		RootID        int32
+	}
+	var rows []existingRoot
+	query := order.getDB().Raw(strings.Join(queries, " union all "), postgresArray(rootIDs)).Scan(&rows)
+	if query.Error != nil {
+		return nil, fmt.Errorf("find existing relation roots: %w", query.Error)
+	}
+	for _, row := range rows {
+		result[row.RelationTable] = append(result[row.RelationTable], row.RootID)
+	}
+	return result, nil
+}
+
 func reconcileIntegerRelation[T any](
 	order Order,
 	relation integerRelation,
@@ -365,19 +414,4 @@ func postgresArray[T any](values []T) pgtype.Array[T] {
 		},
 		Valid: true,
 	}
-}
-
-func relationTablesContainRows(order Order, tables ...string) (bool, error) {
-	checks := make([]string, len(tables))
-	for index, table := range tables {
-		checks[index] = fmt.Sprintf("exists (select 1 from %s limit 1)", table)
-	}
-	var containsRows bool
-	query := order.getDB().Raw(
-		"select " + strings.Join(checks, " or "),
-	).Scan(&containsRows)
-	if query.Error != nil {
-		return false, fmt.Errorf("check relation table state: %w", query.Error)
-	}
-	return containsRows, nil
 }

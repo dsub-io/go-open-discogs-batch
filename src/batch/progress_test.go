@@ -146,7 +146,7 @@ func TestImportResumesOutOfOrderChunks(t *testing.T) {
 		"source-read master relations",
 		failChunkAfterLaterChunkCompletes(
 			func(order Order, chunk ChunkMetadata, items []*XmlMasterRelation) result.Result {
-				return writeMasterRelationChunk(order, chunk, items, false)
+				return writeMasterRelationChunk(order, chunk, items)
 			},
 		),
 	)
@@ -496,7 +496,7 @@ func TestReleaseInterruptionConvergesWhenManifestExpands(t *testing.T) {
 		"source-read release relations",
 		failChunkAfterLaterChunkCompletes(
 			func(order Order, chunk ChunkMetadata, items []*XmlReleaseRelation) result.Result {
-				return writeReleaseRelationChunk(order, chunk, items, false)
+				return writeReleaseRelationChunk(order, chunk, items)
 			},
 		),
 	)

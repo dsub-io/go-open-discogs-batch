@@ -1061,7 +1061,11 @@ func TestGormErrorPropagationBoundaries(t *testing.T) {
 		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.Hash },
 		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) []byte { return item.IdentitySHA256 },
 	).Err(), expected)
-	_, err := relationTablesContainRows(order, "fixture")
+	_, err := findExistingRelationRoots(
+		order,
+		[]int32{1},
+		relationRootTable{table: "fixture", parentColumn: "root_id"},
+	)
 	require.ErrorIs(t, err, expected)
 	require.ErrorIs(t, recordCompletedChunk(db, NewTrackedOrder(
 		context.Background(), 1, 1, "unused", db, 1, "artist", false,

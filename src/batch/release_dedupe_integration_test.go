@@ -62,7 +62,6 @@ func TestConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T) {
 				NewOrder(context.Background(), masterCount, 1, "unused", db),
 				ChunkMetadata{Index: int64(workerID), ItemCount: masterCount},
 				items,
-				false,
 			)
 			errorsByWorker <- written.Err()
 		}(worker)
@@ -191,12 +190,12 @@ func TestReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(t *te
 	fixture := readReleaseRelationDeduplicationFixture(t)
 	order := NewOrder(context.Background(), 100, 1, "unused", db)
 
-	fixtureWrite := writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{fixture}, false)
+	fixtureWrite := writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{fixture})
 	require.NoError(t, fixtureWrite.Err())
 	require.NotZero(t, fixtureWrite.Count())
 	requireReleaseFixtureRelationCounts(t, db, fixture.ID)
 
-	fixtureRetry := writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{fixture}, false)
+	fixtureRetry := writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{fixture})
 	require.NoError(t, fixtureRetry.Err())
 	require.Zero(t, fixtureRetry.Count())
 	requireReleaseFixtureRelationCounts(t, db, fixture.ID)
@@ -246,7 +245,6 @@ func TestReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(t *t
 		NewOrder(context.Background(), 10, 1, "unused", db),
 		ChunkMetadata{ItemCount: 1},
 		[]*XmlReleaseRelation{release},
-		true,
 	)
 	require.NoError(t, firstWrite.Err())
 
@@ -270,7 +268,6 @@ func TestReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(t *t
 		NewOrder(context.Background(), 10, 1, "unused", db),
 		ChunkMetadata{ItemCount: 1},
 		[]*XmlReleaseRelation{release},
-		true,
 	)
 	require.NoError(t, retry.Err())
 	var retryIDs []int32
@@ -294,7 +291,6 @@ func TestReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(t *t
 		NewOrder(context.Background(), 10, 1, "unused", db),
 		ChunkMetadata{ItemCount: 1},
 		[]*XmlReleaseRelation{reducedRelease},
-		true,
 	)
 	require.NoError(t, reassigned.Err())
 	var remaining model.ReleaseItemTrack
@@ -306,7 +302,6 @@ func TestReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(t *t
 		NewOrder(context.Background(), 10, 1, "unused", db),
 		ChunkMetadata{ItemCount: 1},
 		[]*XmlReleaseRelation{reducedRelease},
-		true,
 	)
 	require.NoError(t, stable.Err())
 	var stableID int32

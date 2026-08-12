@@ -135,7 +135,6 @@ func TestReleaseRelationChunkRejectsInvalidCanonicalQuantity(t *testing.T) {
 		order,
 		ChunkMetadata{},
 		[]*XmlReleaseRelation{{ID: 1, Formats: []XmlFormat{{Name: &name, Quantity: invalid}}}},
-		true,
 	)
 	require.ErrorContains(t, actual.Err(), "invalid release_item_format quantity")
 }
