@@ -2,6 +2,8 @@ package batch
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +14,72 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T) {
+	postgres := testutils.GetDatabase(t, testutils.Postgres)
+	dsn := testutils.GetDsn(testutils.Postgres, postgres)
+	db, err := database.GetConnect(dsn)
+	require.NoError(t, err)
+	require.NoError(t, RunDDL(db))
+	db, err = database.GetConnect(dsn)
+	require.NoError(t, err)
+
+	const (
+		firstMasterID int32 = 2_000_000_100
+		masterCount         = 4
+		workerCount         = 4
+	)
+	now := time.Now().UTC()
+	for offset := int32(0); offset < masterCount; offset++ {
+		masterID := firstMasterID + offset
+		cache.MasterIDs.Add(masterID)
+		require.NoError(t, db.Create(&model.Master{
+			ID: masterID, CreatedAt: now, LastModifiedAt: now,
+		}).Error)
+	}
+	t.Cleanup(cache.ResetIDs)
+
+	start := make(chan struct{})
+	errorsByWorker := make(chan error, workerCount)
+	var workers sync.WaitGroup
+	for worker := int32(0); worker < workerCount; worker++ {
+		workers.Add(1)
+		go func(workerID int32) {
+			defer workers.Done()
+			items := make([]*XmlReleaseRelation, 0, masterCount)
+			for index := int32(0); index < masterCount; index++ {
+				masterOffset := (index + workerID) % masterCount
+				masterID := firstMasterID + masterOffset
+				releaseID := int32(2_000_001_000) + workerID*masterCount + masterOffset
+				title := fmt.Sprintf("worker-%d-master-%d", workerID, masterOffset)
+				items = append(items, &XmlReleaseRelation{
+					ID: releaseID, Title: &title,
+					MasterInfo: XmlReleaseMasterInfo{MasterID: &masterID, IsMaster: true},
+				})
+			}
+			<-start
+			written := writeReleaseRelationChunk(
+				NewOrder(context.Background(), masterCount, 1, "unused", db),
+				ChunkMetadata{Index: int64(workerID), ItemCount: masterCount},
+				items,
+				false,
+			)
+			errorsByWorker <- written.Err()
+		}(worker)
+	}
+	close(start)
+	workers.Wait()
+	close(errorsByWorker)
+	for writeError := range errorsByWorker {
+		require.NoError(t, writeError)
+	}
+
+	var linkedMasters int64
+	require.NoError(t, db.Model(&model.Master{}).
+		Where("id >= ? and id < ? and main_release_id is not null", firstMasterID, firstMasterID+masterCount).
+		Count(&linkedMasters).Error)
+	require.Equal(t, int64(masterCount), linkedMasters)
+}
 
 func TestReleaseRelationWriterPreventsPostgresSQLState21000AndRetriesIdempotently(t *testing.T) {
 	postgres := testutils.GetDatabase(t, testutils.Postgres)

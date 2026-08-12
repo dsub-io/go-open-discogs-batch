@@ -63,6 +63,12 @@ Independent sets such as Artist and Label may run together; overlapping Go and
 Java imports cannot write concurrently. Schema migration takes the same shared
 lock family, so migration cannot race an active importer.
 
+Concurrent Release chunks may touch the same Master when a main release changes
+or when several releases for one Master cross chunk boundaries. Each chunk
+therefore locks every affected Master row in ascending ID order before writing
+Release roots or reconciling `main_release_id`. This database lock order is
+independent of XML and worker scheduling order.
+
 A partial Master or Release import is admitted only when each omitted reference
 entity has a compatible successful checkpoint. A missing checkpoint, a stale
 checkpoint, or a same-date dump reissued with a different checksum fails before

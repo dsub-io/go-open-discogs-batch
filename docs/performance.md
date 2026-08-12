@@ -12,9 +12,28 @@ against canonical `open-discogs-model` v0.3.0.
 | Reference ID cache | 25.4× lower median time; 99.88% fewer allocated bytes | 1,000,000 sequential IDs |
 | Durable import contract | Higher fixed latency and allocation | 12-record PostgreSQL fixture |
 | Successful-manifest preflight | 95.4% lower p50; avoided 64 MiB file I/O | Cached sparse file |
+| Release Master lock order | Prevented deadlock in 10/10 concurrent regression runs | 4 writers × 4 overlapping Masters |
 
 Do not compare rows across these harnesses. Their inputs, paths, and units are
 different.
+
+## Release Master lock order
+
+A production-like 2026-08 import with `chunk-size=5000` and `max-workers=4`
+exposed a PostgreSQL deadlock after one Release chunk had committed. The server
+deadlock graph showed four workers waiting on `UPDATE master AS target`. Before
+that failure, Artist committed 10,163,318 roots in 110.797 seconds, Label
+2,405,196 in 21.982 seconds, Master 2,579,897 in 82.008 seconds, and Release
+5,000 roots before the run failed. Those figures describe the failed run and
+are not a successful full-import benchmark.
+
+The regression runs four concurrent Release chunk writers over the same four
+Master rows in different input orders. After adding ascending Master row locks,
+10/10 runs completed without deadlock. The pre-change production run failed;
+the small regression was not run against the old binary, so this is a
+correctness result rather than a latency or throughput improvement claim. A
+successful full-dump retry is required before reporting end-to-end throughput,
+latency distribution, or RSS.
 
 ## Reference ID cache
 
@@ -77,6 +96,9 @@ go test ./src/batch -run '^$' \
 go test ./src/cache -run '^$' \
   -bench '^(BenchmarkIDSetLoadMillion|BenchmarkSyncMapIDSetLoadMillion)$' \
   -benchtime=3x -count=5 -benchmem
+go test ./src/batch \
+  -run '^TestConcurrentReleaseChunksLockOverlappingMastersInOneOrder$' \
+  -count=10
 ```
 
 Each command includes both comparison paths or implementations. The cache
