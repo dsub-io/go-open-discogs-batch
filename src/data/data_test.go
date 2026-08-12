@@ -606,6 +606,110 @@ e0e22f8501c2013eda69071a16e35ff785c0a135dee009fe2b67349f907709eb *discogs_200803
 	require.Len(t, server.Requests(), 2, "one listing plus one shared-date checksum request")
 }
 
+func TestUpdateSelectedDataUsesOneRequestForModernPinnedMonth(t *testing.T) {
+	const checksumBody = `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *discogs_20260801_artists.xml.gz
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb *discogs_20260801_labels.xml.gz
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *discogs_20260801_masters.xml.gz
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd *discogs_20260801_releases.xml.gz
+`
+	server := testserver.NewServer(func(
+		requests []*testserver.HttpRequest,
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		require.Equal(t, "data/2026/discogs_20260801_CHECKSUM.txt", r.URL.Query().Get(downloadParameter))
+		_, _ = w.Write([]byte(checksumBody))
+	})
+	defer server.Close()
+	originalURL := DiscogsDataBaseURL
+	t.Cleanup(func() { DiscogsDataBaseURL = originalURL })
+	DiscogsDataBaseURL = server.URL
+	repository := &RepositoryStub{}
+
+	updated, err := UpdateSelectedData(
+		context.Background(),
+		repository,
+		[]string{"artist", "label", "master", "release"},
+		"2026-08",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 4, updated)
+	require.Len(t, repository.items, 4)
+	require.Len(t, server.Requests(), 1)
+	for _, item := range repository.items {
+		require.Equal(t, time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), item.GeneratedAt)
+		require.NotEmpty(t, item.Checksum)
+		require.Contains(t, item.Uri, "data/2026/discogs_20260801_")
+	}
+}
+
+func TestUpdateSelectedDataModernPinnedErrorsDoNotFallback(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		dumpMonth string
+		want      string
+		wantCalls int
+	}{
+		{
+			name:      "rate limited",
+			status:    http.StatusTooManyRequests,
+			dumpMonth: "2026-08",
+			want:      "429 Too Many Requests",
+			wantCalls: 1,
+		},
+		{
+			name:      "missing selected checksum",
+			status:    http.StatusOK,
+			body:      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee *discogs_20260801_unknown.xml.gz",
+			dumpMonth: "2026-08",
+			want:      "checksum not found",
+			wantCalls: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := testserver.NewServer(func(
+				requests []*testserver.HttpRequest,
+				w http.ResponseWriter,
+				r *http.Request,
+			) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			})
+			defer server.Close()
+			originalURL := DiscogsDataBaseURL
+			t.Cleanup(func() { DiscogsDataBaseURL = originalURL })
+			DiscogsDataBaseURL = server.URL
+
+			updated, err := UpdateSelectedData(
+				context.Background(),
+				&RepositoryStub{},
+				[]string{"artist"},
+				test.dumpMonth,
+			)
+
+			require.Equal(t, -1, updated)
+			require.ErrorContains(t, err, test.want)
+			require.Len(t, server.Requests(), test.wantCalls)
+		})
+	}
+}
+
+func TestUpdateSelectedDataRejectsInvalidPinnedMonth(t *testing.T) {
+	updated, err := UpdateSelectedData(
+		context.Background(),
+		&RepositoryStub{},
+		[]string{"artist"},
+		"invalid",
+	)
+
+	require.Equal(t, -1, updated)
+	require.ErrorContains(t, err, "invalid dump month")
+}
+
 func TestUpdateSelectedDataErrorBoundaries(t *testing.T) {
 	listing := catalogListingFixture(updateCatalogURIs...)
 	tests := []struct {

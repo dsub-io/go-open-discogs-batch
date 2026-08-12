@@ -82,22 +82,9 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	}
 
 	dataRepo := data.NewDataRepository(database.DB)
-	fmt.Println("refreshing dump catalog...")
-	updated, updateErr := refreshSelectedData(
-		ctx,
-		dataRepo,
-		config.Strings("entities"),
-		config.String("dump-month"),
-	)
-	if updateErr != nil {
-		fmt.Printf("dump catalog refresh failed; trying cached catalog: %v\n", updateErr)
-	} else {
-		fmt.Printf("dump catalog refresh affected: %+v rows\n", updated)
-	}
-
-	plan, err := resolveImportPlan(config, dataRepo)
+	plan, err := resolveCatalogPlan(ctx, config, dataRepo)
 	if err != nil {
-		return errors.Join(updateErr, err)
+		return err
 	}
 
 	sqlDB, err := openSQLDatabase(database.DB)
@@ -163,6 +150,59 @@ func (runner *Runner) Run(ctx context.Context, config *koanf.Koanf) error {
 	err = finalizeImport(ctx, coordinator, plan, config.Bool("cleanup"), err)
 	printResult(begin, totalUpdates, err)
 	return err
+}
+
+func resolveCatalogPlan(
+	ctx context.Context,
+	config *koanf.Koanf,
+	repository data.Repository,
+) (*data.ImportPlan, error) {
+	dumpMonth := config.String("dump-month")
+	if dumpMonth != "" {
+		plan, cacheErr := resolveImportPlan(config, repository)
+		if cacheErr == nil {
+			fmt.Printf("using cached dump catalog for %s\n", dumpMonth)
+			return plan, nil
+		}
+		fmt.Printf("cached dump catalog unavailable for %s; refreshing once\n", dumpMonth)
+		if _, refreshErr := refreshDumpCatalog(ctx, config, repository); refreshErr != nil {
+			return nil, errors.Join(refreshErr, cacheErr)
+		}
+		plan, err := resolveImportPlan(config, repository)
+		if err != nil {
+			return nil, err
+		}
+		return plan, nil
+	}
+
+	_, refreshErr := refreshDumpCatalog(ctx, config, repository)
+	if refreshErr != nil {
+		fmt.Printf("dump catalog refresh failed; trying cached catalog: %v\n", refreshErr)
+	}
+	plan, err := resolveImportPlan(config, repository)
+	if err != nil {
+		return nil, errors.Join(refreshErr, err)
+	}
+	return plan, nil
+}
+
+func refreshDumpCatalog(
+	ctx context.Context,
+	config *koanf.Koanf,
+	repository data.Repository,
+) (int, error) {
+	fmt.Println("refreshing dump catalog...")
+	updated, err := refreshSelectedData(
+		ctx,
+		repository,
+		config.Strings("entities"),
+		config.String("dump-month"),
+	)
+	if err != nil {
+		return 0, err
+	}
+	fmt.Printf("dump catalog refresh affected: %+v rows\n", updated)
+	return updated, nil
 }
 
 func finalizeImport(

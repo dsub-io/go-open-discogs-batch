@@ -23,7 +23,10 @@ import (
 
 var DiscogsDataBaseURL = "https://data.discogs.com/"
 
-const dumpDateLayout = "20060102"
+const (
+	dumpDateLayout                 = "20060102"
+	directChecksumCatalogStartYear = 2021
+)
 
 var dumpUriPattern = regexp.MustCompile(`^data/(\d{4})/discogs_(\d{8})_(\w+)\.(.*)$`)
 var checksumPattern = regexp.MustCompile(`^([^ ]+) +.*(\d{8})_([^.]+).*$`)
@@ -256,15 +259,30 @@ func BatchInsertItems(repo Repository) func(_ context.Context, i interface{}) (i
 	}
 }
 
-// UpdateSelectedData refreshes only the catalog rows needed by this invocation. A pinned month
-// requires one catalog request; latest selection requires the index and latest-year catalog. It
-// fetches at most one checksum document per selected dump date.
+// UpdateSelectedData refreshes only the catalog rows needed by this invocation. Modern pinned
+// months are resolved from one checksum document. Older irregularly dated dumps use one annual
+// catalog request and one checksum request. Latest selection uses the index, latest-year catalog,
+// and at most one checksum document per selected dump date.
 func UpdateSelectedData(
 	ctx context.Context,
 	repo Repository,
 	entities []string,
 	dumpMonth string,
 ) (int, error) {
+	if dumpMonth != "" {
+		month, parseErr := time.Parse("2006-01", dumpMonth)
+		if parseErr != nil {
+			return -1, fmt.Errorf("invalid dump month %q: %w", dumpMonth, parseErr)
+		}
+		if month.Year() >= directChecksumCatalogStartYear {
+			candidates, fetchErr := fetchPinnedChecksumData(ctx, entities, month)
+			if fetchErr != nil {
+				return -1, fetchErr
+			}
+			return repo.BatchInsert(candidates)
+		}
+	}
+
 	all, err := fetchCatalogData(ctx, dumpMonth)
 	if err != nil {
 		return -1, err
@@ -310,6 +328,62 @@ func UpdateSelectedData(
 		candidate.Checksum = checksum
 	}
 	return repo.BatchInsert(candidates)
+}
+
+func fetchPinnedChecksumData(
+	ctx context.Context,
+	entities []string,
+	month time.Time,
+) ([]*Data, error) {
+	manifestDate := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+	manifestURI := fmt.Sprintf(
+		"%s%d/discogs_%s_CHECKSUM.txt",
+		dumpPathPrefix,
+		manifestDate.Year(),
+		manifestDate.Format(dumpDateLayout),
+	)
+	body, err := fetchBytes(ctx, checksumDownloadURL(manifestURI))
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s checksum manifest: %w", month.Format("2006-01"), err)
+	}
+	byType := make(map[string]*Data)
+	for _, line := range strings.Split(string(body), "\n") {
+		checksum, ok := parseChecksumTextLine(line)
+		if !ok || checksum.gen.Format("2006-01") != month.Format("2006-01") {
+			continue
+		}
+		entityType := strings.ToLower(checksum.typ)
+		if entityType == "checksum" || !isKnownType(entityType) {
+			continue
+		}
+		byType[entityType] = &Data{
+			GeneratedAt: checksum.gen,
+			Checksum:    checksum.chk,
+			TargetType:  entityType,
+			Uri: fmt.Sprintf(
+				"%s%d/discogs_%s_%s.xml.gz",
+				dumpPathPrefix,
+				checksum.gen.Year(),
+				checksum.gen.Format(dumpDateLayout),
+				entityType,
+			),
+		}
+	}
+
+	candidates := make([]*Data, 0, len(entities))
+	for _, entity := range entities {
+		entityType := strings.TrimSuffix(strings.ToLower(entity), "s") + "s"
+		candidate := byType[entityType]
+		if candidate == nil {
+			return nil, fmt.Errorf(
+				"checksum not found for %s %s",
+				month.Format("2006-01"),
+				entityType,
+			)
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates, nil
 }
 
 func selectRefreshCandidates(items []*Data, entities []string, dumpMonth string) []*Data {
