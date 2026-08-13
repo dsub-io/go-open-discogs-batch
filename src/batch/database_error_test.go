@@ -1264,8 +1264,8 @@ func TestExecutionQueryHelpersPropagateErrors(t *testing.T) {
 
 	t.Run("find resumable", func(t *testing.T) {
 		mock, tx := newMockTransaction(t)
-		mock.ExpectQuery("select import_run.id").WithArgs("fingerprint", processorName, "version", 1, 1).WillReturnError(expected)
-		_, err := findResumableRun(context.Background(), tx, "fingerprint", "version", 1, 1)
+		mock.ExpectQuery("select import_run.id").WithArgs("fingerprint", 1, 1).WillReturnError(expected)
+		_, err := findResumableRun(context.Background(), tx, "fingerprint", 1, 1)
 		require.ErrorContains(t, err, "find resumable")
 	})
 
@@ -1476,7 +1476,7 @@ func expectInsertedDump(mock sqlmock.Sqlmock, dump *opendiscogsmodel.DiscogsDump
 
 func expectNoResumableRun(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("select import_run.id").
-		WithArgs(sqlmock.AnyArg(), processorName, "version", 1, 5).
+		WithArgs(sqlmock.AnyArg(), 1, 5).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 }
 
@@ -1677,7 +1677,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoCheckpoint(mock)
 				expectInsertedDump(mock, dump)
 				expectNoSuccessfulRun(mock)
-				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), processorName, "version", 1, 5).WillReturnError(expected)
+				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), 1, 5).WillReturnError(expected)
 				mock.ExpectRollback()
 				expectEntityUnlock(mock)
 			},
@@ -1729,7 +1729,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoCheckpoint(mock)
 				expectInsertedDump(mock, dump)
 				expectNoSuccessfulRun(mock)
-				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), processorName, "version", 1, 5).
+				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), 1, 5).
 					WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 				expectInsertedRun(mock, sqlmock.AnyArg())
 				expectInsertedRunDump(mock)

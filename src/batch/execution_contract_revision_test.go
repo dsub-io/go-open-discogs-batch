@@ -120,13 +120,11 @@ func TestFindResumableRunUsesEntityContractRevisions(t *testing.T) {
 				"run_dump.import_contract_revision is distinct from case run_dump.entity_type",
 			)).WithArgs(
 				"fingerprint",
-				processorName,
-				"version",
 				4,
 				5,
 			).WillReturnRows(test.rows)
 
-			runID, err := findResumableRun(ctx, tx, "fingerprint", "version", 5, 4)
+			runID, err := findResumableRun(ctx, tx, "fingerprint", 5, 4)
 			require.NoError(t, err)
 			require.Equal(t, test.want, runID)
 		})
@@ -183,13 +181,11 @@ func TestImportContractRevisionErrorBoundaries(t *testing.T) {
 		mock, tx := newMockTransaction(t)
 		mock.ExpectQuery("select import_run.id").WithArgs(
 			"fingerprint",
-			processorName,
-			"version",
 			1,
 			5,
 		).WillReturnError(expected)
 
-		_, err := findResumableRun(ctx, tx, "fingerprint", "version", 5, 1)
+		_, err := findResumableRun(ctx, tx, "fingerprint", 5, 1)
 		require.ErrorIs(t, err, expected)
 		require.ErrorContains(t, err, "find resumable import run")
 	})

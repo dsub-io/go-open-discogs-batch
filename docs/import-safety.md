@@ -138,9 +138,12 @@ and atomically transfers its valid ledger. Resume requires an exact compatible
 match on:
 
 - manifest and per-entity import contract revision;
-- processor name and version;
 - entity and dump identity;
 - chunk size.
+
+Processor name and version remain provenance only. Go and Java may transfer a
+ledger when the shared import contract revision matches; an output- or
+chunk-boundary-changing release must increment that revision.
 
 If transfer fails, the new run rolls back and the source ledger remains
 authoritative. Each chunk fences on its owning run row, so a delayed worker

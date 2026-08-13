@@ -232,7 +232,6 @@ func (c *ImportExecutionCoordinator) Prepare(
 			ctx,
 			tx,
 			fingerprint,
-			c.processorVersion,
 			chunkSize,
 			len(dumps),
 		)
@@ -715,7 +714,6 @@ func findResumableRun(
 	ctx context.Context,
 	tx *sql.Tx,
 	fingerprint string,
-	processorVersion string,
 	chunkSize int,
 	entityCount int,
 ) (int64, error) {
@@ -725,12 +723,10 @@ func findResumableRun(
 		   from discogs_import_run import_run
 		  where import_run.manifest_sha256 = $1
 		    and import_run.status = 'failed'
-		    and import_run.processor = $2
-		    and import_run.processor_version = $3
 		    and not import_run.force_requested
 		    and (select count(*)
 		           from discogs_import_run_dump run_dump
-		          where run_dump.import_run_id = import_run.id) = $4
+		          where run_dump.import_run_id = import_run.id) = $2
 		    and not exists (
 		        select 1
 		          from discogs_import_run_dump run_dump
@@ -741,7 +737,7 @@ func findResumableRun(
 		        select 1
 		          from discogs_import_run_dump run_dump
 		         where run_dump.import_run_id = import_run.id
-		           and run_dump.chunk_size is distinct from $5
+		           and run_dump.chunk_size is distinct from $3
 		    )
 		    and not exists (
 		        select 1
@@ -772,12 +768,8 @@ func findResumableRun(
 		          join discogs_import_run_dump current_dump
 		            on current_dump.import_run_id = checkpoint.import_run_id
 		           and current_dump.entity_type = checkpoint.entity_type
-		          join discogs_import_run current_run
-		            on current_run.id = checkpoint.import_run_id
 		         where failed_dump.import_run_id = import_run.id
 		           and (current_dump.dump_id <> failed_dump.dump_id
-		                or current_run.processor <> import_run.processor
-		                or current_run.processor_version <> import_run.processor_version
 		                or current_dump.import_contract_revision <>
 		                   failed_dump.import_contract_revision)
 		           and (checkpoint.applied_at > import_run.completed_at
@@ -792,8 +784,6 @@ func findResumableRun(
 		ctx,
 		query,
 		fingerprint,
-		processorName,
-		processorVersion,
 		entityCount,
 		chunkSize,
 	).Scan(&runID)
@@ -902,15 +892,11 @@ func pruneSupersededFailedProgress(ctx context.Context, tx *sql.Tx) error {
 		               from discogs_import_run_dump failed_dump
 		               left join discogs_import_checkpoint checkpoint
 		                 on checkpoint.entity_type = failed_dump.entity_type
-		               left join discogs_import_run current_run
-		                 on current_run.id = checkpoint.import_run_id
-		               left join discogs_import_run_dump current_dump
+			               left join discogs_import_run_dump current_dump
 		                 on current_dump.import_run_id = checkpoint.import_run_id
 		                and current_dump.entity_type = checkpoint.entity_type
 			              where failed_dump.import_run_id = failed_run.id
 			                and (current_dump.dump_id is distinct from failed_dump.dump_id
-			                     or current_run.processor is distinct from failed_run.processor
-			                     or current_run.processor_version is distinct from failed_run.processor_version
 			                     or current_dump.import_contract_revision is distinct from
 			                        failed_dump.import_contract_revision)
 		         )

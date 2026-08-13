@@ -803,7 +803,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, retry.Complete(ctx, errors.New("fixture cleanup")))
 	})
 
-	t.Run("does not resume progress across processor versions", func(t *testing.T) {
+	t.Run("resumes current contract progress from Java", func(t *testing.T) {
 		reset(t)
 		dumps := []*opendiscogsmodel.DiscogsDump{
 			importDump("release", "2026-07-01", "4"),
@@ -817,13 +817,45 @@ func TestImportExecutionCoordinator(t *testing.T) {
 			false,
 		)
 		require.NoError(t, err)
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if insertErr := tx.Exec(
+				`insert into public.discogs_import_run_chunk
+				    (import_run_id, entity_type, chunk_index, first_item_index, item_count)
+				 values (?, 'release', 0, 0, 1)`,
+				failedPreparation.RunID,
+			).Error; insertErr != nil {
+				return insertErr
+			}
+			return tx.Exec(
+				`update public.discogs_import_run_dump
+				    set processed_items = 1,
+				        last_progress_at = now()
+				  where import_run_id = ?
+				    and entity_type = 'release'`,
+				failedPreparation.RunID,
+			).Error
+		}))
 		require.NoError(t, failed.Complete(ctx, errors.New("fixture failure")))
+		require.NoError(t, db.Exec(
+			`update public.discogs_import_run
+			    set processor = ?, processor_version = ?
+			  where id = ?`,
+			"open-discogs-batch",
+			"java-version",
+			failedPreparation.RunID,
+		).Error)
 
-		retry := NewImportExecutionCoordinator(sqlDB, "new-version")
+		retry := NewImportExecutionCoordinator(sqlDB, "go-version")
 		prepared, err := retry.Prepare(ctx, dumps, testChunkSize, false, false)
 		require.NoError(t, err)
-		require.Zero(t, prepared.ResumedFromRunID)
+		require.Equal(t, failedPreparation.RunID, prepared.ResumedFromRunID)
 		require.NotEqual(t, failedPreparation.RunID, prepared.RunID)
+		require.Empty(t, completedChunkIndexes(t, db, failedPreparation.RunID, "release"))
+		require.ElementsMatch(
+			t,
+			[]int64{0},
+			completedChunkIndexes(t, db, prepared.RunID, "release"),
+		)
 		require.NoError(t, retry.Complete(ctx, errors.New("fixture cleanup")))
 	})
 
@@ -1069,7 +1101,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		))
 	})
 
-	t.Run("does not prune progress superseded by another processor version", func(t *testing.T) {
+	t.Run("prunes progress superseded by a compatible processor", func(t *testing.T) {
 		reset(t)
 		artistDump := importDump("artist", "2026-07-01", "a")
 		releaseDump := importDump("release", "2026-07-01", "b")
@@ -1134,7 +1166,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, master.Complete(ctx, nil))
 
 		for _, entityType := range []string{"artist", "release"} {
-			require.ElementsMatch(t, []int64{0}, completedChunkIndexes(
+			require.Empty(t, completedChunkIndexes(
 				t,
 				db,
 				failedPreparation.RunID,
