@@ -641,7 +641,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	expected := errors.New("fixture")
 	db, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
-	mock.ExpectExec("WITH desired").WillReturnError(expected)
+	mock.ExpectExec("WITH stale").WillReturnError(expected)
 	mock.ExpectRollback()
 	actual := reconcileMasterMainReleases(
 		NewOrder(context.Background(), 1, 1, "unused", db),
@@ -652,7 +652,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 
 	db, mock, _ = newMockGorm(t)
 	mock.ExpectBegin()
-	mock.ExpectExec("WITH desired").
+	mock.ExpectExec("WITH stale").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("WITH desired").
 		WillReturnError(expected)
@@ -664,7 +664,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 
 	db, mock, _ = newMockGorm(t)
 	mock.ExpectBegin()
-	mock.ExpectExec("WITH desired").
+	mock.ExpectExec("WITH stale").
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec("WITH desired").
 		WillReturnResult(sqlmock.NewResult(0, 3))
@@ -683,7 +683,8 @@ func TestReleaseMasterReconciliationUsesFixedSetStatements(t *testing.T) {
 	require.Contains(t, releaseMainReleaseSetSQL, "FOR UPDATE OF target")
 	require.Contains(t, releaseMainReleaseClearSQL, "main_release_id = NULL")
 	require.Contains(t, releaseMainReleaseSetSQL, "main_release_id = pending.release_id")
-	require.Contains(t, releaseMainReleaseClearSQL, "LEFT JOIN desired")
+	require.Contains(t, releaseMainReleaseClearSQL, "NOT EXISTS")
+	require.Contains(t, releaseMainReleaseClearSQL, "current_release.master_id = target.id")
 	require.NotContains(t, releaseMainReleaseClearSQL, "last_modified_at =")
 	require.NotContains(t, releaseMainReleaseSetSQL, "last_modified_at =")
 	require.NotContains(t, releaseMainReleaseClearSQL, "VALUES")

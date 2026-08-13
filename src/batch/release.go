@@ -13,23 +13,17 @@ import (
 
 const (
 	releaseIdentityColumn      = "identity_sha256"
-	releaseMainReleaseClearSQL = `WITH desired AS MATERIALIZED (
-		SELECT DISTINCT ON (release_item.master_id)
-		       release_item.master_id,
-		       release_item.id AS release_id
-		  FROM release_item
-		 WHERE release_item.is_master IS TRUE
-		   AND release_item.master_id IS NOT NULL
-		 ORDER BY release_item.master_id,
-		          release_item.last_modified_at DESC,
-		          release_item.id DESC
-	),
-	stale AS MATERIALIZED (
+	releaseMainReleaseClearSQL = `WITH stale AS MATERIALIZED (
 		SELECT target.id
 		  FROM master AS target
-		  LEFT JOIN desired ON desired.master_id = target.id
-		 WHERE target.main_release_id IS DISTINCT FROM desired.release_id
-		   AND target.main_release_id IS NOT NULL
+		 WHERE target.main_release_id IS NOT NULL
+		   AND NOT EXISTS (
+		       SELECT 1
+		         FROM release_item AS current_release
+		        WHERE current_release.id = target.main_release_id
+		          AND current_release.master_id = target.id
+		          AND current_release.is_master IS TRUE
+		   )
 		 ORDER BY target.id
 		 FOR UPDATE OF target
 	)
