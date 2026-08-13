@@ -125,6 +125,12 @@ The 2026-08 dump audit streamed all 19,341,287 release roots in 2,132.79
 seconds with zero duplicate or non-monotonic roots. The corrected allocator
 accepted every root, including four conflicting identifier rows and 14
 conflicting track rows that the legacy 32-bit keys could not distinguish.
+Re-run the bounded, database-free audit for any monthly dump with:
+
+```shell
+OPEN_DISCOGS_RELEASE_DUMP=/path/to/releases.xml.gz \
+  go test -tags fulldump ./src/batch -run '^TestReleaseFullDumpCanonicalAudit$' -count=1 -v
+```
 
 ## Interruption and resume
 
