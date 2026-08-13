@@ -1331,6 +1331,16 @@ func TestMasterMainReleaseImportPolicy(t *testing.T) {
 		require.ErrorIs(t, err, expected)
 	})
 
+	t.Run("insert propagates policy failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).WillReturnError(expected)
+		actual := InsertMasterRelations(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
 	t.Run("missing result", func(t *testing.T) {
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectQuery("select exists").WithArgs(int64(1)).
