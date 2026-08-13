@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.8](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.7...v2.3.8) (2026-08-13)
+
+
+### Bug Fixes
+
+* preserve canonical dump data and bound full imports ([#71](https://github.com/dsub-io/go-open-discogs-batch/issues/71)) ([b274320](https://github.com/dsub-io/go-open-discogs-batch/commit/b274320e373b28a79c88460a7b2c3eea19f9e68a))
+
 ## [2.3.7](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.6...v2.3.7) (2026-08-12)
 
 
