@@ -155,6 +155,20 @@ func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
 		require.NoFileExists(t, filepath.Join(config.String("data-dir"), fixture.filename))
 	}
 
+	for _, selected := range []string{"artist", "label", "master", "release"} {
+		require.NoError(t, config.Set("entities", []string{selected}))
+		for _, entity := range []string{"artist", "label", "master", "release"} {
+			require.NoError(t, config.Set(entity+"s", entity == selected))
+		}
+		require.NoError(t, config.Set("force", true))
+		require.NoError(t, runner.Run(context.Background(), config), "standalone %s", selected)
+	}
+
+	require.NoError(t, config.Set("entities", []string{"artist", "label", "master", "release"}))
+	for _, entity := range []string{"artist", "label", "master", "release"} {
+		require.NoError(t, config.Set(entity+"s", true))
+	}
+	require.NoError(t, config.Set("force", false))
 	require.NoError(t, runner.Run(context.Background(), config))
 	require.NoError(t, config.Set("cleanup", false))
 	require.NoError(t, runner.Run(context.Background(), config))
