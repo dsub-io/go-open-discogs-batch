@@ -2,8 +2,10 @@ package batch
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
@@ -76,6 +78,16 @@ type Writer interface {
 type gormWriter struct {
 	db *gorm.DB
 }
+
+type modelWriteMetadata struct {
+	columnCount    int
+	conflictClause clause.OnConflict
+}
+
+var modelWriteMetadataCache = struct {
+	sync.RWMutex
+	values map[reflect.Type]modelWriteMetadata
+}{values: make(map[reflect.Type]modelWriteMetadata)}
 
 var NewWriter = newWriter
 
@@ -191,11 +203,11 @@ func doWrite[T any](items []T, chunkSize int, db *gorm.DB) result.Result {
 	if len(items) == 0 {
 		return result.NewResult(0, nil)
 	}
-	statement := &gorm.Statement{DB: db}
-	if err := statement.Parse(items[0]); err != nil {
-		return result.NewResult(0, fmt.Errorf("parse insert schema: %w", err))
+	metadata, err := writeMetadataFor(items[0], db)
+	if err != nil {
+		return result.NewResult(0, err)
 	}
-	chunkSize, err := postgresSafeBatchSize(chunkSize, len(statement.Schema.DBNames))
+	chunkSize, err = postgresSafeBatchSize(chunkSize, metadata.columnCount)
 	if err != nil {
 		return result.NewResult(0, err)
 	}
@@ -204,7 +216,7 @@ func doWrite[T any](items []T, chunkSize int, db *gorm.DB) result.Result {
 		end       = chunkSize
 		resultSum = result.NewResult(0, nil)
 		size      = len(items)
-		cl        = ExtractClause(items[0])
+		cl        = metadata.conflictClause
 	)
 	for {
 		if resultSum.IsErr() {
@@ -222,6 +234,32 @@ func doWrite[T any](items []T, chunkSize int, db *gorm.DB) result.Result {
 		start += chunkSize
 		end += chunkSize
 	}
+}
+
+func writeMetadataFor[T any](item T, db *gorm.DB) (modelWriteMetadata, error) {
+	modelType := reflect.TypeOf(item)
+	modelWriteMetadataCache.RLock()
+	metadata, exists := modelWriteMetadataCache.values[modelType]
+	modelWriteMetadataCache.RUnlock()
+	if exists {
+		return metadata, nil
+	}
+
+	modelWriteMetadataCache.Lock()
+	defer modelWriteMetadataCache.Unlock()
+	if metadata, exists = modelWriteMetadataCache.values[modelType]; exists {
+		return metadata, nil
+	}
+	statement := &gorm.Statement{DB: db}
+	if err := statement.Parse(item); err != nil {
+		return modelWriteMetadata{}, fmt.Errorf("parse insert schema: %w", err)
+	}
+	metadata = modelWriteMetadata{
+		columnCount:    len(statement.Schema.DBNames),
+		conflictClause: ExtractClause(item),
+	}
+	modelWriteMetadataCache.values[modelType] = metadata
+	return metadata, nil
 }
 
 func postgresSafeBatchSize(requested, columnCount int) (int, error) {

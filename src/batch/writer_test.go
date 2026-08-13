@@ -1,10 +1,18 @@
 package batch
 
 import (
+	"sync"
 	"testing"
 
+	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/require"
 )
+
+type metadataCacheFixture struct {
+	ID int32 `gorm:"column:id;primaryKey"`
+}
+
+func (metadataCacheFixture) TableName() string { return "metadata_cache_fixture" }
 
 func TestPostgresSafeBatchSize(t *testing.T) {
 	tests := []struct {
@@ -30,5 +38,43 @@ func TestPostgresSafeBatchSize(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, test.want, got)
 		})
+	}
+}
+
+func TestWriteMetadataCachesSchemaAndConflictClauseByModelType(t *testing.T) {
+	db, _, _ := newMockGorm(t)
+	first, err := writeMetadataFor(&model.Artist{}, db)
+	require.NoError(t, err)
+	require.Positive(t, first.columnCount)
+	require.NotEmpty(t, first.conflictClause.Columns)
+
+	second, err := writeMetadataFor(&model.Artist{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+}
+
+func TestWriteMetadataCacheIsConcurrentAndTyped(t *testing.T) {
+	db, _, _ := newMockGorm(t)
+	const workers = 32
+	results := make(chan modelWriteMetadata, workers)
+	errors := make(chan error, workers)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			metadata, err := writeMetadataFor(&metadataCacheFixture{}, db)
+			results <- metadata
+			errors <- err
+		}()
+	}
+	group.Wait()
+	close(results)
+	close(errors)
+	for err := range errors {
+		require.NoError(t, err)
+	}
+	for metadata := range results {
+		require.Equal(t, 1, metadata.columnCount)
 	}
 }
