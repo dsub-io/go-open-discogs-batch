@@ -26,6 +26,7 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 		{"legacy identity reconciliation", runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows},
 		{"ordinal refresh", runRelationOrdinalRefreshUpdatesOnlyWhenChanged},
 		{"unchanged root", runUnchangedRootSkipsPostgreSQLUpdate},
+		{"changed dump convergence", runChangedDumpConvergesRootAndRelations},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -34,6 +35,64 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 			test.run(t, dsn)
 		})
 	}
+}
+
+func runChangedDumpConvergesRootAndRelations(t *testing.T, dsn string) {
+	db := resetReleaseRelationDatabase(t, dsn)
+	observedAt := time.Now().UTC()
+	initialName := "Artist"
+	initial := &model.Artist{
+		ID:             1,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
+		Name:           &initialName,
+	}
+	recorded := writeCanonicalBatch([]*model.Artist{initial}, 1, db, deduplicateArtists)
+	require.NoError(t, recorded.Err())
+
+	order := NewOrder(context.Background(), 10, 1, "unused", db)
+	firstRelations := writeArtistRelationChunk(
+		order,
+		ChunkMetadata{ItemCount: 1},
+		[]*XmlArtistRelation{{
+			ID:   initial.ID,
+			URLs: []string{"https://a.example", "https://b.example"},
+		}},
+	)
+	require.NoError(t, firstRelations.Err())
+
+	changedName := "Changed Artist"
+	changedAt := observedAt.Add(time.Second)
+	changedRoot := &model.Artist{
+		ID:             initial.ID,
+		CreatedAt:      changedAt,
+		LastModifiedAt: changedAt,
+		Name:           &changedName,
+	}
+	rootUpdate := writeCanonicalBatch([]*model.Artist{changedRoot}, 1, db, deduplicateArtists)
+	require.NoError(t, rootUpdate.Err())
+	require.Equal(t, 1, rootUpdate.Count())
+
+	changedRelations := writeArtistRelationChunk(
+		order,
+		ChunkMetadata{ItemCount: 1},
+		[]*XmlArtistRelation{{
+			ID:   initial.ID,
+			URLs: []string{"https://b.example", "https://c.example"},
+		}},
+	)
+	require.NoError(t, changedRelations.Err())
+
+	var storedRoot model.Artist
+	require.NoError(t, db.First(&storedRoot, initial.ID).Error)
+	require.Equal(t, changedName, *storedRoot.Name)
+	var storedURLs []*model.ArtistURL
+	require.NoError(t, db.Where("artist_id = ?", initial.ID).Order("ordinal").Find(&storedURLs).Error)
+	require.Len(t, storedURLs, 2)
+	require.Equal(t, "https://b.example", storedURLs[0].URL)
+	require.Equal(t, int32(0), *storedURLs[0].Ordinal)
+	require.Equal(t, "https://c.example", storedURLs[1].URL)
+	require.Equal(t, int32(1), *storedURLs[1].Ordinal)
 }
 
 func runUnchangedRootSkipsPostgreSQLUpdate(t *testing.T, dsn string) {
