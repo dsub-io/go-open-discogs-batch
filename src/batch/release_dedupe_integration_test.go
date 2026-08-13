@@ -200,7 +200,7 @@ func runMasterMainReleaseReconciliationConvergesAndRollsBack(t *testing.T, dsn s
 		releaseB int32 = 2_000_001_001
 		releaseC int32 = 2_000_001_002
 	)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	require.NoError(t, db.Exec(
 		`INSERT INTO master (id, created_at, last_modified_at)
 		 VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
