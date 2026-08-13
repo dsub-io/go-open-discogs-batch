@@ -22,7 +22,7 @@ type Runner struct {
 	Version string
 }
 
-const importCompletionTimeout = 30 * time.Second
+const failedImportCompletionTimeout = 30 * time.Second
 
 const publicSchemaWarning = "WARN: database schema is public; set --database-schema or OPEN_DISCOGS_BATCH_DATABASE_SCHEMA to isolate OpenDiscogs tables"
 
@@ -219,10 +219,7 @@ func finalizeImport(
 	cleanup bool,
 	runErr error,
 ) error {
-	completionCtx, cancel := context.WithTimeout(
-		context.WithoutCancel(ctx),
-		importCompletionTimeout,
-	)
+	completionCtx, cancel := importCompletionContext(ctx, runErr)
 	defer cancel()
 	completionErr := completer.Complete(completionCtx, runErr)
 	finalErr := errors.Join(runErr, completionErr)
@@ -230,6 +227,17 @@ func finalizeImport(
 		return finalErr
 	}
 	return cleanupImportFiles(plan)
+}
+
+func importCompletionContext(
+	ctx context.Context,
+	runErr error,
+) (context.Context, context.CancelFunc) {
+	completionCtx := context.WithoutCancel(ctx)
+	if runErr == nil {
+		return completionCtx, func() {}
+	}
+	return context.WithTimeout(completionCtx, failedImportCompletionTimeout)
 }
 
 func preloadReferenceIDs(ctx context.Context, db *sql.DB, config *koanf.Koanf) error {
