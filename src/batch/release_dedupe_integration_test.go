@@ -15,14 +15,46 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T) {
+func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 	postgres := testutils.GetDatabase(t, testutils.Postgres)
 	dsn := testutils.GetDsn(testutils.Postgres, postgres)
+	tests := []struct {
+		name string
+		run  func(*testing.T, string)
+	}{
+		{"overlapping master lock order", runConcurrentReleaseChunksLockOverlappingMastersInOneOrder},
+		{"hash collision idempotency", runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently},
+		{"legacy identity reconciliation", runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cache.ResetIDs()
+			t.Cleanup(cache.ResetIDs)
+			test.run(t, dsn)
+		})
+	}
+}
+
+func resetReleaseRelationDatabase(t *testing.T, dsn string) *gorm.DB {
+	t.Helper()
 	db, err := database.GetConnect(dsn)
 	require.NoError(t, err)
+	require.NoError(t, db.Exec("drop schema public cascade").Error)
+	require.NoError(t, db.Exec("create schema public").Error)
 	require.NoError(t, RunDDL(db))
+	initialSQLDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, initialSQLDB.Close())
 	db, err = database.GetConnect(dsn)
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	return db
+}
+
+func runConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T, dsn string) {
+	db := resetReleaseRelationDatabase(t, dsn)
 
 	const (
 		firstMasterID int32 = 2_000_000_100
@@ -37,7 +69,6 @@ func TestConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T) {
 			ID: masterID, CreatedAt: now, LastModifiedAt: now,
 		}).Error)
 	}
-	t.Cleanup(cache.ResetIDs)
 
 	start := make(chan struct{})
 	errorsByWorker := make(chan error, workerCount)
@@ -80,14 +111,11 @@ func TestConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T) {
 	require.Equal(t, int64(masterCount), linkedMasters)
 }
 
-func TestReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(t *testing.T) {
-	postgres := testutils.GetDatabase(t, testutils.Postgres)
-	dsn := testutils.GetDsn(testutils.Postgres, postgres)
-	db, err := database.GetConnect(dsn)
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
-	db, err = database.GetConnect(dsn)
-	require.NoError(t, err)
+func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(
+	t *testing.T,
+	dsn string,
+) {
+	db := resetReleaseRelationDatabase(t, dsn)
 
 	now := time.Now().UTC()
 	const releaseItemID int32 = 2_000_000_001
@@ -176,7 +204,6 @@ func TestReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(t *te
 
 	cache.ArtistIDs.Add(1)
 	cache.LabelIDs.Add(5)
-	t.Cleanup(cache.ResetIDs)
 	require.NoError(t, db.Create(&model.Artist{
 		ID:             1,
 		CreatedAt:      now,
@@ -201,14 +228,11 @@ func TestReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(t *te
 	requireReleaseFixtureRelationCounts(t, db, fixture.ID)
 }
 
-func TestReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(t *testing.T) {
-	postgres := testutils.GetDatabase(t, testutils.Postgres)
-	dsn := testutils.GetDsn(testutils.Postgres, postgres)
-	db, err := database.GetConnect(dsn)
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
-	db, err = database.GetConnect(dsn)
-	require.NoError(t, err)
+func runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(
+	t *testing.T,
+	dsn string,
+) {
+	db := resetReleaseRelationDatabase(t, dsn)
 
 	const (
 		releaseItemID = int32(2_000_000_002)
