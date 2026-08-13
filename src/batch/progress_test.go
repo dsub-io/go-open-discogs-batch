@@ -25,6 +25,8 @@ const (
 	progressBacklinkFailureTrigger    = "fail_master_backlink_reconciliation_trigger"
 	intentionalChunkFailure           = "intentional chunk failure"
 	chunkSynchronizationTimeout       = 10 * time.Second
+	javaBatchProcessor                = "open-discogs-batch"
+	crossLanguageTestVersion          = "cross-language-test"
 )
 
 func TestProgressDurability(t *testing.T) {
@@ -185,6 +187,14 @@ func runImportResumesOutOfOrderChunks(t *testing.T, dsn string) {
 	)
 	require.ErrorContains(t, failed.Err(), "intentional chunk failure")
 	require.NoError(t, failedCoordinator.Complete(ctx, failed.Err()))
+	require.NoError(t, db.Exec(
+		`update public.discogs_import_run
+		    set processor = ?, processor_version = ?
+		  where id = ?`,
+		javaBatchProcessor,
+		crossLanguageTestVersion,
+		failedPreparation.RunID,
+	).Error)
 
 	committedBeforeRetry := completedChunkIndexes(t, db, failedPreparation.RunID, entityType)
 	require.ElementsMatch(t, []int64{0, 2}, committedBeforeRetry)
