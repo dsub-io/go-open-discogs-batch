@@ -3,6 +3,7 @@ package batch
 import (
 	"encoding/xml"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +17,16 @@ import (
 const (
 	releaseFormatHashFieldSeparator = "\x00"
 	releaseFormatHashNullValue      = "\x01"
+	relationOrdinalOutOfRange       = "relation ordinal exceeds PostgreSQL integer range"
 )
+
+func relationOrdinal(index int) *int32 {
+	if index < 0 || int64(index) > int64(math.MaxInt32) {
+		panic(relationOrdinalOutOfRange)
+	}
+	ordinal := int32(index)
+	return &ordinal
+}
 
 type XmlRef struct {
 	ID   int32  `xml:"id,attr"`
@@ -87,13 +97,14 @@ func (a *XmlArtistRelation) GetArtist() *opendiscogsmodel.Artist {
 func (a *XmlArtistRelation) GetUrls() []*opendiscogsmodel.ArtistURL {
 	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistURL, 0, len(a.URLs))
-	for _, value := range a.URLs {
+	for index, value := range a.URLs {
 		url := strings.TrimSpace(value)
 		if url == "" {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.ArtistURL{
 			ArtistID:       a.ID,
+			Ordinal:        relationOrdinal(index),
 			Hash:           helper.JavaStringHash(url),
 			URL:            url,
 			CreatedAt:      observedAt,
@@ -106,13 +117,14 @@ func (a *XmlArtistRelation) GetUrls() []*opendiscogsmodel.ArtistURL {
 func (a *XmlArtistRelation) GetNameVars() []*opendiscogsmodel.ArtistNameVariation {
 	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistNameVariation, 0, len(a.NameVars))
-	for _, value := range a.NameVars {
+	for index, value := range a.NameVars {
 		nameVariation := strings.TrimSpace(value)
 		if nameVariation == "" {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.ArtistNameVariation{
 			ArtistID:       a.ID,
+			Ordinal:        relationOrdinal(index),
 			NameVariation:  nameVariation,
 			Hash:           helper.JavaStringHash(nameVariation),
 			CreatedAt:      observedAt,
@@ -125,13 +137,14 @@ func (a *XmlArtistRelation) GetNameVars() []*opendiscogsmodel.ArtistNameVariatio
 func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
 	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistAlias, 0, len(a.Aliases))
-	for _, alias := range a.Aliases {
+	for index, alias := range a.Aliases {
 		if !cache.ArtistIDs.Contains(alias.ID) {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.ArtistAlias{
 			ArtistID:       a.ID,
 			AliasID:        alias.ID,
+			Ordinal:        relationOrdinal(index),
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
@@ -142,13 +155,14 @@ func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
 func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
 	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistGroup, 0, len(a.Groups))
-	for _, group := range a.Groups {
+	for index, group := range a.Groups {
 		if !cache.ArtistIDs.Contains(group.ID) {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.ArtistGroup{
 			ArtistID:       a.ID,
 			GroupID:        group.ID,
+			Ordinal:        relationOrdinal(index),
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
@@ -159,13 +173,14 @@ func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
 func (a *XmlArtistRelation) GetMembers() []*opendiscogsmodel.ArtistMember {
 	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistMember, 0, len(a.Members))
-	for _, member := range a.Members {
+	for index, member := range a.Members {
 		if !cache.ArtistIDs.Contains(member.ID) {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.ArtistMember{
 			ArtistID:       a.ID,
 			MemberID:       member.ID,
+			Ordinal:        relationOrdinal(index),
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
@@ -234,13 +249,14 @@ func (l *XmlLabelRelation) GetLabel() *opendiscogsmodel.Label {
 func (l *XmlLabelRelation) GetUrls() []*opendiscogsmodel.LabelURL {
 	observedAt := l.timestamp()
 	items := make([]*opendiscogsmodel.LabelURL, 0, len(l.URLs))
-	for _, value := range l.URLs {
+	for index, value := range l.URLs {
 		url := strings.TrimSpace(value)
 		if url == "" {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.LabelURL{
 			LabelID:        l.ID,
+			Ordinal:        relationOrdinal(index),
 			Hash:           helper.JavaStringHash(url),
 			URL:            url,
 			CreatedAt:      observedAt,
@@ -253,13 +269,14 @@ func (l *XmlLabelRelation) GetUrls() []*opendiscogsmodel.LabelURL {
 func (l *XmlLabelRelation) GetSubLabels() []*opendiscogsmodel.LabelSubLabel {
 	observedAt := l.timestamp()
 	items := make([]*opendiscogsmodel.LabelSubLabel, 0, len(l.SubLabels))
-	for _, subLabel := range l.SubLabels {
+	for index, subLabel := range l.SubLabels {
 		if !cache.LabelIDs.Contains(subLabel.ID) {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.LabelSubLabel{
 			ParentLabelID:  l.ID,
 			SubLabelID:     subLabel.ID,
+			Ordinal:        relationOrdinal(index),
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
@@ -347,13 +364,14 @@ func (m *XmlMasterRelation) GetMaster() *opendiscogsmodel.Master {
 func (m *XmlMasterRelation) GetMasterStyles() []*opendiscogsmodel.MasterStyle {
 	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterStyle, 0, len(m.Styles))
-	for _, value := range m.Styles {
+	for index, value := range m.Styles {
 		style := strings.TrimSpace(value)
 		if style == "" {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.MasterStyle{
 			MasterID:       m.ID,
+			Ordinal:        relationOrdinal(index),
 			Style:          style,
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
@@ -365,13 +383,14 @@ func (m *XmlMasterRelation) GetMasterStyles() []*opendiscogsmodel.MasterStyle {
 func (m *XmlMasterRelation) GetMasterGenres() []*opendiscogsmodel.MasterGenre {
 	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterGenre, 0, len(m.Genres))
-	for _, value := range m.Genres {
+	for index, value := range m.Genres {
 		genre := strings.TrimSpace(value)
 		if genre == "" {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.MasterGenre{
 			MasterID:       m.ID,
+			Ordinal:        relationOrdinal(index),
 			Genre:          genre,
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
@@ -383,7 +402,7 @@ func (m *XmlMasterRelation) GetMasterGenres() []*opendiscogsmodel.MasterGenre {
 func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
 	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterVideo, 0, len(m.Videos))
-	for _, video := range m.Videos {
+	for index, video := range m.Videos {
 		title := helper.FilterStr(video.Title)
 		description := helper.FilterStr(video.Description)
 		url := helper.FilterStr(&video.URL)
@@ -393,6 +412,7 @@ func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
 		}
 		items = append(items, &opendiscogsmodel.MasterVideo{
 			MasterID:       m.ID,
+			Ordinal:        relationOrdinal(index),
 			Hash:           helper.JavaStringHash(hashSource),
 			URL:            url,
 			Description:    description,
@@ -407,13 +427,14 @@ func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
 func (m *XmlMasterRelation) GetMasterArtists() []*opendiscogsmodel.MasterArtist {
 	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterArtist, 0, len(m.Artists))
-	for _, artistID := range m.Artists {
+	for index, artistID := range m.Artists {
 		if !cache.ArtistIDs.Contains(artistID) {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.MasterArtist{
 			ArtistID:       artistID,
 			MasterID:       m.ID,
+			Ordinal:        relationOrdinal(index),
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
@@ -589,7 +610,7 @@ func (r *XmlReleaseRelation) GetRelease() *opendiscogsmodel.ReleaseItem {
 func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemWork, 0, len(r.Works))
-	for _, work := range r.Works {
+	for index, work := range r.Works {
 		value := strings.TrimSpace(work.Work)
 		if value == "" {
 			continue
@@ -600,6 +621,7 @@ func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
 		items = append(items, &opendiscogsmodel.ReleaseItemWork{
 			ReleaseItemID:  r.ID,
 			LabelID:        work.LabelID,
+			Ordinal:        relationOrdinal(index),
 			Work:           &value,
 			Hash:           helper.JavaStringHash(value),
 			CreatedAt:      observedAt,
@@ -612,7 +634,7 @@ func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
 func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemVideo, 0, len(r.Videos))
-	for _, video := range r.Videos {
+	for index, video := range r.Videos {
 		title := helper.FilterStr(video.Title)
 		description := helper.FilterStr(video.Description)
 		url := helper.FilterStr(&video.URL)
@@ -622,6 +644,7 @@ func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
 		}
 		items = append(items, &opendiscogsmodel.ReleaseItemVideo{
 			ReleaseItemID:  r.ID,
+			Ordinal:        relationOrdinal(index),
 			Description:    description,
 			Title:          title,
 			URL:            url,
@@ -636,7 +659,7 @@ func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
 func (r *XmlReleaseRelation) GetIdentifiers() []*opendiscogsmodel.ReleaseItemIdentifier {
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemIdentifier, 0, len(r.Identifiers))
-	for _, identifier := range r.Identifiers {
+	for index, identifier := range r.Identifiers {
 		description := helper.FilterStr(&identifier.Description)
 		identifierType := helper.FilterStr(&identifier.Type)
 		value := helper.FilterStr(&identifier.Value)
@@ -646,6 +669,7 @@ func (r *XmlReleaseRelation) GetIdentifiers() []*opendiscogsmodel.ReleaseItemIde
 		}
 		items = append(items, &opendiscogsmodel.ReleaseItemIdentifier{
 			ReleaseItemID:  r.ID,
+			Ordinal:        relationOrdinal(index),
 			Description:    description,
 			Type:           identifierType,
 			Value:          value,
@@ -660,7 +684,7 @@ func (r *XmlReleaseRelation) GetIdentifiers() []*opendiscogsmodel.ReleaseItemIde
 func (r *XmlReleaseRelation) GetTracks() []*opendiscogsmodel.ReleaseItemTrack {
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemTrack, 0, len(r.Tracks))
-	for _, track := range r.Tracks {
+	for index, track := range r.Tracks {
 		duration := helper.FilterStr(&track.Duration)
 		position := helper.FilterStr(&track.Position)
 		title := helper.FilterStr(&track.Title)
@@ -670,6 +694,7 @@ func (r *XmlReleaseRelation) GetTracks() []*opendiscogsmodel.ReleaseItemTrack {
 		}
 		items = append(items, &opendiscogsmodel.ReleaseItemTrack{
 			ReleaseItemID:  r.ID,
+			Ordinal:        relationOrdinal(index),
 			Duration:       duration,
 			Position:       position,
 			Title:          title,
@@ -684,7 +709,7 @@ func (r *XmlReleaseRelation) GetTracks() []*opendiscogsmodel.ReleaseItemTrack {
 func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat {
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemFormat, 0, len(r.Formats))
-	for _, format := range r.Formats {
+	for index, format := range r.Formats {
 		description := reducedDescription(format.Descriptions)
 		name := helper.FilterStr(format.Name)
 		text := helper.FilterStr(format.Text)
@@ -696,6 +721,7 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 		hashSource := releaseFormatHashSource(name, description, quantityText, text)
 		items = append(items, &opendiscogsmodel.ReleaseItemFormat{
 			ReleaseItemID:  r.ID,
+			Ordinal:        relationOrdinal(index),
 			Description:    description,
 			Name:           name,
 			Quantity:       quantity,
@@ -732,7 +758,7 @@ func releaseFormatHashString(value *string) string {
 func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseItemCreditedArtist {
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemCreditedArtist, 0, len(r.CreditedArtists))
-	for _, creditedArtist := range r.CreditedArtists {
+	for index, creditedArtist := range r.CreditedArtists {
 		if !cache.ArtistIDs.Contains(creditedArtist.ArtistID) {
 			continue
 		}
@@ -743,6 +769,7 @@ func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseIte
 		items = append(items, &opendiscogsmodel.ReleaseItemCreditedArtist{
 			ReleaseItemID:  r.ID,
 			ArtistID:       creditedArtist.ArtistID,
+			Ordinal:        relationOrdinal(index),
 			Role:           &role,
 			Hash:           helper.JavaStringHash(role),
 			CreatedAt:      observedAt,
@@ -755,13 +782,14 @@ func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseIte
 func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItemArtist {
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemArtist, 0, len(r.Artists))
-	for _, artistID := range r.Artists {
+	for index, artistID := range r.Artists {
 		if !cache.ArtistIDs.Contains(artistID) {
 			continue
 		}
 		items = append(items, &opendiscogsmodel.ReleaseItemArtist{
 			ReleaseItemID:  r.ID,
 			ArtistID:       artistID,
+			Ordinal:        relationOrdinal(index),
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
@@ -777,7 +805,7 @@ func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
 		categoryNotation string
 	}
 	seen := make(map[identity]struct{}, len(r.Labels))
-	for _, label := range r.Labels {
+	for index, label := range r.Labels {
 		if !cache.LabelIDs.Contains(label.LabelID) {
 			continue
 		}
@@ -790,6 +818,7 @@ func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
 		items = append(items, &opendiscogsmodel.LabelReleaseItem{
 			LabelID:          label.LabelID,
 			ReleaseItemID:    r.ID,
+			Ordinal:          relationOrdinal(index),
 			CategoryNotation: helper.FilterStr(&categoryNotation),
 			CreatedAt:        observedAt,
 			LastModifiedAt:   observedAt,
@@ -802,7 +831,7 @@ func (r *XmlReleaseRelation) GetReleaseStyles() []*opendiscogsmodel.ReleaseItemS
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemStyle, 0, len(r.Styles))
 	seen := make(map[string]struct{}, len(r.Styles))
-	for _, value := range r.Styles {
+	for index, value := range r.Styles {
 		style := strings.TrimSpace(value)
 		if style == "" {
 			continue
@@ -813,6 +842,7 @@ func (r *XmlReleaseRelation) GetReleaseStyles() []*opendiscogsmodel.ReleaseItemS
 		seen[style] = struct{}{}
 		items = append(items, &opendiscogsmodel.ReleaseItemStyle{
 			ReleaseItemID:  r.ID,
+			Ordinal:        relationOrdinal(index),
 			Style:          style,
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
@@ -825,7 +855,7 @@ func (r *XmlReleaseRelation) GetReleaseGenres() []*opendiscogsmodel.ReleaseItemG
 	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemGenre, 0, len(r.Genres))
 	seen := make(map[string]struct{}, len(r.Genres))
-	for _, value := range r.Genres {
+	for index, value := range r.Genres {
 		genre := strings.TrimSpace(value)
 		if genre == "" {
 			continue
@@ -836,6 +866,7 @@ func (r *XmlReleaseRelation) GetReleaseGenres() []*opendiscogsmodel.ReleaseItemG
 		seen[genre] = struct{}{}
 		items = append(items, &opendiscogsmodel.ReleaseItemGenre{
 			ReleaseItemID:  r.ID,
+			Ordinal:        relationOrdinal(index),
 			Genre:          genre,
 			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,

@@ -24,6 +24,7 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 		{"master backlink reconciliation", runMasterMainReleaseReconciliationConvergesAndRollsBack},
 		{"hash collision idempotency", runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently},
 		{"legacy identity reconciliation", runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows},
+		{"ordinal refresh", runRelationOrdinalRefreshUpdatesOnlyWhenChanged},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -32,6 +33,65 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 			test.run(t, dsn)
 		})
 	}
+}
+
+func runRelationOrdinalRefreshUpdatesOnlyWhenChanged(t *testing.T, dsn string) {
+	db := resetReleaseRelationDatabase(t, dsn)
+	const releaseItemID int32 = 2_000_000_003
+	observedAt := time.Now().UTC()
+	require.NoError(t, db.Create(&model.ReleaseItem{
+		ID:             releaseItemID,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
+	}).Error)
+
+	position := "A1"
+	title := "Track"
+	ordinalFive := int32(5)
+	row := &model.ReleaseItemTrack{
+		ReleaseItemID:  releaseItemID,
+		Hash:           101,
+		Position:       &position,
+		Title:          &title,
+		Ordinal:        &ordinalFive,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
+	}
+	inserted := writeReleaseRelationBatch(
+		[]*model.ReleaseItemTrack{row},
+		1,
+		db,
+		deduplicateReleaseTracks,
+	)
+	require.NoError(t, inserted.Err())
+	require.Equal(t, 1, inserted.Count())
+
+	ordinalOne := int32(1)
+	row.Ordinal = &ordinalOne
+	row.LastModifiedAt = observedAt.Add(time.Second)
+	updated := writeReleaseRelationBatch(
+		[]*model.ReleaseItemTrack{row},
+		1,
+		db,
+		deduplicateReleaseTracks,
+	)
+	require.NoError(t, updated.Err())
+	require.Equal(t, 1, updated.Count())
+
+	var stored model.ReleaseItemTrack
+	require.NoError(t, db.Where("release_item_id = ?", releaseItemID).First(&stored).Error)
+	require.NotNil(t, stored.Ordinal)
+	require.Equal(t, ordinalOne, *stored.Ordinal)
+	require.Equal(t, row.LastModifiedAt.UTC(), stored.LastModifiedAt.UTC())
+
+	unchanged := writeReleaseRelationBatch(
+		[]*model.ReleaseItemTrack{row},
+		1,
+		db,
+		deduplicateReleaseTracks,
+	)
+	require.NoError(t, unchanged.Err())
+	require.Zero(t, unchanged.Count())
 }
 
 func resetReleaseRelationDatabase(t *testing.T, dsn string) *gorm.DB {

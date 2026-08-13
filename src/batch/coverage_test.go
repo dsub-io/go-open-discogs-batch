@@ -16,6 +16,7 @@ import (
 	"github.com/reactivex/rxgo/v2"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func testString(value string) *string { return &value }
@@ -66,20 +67,22 @@ func TestXMLRelationFiltersInvalidValues(t *testing.T) {
 		URLs:     []string{" ", "https://example.test"},
 		NameVars: []string{" ", "Name"},
 		Aliases:  []XmlRef{{ID: 99}, {ID: 1}},
+		Groups:   []XmlRef{{ID: 99}, {ID: 1}},
 		Members:  []XmlRef{{ID: 99}, {ID: 1}},
 	}
-	require.Len(t, artist.GetUrls(), 1)
-	require.Len(t, artist.GetNameVars(), 1)
-	require.Len(t, artist.GetAliases(), 1)
-	require.Len(t, artist.GetMembers(), 1)
+	requireRelationOrdinal(t, artist.GetUrls(), func(row *opendiscogsmodel.ArtistURL) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, artist.GetNameVars(), func(row *opendiscogsmodel.ArtistNameVariation) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, artist.GetAliases(), func(row *opendiscogsmodel.ArtistAlias) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, artist.GetGroups(), func(row *opendiscogsmodel.ArtistGroup) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, artist.GetMembers(), func(row *opendiscogsmodel.ArtistMember) *int32 { return row.Ordinal }, 1)
 
 	label := &XmlLabelRelation{
 		ID:        11,
 		URLs:      []string{" ", "https://example.test"},
 		SubLabels: []XmlRef{{ID: 99}, {ID: 2}},
 	}
-	require.Len(t, label.GetUrls(), 1)
-	require.Len(t, label.GetSubLabels(), 1)
+	requireRelationOrdinal(t, label.GetUrls(), func(row *opendiscogsmodel.LabelURL) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, label.GetSubLabels(), func(row *opendiscogsmodel.LabelSubLabel) *int32 { return row.Ordinal }, 1)
 
 	master := &XmlMasterRelation{
 		ID:      12,
@@ -88,10 +91,10 @@ func TestXMLRelationFiltersInvalidValues(t *testing.T) {
 		Artists: []int32{99, 1},
 		Videos:  []XmlVideo{{}, {URL: "https://example.test"}},
 	}
-	require.Len(t, master.GetMasterStyles(), 1)
-	require.Len(t, master.GetMasterGenres(), 1)
-	require.Len(t, master.GetMasterArtists(), 1)
-	require.Len(t, master.GetMasterVideos(), 1)
+	requireRelationOrdinal(t, master.GetMasterStyles(), func(row *opendiscogsmodel.MasterStyle) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, master.GetMasterGenres(), func(row *opendiscogsmodel.MasterGenre) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, master.GetMasterArtists(), func(row *opendiscogsmodel.MasterArtist) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, master.GetMasterVideos(), func(row *opendiscogsmodel.MasterVideo) *int32 { return row.Ordinal }, 1)
 
 	release := &XmlReleaseRelation{
 		ID: 13,
@@ -106,20 +109,37 @@ func TestXMLRelationFiltersInvalidValues(t *testing.T) {
 		Formats:         []XmlFormat{{}, {Name: testString("LP")}},
 		CreditedArtists: []XmlCreditedArtist{{ArtistID: 99, Role: "Role"}, {ArtistID: 1}, {ArtistID: 1, Role: "Role"}},
 		Artists:         []int32{99, 1},
-		Labels:          []XmlLabelRelease{{LabelID: 99}, {LabelID: 2}},
-		Styles:          []string{" ", "Rock"},
-		Genres:          []string{" ", "Electronic"},
+		Labels:          []XmlLabelRelease{{LabelID: 99}, {LabelID: 2}, {LabelID: 2}},
+		Styles:          []string{" ", "Rock", "Rock"},
+		Genres:          []string{" ", "Electronic", "Electronic"},
 	}
-	require.Len(t, release.GetWorks(), 1)
-	require.Len(t, release.GetVideos(), 1)
-	require.Len(t, release.GetIdentifiers(), 1)
-	require.Len(t, release.GetTracks(), 1)
-	require.Len(t, release.GetFormats(), 1)
-	require.Len(t, release.GetCreditedArtists(), 1)
-	require.Len(t, release.GetReleaseArtists(), 1)
-	require.Len(t, release.GetLabels(), 1)
-	require.Len(t, release.GetReleaseStyles(), 1)
-	require.Len(t, release.GetReleaseGenres(), 1)
+	requireRelationOrdinal(t, release.GetWorks(), func(row *opendiscogsmodel.ReleaseItemWork) *int32 { return row.Ordinal }, 2)
+	requireRelationOrdinal(t, release.GetVideos(), func(row *opendiscogsmodel.ReleaseItemVideo) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, release.GetIdentifiers(), func(row *opendiscogsmodel.ReleaseItemIdentifier) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, release.GetTracks(), func(row *opendiscogsmodel.ReleaseItemTrack) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, release.GetFormats(), func(row *opendiscogsmodel.ReleaseItemFormat) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, release.GetCreditedArtists(), func(row *opendiscogsmodel.ReleaseItemCreditedArtist) *int32 { return row.Ordinal }, 2)
+	requireRelationOrdinal(t, release.GetReleaseArtists(), func(row *opendiscogsmodel.ReleaseItemArtist) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, release.GetLabels(), func(row *opendiscogsmodel.LabelReleaseItem) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, release.GetReleaseStyles(), func(row *opendiscogsmodel.ReleaseItemStyle) *int32 { return row.Ordinal }, 1)
+	requireRelationOrdinal(t, release.GetReleaseGenres(), func(row *opendiscogsmodel.ReleaseItemGenre) *int32 { return row.Ordinal }, 1)
+}
+
+func requireRelationOrdinal[T any](
+	t *testing.T,
+	rows []*T,
+	ordinal func(*T) *int32,
+	expected int32,
+) {
+	t.Helper()
+	require.Len(t, rows, 1)
+	require.NotNil(t, ordinal(rows[0]))
+	require.Equal(t, expected, *ordinal(rows[0]))
+}
+
+func TestRelationOrdinalRange(t *testing.T) {
+	require.Equal(t, int32(0), *relationOrdinal(0))
+	require.PanicsWithValue(t, relationOrdinalOutOfRange, func() { relationOrdinal(-1) })
 }
 
 func TestXMLValueBoundaries(t *testing.T) {
@@ -204,6 +224,52 @@ func TestExtractClauseRemainingTypes(t *testing.T) {
 		struct{}{},
 	} {
 		_ = ExtractClause(item)
+	}
+}
+
+func TestEveryCatalogRelationUpdatesOrdinalOnConflict(t *testing.T) {
+	tests := []struct {
+		item  interface{}
+		table string
+	}{
+		{&opendiscogsmodel.ArtistAlias{}, "artist_alias"},
+		{&opendiscogsmodel.ArtistGroup{}, "artist_group"},
+		{&opendiscogsmodel.ArtistMember{}, "artist_member"},
+		{&opendiscogsmodel.ArtistNameVariation{}, "artist_name_variation"},
+		{&opendiscogsmodel.ArtistURL{}, "artist_url"},
+		{&opendiscogsmodel.LabelSubLabel{}, "label_sub_label"},
+		{&opendiscogsmodel.LabelURL{}, "label_url"},
+		{&opendiscogsmodel.MasterArtist{}, "master_artist"},
+		{&opendiscogsmodel.MasterGenre{}, "master_genre"},
+		{&opendiscogsmodel.MasterStyle{}, "master_style"},
+		{&opendiscogsmodel.MasterVideo{}, "master_video"},
+		{&opendiscogsmodel.LabelReleaseItem{}, "label_release_item"},
+		{&opendiscogsmodel.ReleaseItemArtist{}, "release_item_artist"},
+		{&opendiscogsmodel.ReleaseItemCreditedArtist{}, "release_item_credited_artist"},
+		{&opendiscogsmodel.ReleaseItemFormat{}, "release_item_format"},
+		{&opendiscogsmodel.ReleaseItemGenre{}, "release_item_genre"},
+		{&opendiscogsmodel.ReleaseItemIdentifier{}, "release_item_identifier"},
+		{&opendiscogsmodel.ReleaseItemImage{}, "release_item_image"},
+		{&opendiscogsmodel.ReleaseItemStyle{}, "release_item_style"},
+		{&opendiscogsmodel.ReleaseItemTrack{}, "release_item_track"},
+		{&opendiscogsmodel.ReleaseItemVideo{}, "release_item_video"},
+		{&opendiscogsmodel.ReleaseItemWork{}, "release_item_work"},
+	}
+	for _, test := range tests {
+		t.Run(test.table, func(t *testing.T) {
+			conflict := ExtractClause(test.item)
+			require.False(t, conflict.DoNothing)
+			require.Len(t, conflict.DoUpdates, 2)
+			require.Equal(t, "ordinal", conflict.DoUpdates[0].Column.Name)
+			require.Equal(t, "last_modified_at", conflict.DoUpdates[1].Column.Name)
+			require.Len(t, conflict.Where.Exprs, 1)
+			expression, ok := conflict.Where.Exprs[0].(clause.Expr)
+			require.True(t, ok)
+			require.Equal(t,
+				`"`+test.table+`"."ordinal" IS DISTINCT FROM excluded."ordinal"`,
+				expression.SQL,
+			)
+		})
 	}
 }
 
