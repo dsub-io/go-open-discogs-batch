@@ -2,6 +2,7 @@ package batch
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
@@ -39,21 +40,64 @@ func GetMasterStep(order Order) Step {
 }
 
 func InsertMasterRelations(order Order) result.Result {
+	seedMainReleases, err := shouldSeedMasterMainReleases(order)
+	if err != nil {
+		return result.NewResult(0, err)
+	}
 	return processRelationChunks(
 		order,
 		"master relations",
 		"master",
 		"source-read master relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlMasterRelation) result.Result {
-			return writeMasterRelationChunk(order, chunk, items)
+			return writeMasterRelationChunkWithMainReleasePolicy(
+				order, chunk, items, seedMainReleases,
+			)
 		},
 	)
+}
+
+func shouldSeedMasterMainReleases(order Order) (bool, error) {
+	if order.getRunID() == 0 {
+		return false, nil
+	}
+	type bootstrapState struct {
+		Seed bool
+	}
+	var state bootstrapState
+	query := order.getDB().WithContext(order.getContext()).Raw(
+		`select exists (
+		    select 1
+		      from discogs_catalog_entity_state
+		     where entity_type = 'release'
+		       and status = 'importing'
+		       and operation = 'bootstrap'
+		       and active_import_run_id = ?
+		) as seed`,
+		order.getRunID(),
+	).Scan(&state)
+	if query.Error != nil {
+		return false, fmt.Errorf("load master backlink import policy: %w", query.Error)
+	}
+	if query.RowsAffected != 1 {
+		return false, errors.New("load master backlink import policy: result is unavailable")
+	}
+	return state.Seed, nil
 }
 
 func writeMasterRelationChunk(
 	order Order,
 	chunk ChunkMetadata,
 	items []*XmlMasterRelation,
+) result.Result {
+	return writeMasterRelationChunkWithMainReleasePolicy(order, chunk, items, false)
+}
+
+func writeMasterRelationChunkWithMainReleasePolicy(
+	order Order,
+	chunk ChunkMetadata,
+	items []*XmlMasterRelation,
+	seedMainReleases bool,
 ) result.Result {
 	observedAt := time.Now().UTC()
 	assignChunkObservedAt(items, observedAt)
@@ -73,7 +117,11 @@ func writeMasterRelationChunk(
 		rootIDs = append(rootIDs, item.ID)
 		genres = append(genres, item.GetGenres()...)
 		styles = append(styles, item.GetStyles()...)
-		masters = append(masters, item.GetMaster())
+		master := item.GetMaster()
+		if !seedMainReleases {
+			master.MainReleaseID = nil
+		}
+		masters = append(masters, master)
 		masterStyles = append(masterStyles, item.GetMasterStyles()...)
 		masterGenres = append(masterGenres, item.GetMasterGenres()...)
 		videos = append(videos, item.GetMasterVideos()...)

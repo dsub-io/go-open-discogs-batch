@@ -281,6 +281,7 @@ func (m *XmlMaster) TransformAt(observedAt time.Time) *opendiscogsmodel.Master {
 		Title:          helper.FilterStr(m.Title),
 		DataQuality:    helper.FilterStr(m.DataQuality),
 		Year:           m.Year,
+		MainReleaseID:  m.MainReleaseID,
 	}
 }
 
@@ -334,6 +335,7 @@ func (m *XmlMasterRelation) GetMaster() *opendiscogsmodel.Master {
 		Title:          helper.FilterStr(m.Title),
 		DataQuality:    helper.FilterStr(m.DataQuality),
 		Year:           m.Year,
+		MainReleaseID:  m.MainReleaseID,
 	}
 }
 

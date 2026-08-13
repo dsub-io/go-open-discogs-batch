@@ -1311,6 +1311,49 @@ func TestCompletedEntityProgressPreload(t *testing.T) {
 	})
 }
 
+func TestMasterMainReleaseImportPolicy(t *testing.T) {
+	t.Run("untracked", func(t *testing.T) {
+		seed, err := shouldSeedMasterMainReleases(
+			NewOrder(context.Background(), 1, 1, "unused", nil),
+		)
+		require.NoError(t, err)
+		require.False(t, seed)
+	})
+
+	t.Run("query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).WillReturnError(expected)
+		seed, err := shouldSeedMasterMainReleases(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.False(t, seed)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("missing result", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).
+			WillReturnRows(sqlmock.NewRows([]string{"seed"}))
+		seed, err := shouldSeedMasterMainReleases(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.False(t, seed)
+		require.ErrorContains(t, err, "result is unavailable")
+	})
+
+	t.Run("bootstrap release", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).
+			WillReturnRows(sqlmock.NewRows([]string{"seed"}).AddRow(true))
+		seed, err := shouldSeedMasterMainReleases(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.NoError(t, err)
+		require.True(t, seed)
+	})
+}
+
 func newMockTransaction(t *testing.T) (sqlmock.Sqlmock, *sql.Tx) {
 	t.Helper()
 	_, mock, sqlDB := newMockGorm(t)

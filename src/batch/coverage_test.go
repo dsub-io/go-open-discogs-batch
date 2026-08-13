@@ -43,10 +43,14 @@ func TestBatchConstructor(t *testing.T) {
 
 func TestLegacyCoreTransforms(t *testing.T) {
 	observedAt := time.Unix(1, 0).UTC()
-	master := &XmlMaster{ID: 1, Title: testString("master")}
+	mainReleaseID := int32(10)
+	master := &XmlMaster{
+		ID: 1, Title: testString("master"), MainReleaseID: &mainReleaseID,
+	}
 	masterResult := master.TransformAt(observedAt)
 	require.Equal(t, int32(1), masterResult.ID)
 	require.Equal(t, observedAt, masterResult.CreatedAt)
+	require.Equal(t, mainReleaseID, *masterResult.MainReleaseID)
 
 	release := &XmlRelease{ID: 2, Title: testString("release")}
 	releaseResult := release.TransformAt(observedAt)
@@ -81,13 +85,16 @@ func TestXMLRelationFiltersInvalidValues(t *testing.T) {
 	require.Len(t, label.GetUrls(), 1)
 	require.Len(t, label.GetSubLabels(), 1)
 
+	mainReleaseID := int32(10)
 	master := &XmlMasterRelation{
-		ID:      12,
-		Styles:  []string{" ", "Rock"},
-		Genres:  []string{" ", "Electronic"},
-		Artists: []int32{99, 1},
-		Videos:  []XmlVideo{{}, {URL: "https://example.test"}},
+		ID:            12,
+		MainReleaseID: &mainReleaseID,
+		Styles:        []string{" ", "Rock"},
+		Genres:        []string{" ", "Electronic"},
+		Artists:       []int32{99, 1},
+		Videos:        []XmlVideo{{}, {URL: "https://example.test"}},
 	}
+	require.Equal(t, int32(10), *master.GetMaster().MainReleaseID)
 	require.Len(t, master.GetMasterStyles(), 1)
 	require.Len(t, master.GetMasterGenres(), 1)
 	require.Len(t, master.GetMasterArtists(), 1)
