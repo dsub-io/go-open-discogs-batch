@@ -25,6 +25,7 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 		{"hash collision idempotency", runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently},
 		{"legacy identity reconciliation", runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows},
 		{"ordinal refresh", runRelationOrdinalRefreshUpdatesOnlyWhenChanged},
+		{"unchanged root", runUnchangedRootSkipsPostgreSQLUpdate},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -33,6 +34,46 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 			test.run(t, dsn)
 		})
 	}
+}
+
+func runUnchangedRootSkipsPostgreSQLUpdate(t *testing.T, dsn string) {
+	db := resetReleaseRelationDatabase(t, dsn)
+	observedAt := time.Now().UTC()
+	name := "Artist"
+	initial := &model.Artist{
+		ID:             1,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
+		Name:           &name,
+	}
+	recorded := writeCanonicalBatch([]*model.Artist{initial}, 1, db, deduplicateArtists)
+	require.NoError(t, recorded.Err())
+	require.Equal(t, 1, recorded.Count())
+
+	require.NoError(t, db.Exec(`
+		CREATE FUNCTION reject_artist_update() RETURNS trigger
+		LANGUAGE plpgsql AS $$ BEGIN
+			RAISE EXCEPTION 'unchanged root must not update';
+		END $$`).Error)
+	require.NoError(t, db.Exec(`
+		CREATE TRIGGER reject_artist_update
+		BEFORE UPDATE ON artist
+		FOR EACH ROW EXECUTE FUNCTION reject_artist_update()`).Error)
+
+	unchanged := &model.Artist{
+		ID:             initial.ID,
+		CreatedAt:      observedAt.Add(time.Second),
+		LastModifiedAt: observedAt.Add(time.Second),
+		Name:           &name,
+	}
+	retry := writeCanonicalBatch([]*model.Artist{unchanged}, 1, db, deduplicateArtists)
+	require.NoError(t, retry.Err())
+	require.Zero(t, retry.Count())
+
+	changedName := "Changed Artist"
+	unchanged.Name = &changedName
+	changed := writeCanonicalBatch([]*model.Artist{unchanged}, 1, db, deduplicateArtists)
+	require.ErrorContains(t, changed.Err(), "unchanged root must not update")
 }
 
 func runRelationOrdinalRefreshUpdatesOnlyWhenChanged(t *testing.T, dsn string) {
