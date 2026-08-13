@@ -61,12 +61,34 @@ func TestResetIDsClearsGlobalIdentifierCaches(t *testing.T) {
 	ArtistIDs.Add(1)
 	LabelIDs.Add(2)
 	MasterIDs.Add(3)
+	GenreNames.Add("Electronic")
+	StyleNames.Add("Techno")
 
 	ResetIDs()
 
 	require.False(t, ArtistIDs.Contains(1))
 	require.False(t, LabelIDs.Contains(2))
 	require.False(t, MasterIDs.Contains(3))
+	require.False(t, GenreNames.Contains("Electronic"))
+	require.False(t, StyleNames.Contains("Techno"))
+}
+
+func TestNameSetSupportsConcurrentConfirmation(t *testing.T) {
+	names := new(NameSet)
+	var workers sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			names.Add("Electronic")
+		}()
+	}
+	workers.Wait()
+
+	require.True(t, names.Contains("Electronic"))
+	require.False(t, names.Contains("Techno"))
+	names.Reset()
+	require.False(t, names.Contains("Electronic"))
 }
 
 func BenchmarkIDSetLoadMillion(b *testing.B) {

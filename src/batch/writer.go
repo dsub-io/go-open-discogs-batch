@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
@@ -39,6 +40,34 @@ func sortReferenceEntities(genres []*model.Genre, styles []*model.Style) {
 	slices.SortFunc(styles, func(left, right *model.Style) int {
 		return strings.Compare(left.Name, right.Name)
 	})
+}
+
+func filterConfirmedReferenceEntities(
+	genres []*model.Genre,
+	styles []*model.Style,
+) ([]*model.Genre, []*model.Style) {
+	pendingGenres := make([]*model.Genre, 0, len(genres))
+	for _, genre := range genres {
+		if !cache.GenreNames.Contains(genre.Name) {
+			pendingGenres = append(pendingGenres, genre)
+		}
+	}
+	pendingStyles := make([]*model.Style, 0, len(styles))
+	for _, style := range styles {
+		if !cache.StyleNames.Contains(style.Name) {
+			pendingStyles = append(pendingStyles, style)
+		}
+	}
+	return pendingGenres, pendingStyles
+}
+
+func confirmReferenceEntities(genres []*model.Genre, styles []*model.Style) {
+	for _, genre := range genres {
+		cache.GenreNames.Add(genre.Name)
+	}
+	for _, style := range styles {
+		cache.StyleNames.Add(style.Name)
+	}
 }
 
 type Writer interface {

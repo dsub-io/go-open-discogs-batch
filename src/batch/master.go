@@ -73,7 +73,8 @@ func writeMasterRelationChunk(
 	genres = filterGenres(genres)
 	styles = filterStyles(styles)
 	sortReferenceEntities(genres, styles)
-	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
+	genres, styles = filterConfirmedReferenceEntities(genres, styles)
+	written := executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		existingRoots, err := findExistingRelationRoots(
 			transactionOrder,
 			rootIDs,
@@ -150,4 +151,8 @@ func writeMasterRelationChunk(
 		}
 		return written
 	})
+	if !written.IsErr() {
+		confirmReferenceEntities(genres, styles)
+	}
+	return written
 }

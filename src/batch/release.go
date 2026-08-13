@@ -171,7 +171,8 @@ func writeReleaseRelationChunk(
 	genres = filterGenres(genres)
 	styles = filterStyles(styles)
 	sortReferenceEntities(genres, styles)
-	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
+	genres, styles = filterConfirmedReferenceEntities(genres, styles)
+	written := executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		existingRoots, existingRootsError := findExistingRelationRoots(
 			transactionOrder,
 			rootIDs,
@@ -332,6 +333,10 @@ func writeReleaseRelationChunk(
 		}
 		return written.Sum(updateMasterMainReleases(transactionOrder, items))
 	})
+	if !written.IsErr() {
+		confirmReferenceEntities(genres, styles)
+	}
+	return written
 }
 
 func lockReleaseMasterRows(

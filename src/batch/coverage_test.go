@@ -465,6 +465,23 @@ func TestReferenceEntitiesUseDeterministicLockOrder(t *testing.T) {
 	require.NoError(t, actual.Err())
 }
 
+func TestConfirmedReferenceEntitiesAreNotSentToPostgreSQLAgain(t *testing.T) {
+	cache.ResetIDs()
+	t.Cleanup(cache.ResetIDs)
+	confirmReferenceEntities(
+		[]*opendiscogsmodel.Genre{{Name: "Electronic"}},
+		[]*opendiscogsmodel.Style{{Name: "Techno"}},
+	)
+
+	genres, styles := filterConfirmedReferenceEntities(
+		[]*opendiscogsmodel.Genre{{Name: "Ambient"}, {Name: "Electronic"}},
+		[]*opendiscogsmodel.Style{{Name: "Dub"}, {Name: "Techno"}},
+	)
+
+	require.Equal(t, []string{"Ambient"}, []string{genres[0].Name})
+	require.Equal(t, []string{"Dub"}, []string{styles[0].Name})
+}
+
 func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	expected := errors.New("fixture")
 	poisonedDB := poisonedGorm(t, expected)
@@ -519,6 +536,8 @@ func TestReleaseMasterLockUsesIndexedCandidateSets(t *testing.T) {
 }
 
 func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
+	cache.ResetIDs()
+	t.Cleanup(cache.ResetIDs)
 	originalWriter := NewWriter
 	t.Cleanup(func() { NewWriter = originalWriter })
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
@@ -553,6 +572,7 @@ func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
 		mock.ExpectExec(`INSERT INTO .*genre`).WithArgs("genre").WillReturnError(expected)
 		mock.ExpectRollback()
 		require.ErrorIs(t, fixture.write(NewOrder(context.Background(), 1, 1, "unused", db)).Err(), expected)
+		require.False(t, cache.GenreNames.Contains("genre"))
 	}
 }
 
