@@ -48,49 +48,49 @@ func ExtractClause(item any) clause.OnConflict {
 			},
 		)
 	case *model.LabelReleaseItem:
-		return updateOrdinalWhenChanged("label_release_item", "release_item_id", "label_id", "category_notation")
+		return doNothing("release_item_id", "label_id", "category_notation")
 	case *model.ReleaseItemFormat:
-		return updateOrdinalWhenChanged("release_item_format", "release_item_id", "hash")
+		return doNothing("release_item_id", "hash")
 	case *model.ArtistAlias:
-		return updateOrdinalWhenChanged("artist_alias", "artist_id", "alias_id")
+		return doNothing("artist_id", "alias_id")
 	case *model.ArtistGroup:
-		return updateOrdinalWhenChanged("artist_group", "artist_id", "group_id")
+		return doNothing("artist_id", "group_id")
 	case *model.ArtistMember:
-		return updateOrdinalWhenChanged("artist_member", "artist_id", "member_id")
+		return doNothing("artist_id", "member_id")
 	case *model.ArtistNameVariation:
-		return updateOrdinalWhenChanged("artist_name_variation", "artist_id", "hash")
+		return doNothing("artist_id", "hash")
 	case *model.ArtistURL:
-		return updateOrdinalWhenChanged("artist_url", "artist_id", "hash")
+		return doNothing("artist_id", "hash")
 	case *model.LabelSubLabel:
-		return updateOrdinalWhenChanged("label_sub_label", "parent_label_id", "sub_label_id")
+		return doNothing("parent_label_id", "sub_label_id")
 	case *model.LabelURL:
-		return updateOrdinalWhenChanged("label_url", "label_id", "hash")
+		return doNothing("label_id", "hash")
 	case *model.MasterArtist:
-		return updateOrdinalWhenChanged("master_artist", "master_id", "artist_id")
+		return doNothing("master_id", "artist_id")
 	case *model.MasterGenre:
-		return updateOrdinalWhenChanged("master_genre", "master_id", "genre")
+		return doNothing("master_id", "genre")
 	case *model.MasterStyle:
-		return updateOrdinalWhenChanged("master_style", "master_id", "style")
+		return doNothing("master_id", "style")
 	case *model.MasterVideo:
-		return updateOrdinalWhenChanged("master_video", "master_id", "hash")
+		return doNothing("master_id", "hash")
 	case *model.ReleaseItemArtist:
-		return updateOrdinalWhenChanged("release_item_artist", "release_item_id", "artist_id")
+		return doNothing("release_item_id", "artist_id")
 	case *model.ReleaseItemCreditedArtist:
-		return updateOrdinalWhenChanged("release_item_credited_artist", "release_item_id", "artist_id", "hash")
+		return doNothing("release_item_id", "artist_id", "hash")
 	case *model.ReleaseItemGenre:
-		return updateOrdinalWhenChanged("release_item_genre", "release_item_id", "genre")
+		return doNothing("release_item_id", "genre")
 	case *model.ReleaseItemIdentifier:
-		return updateOrdinalWhenChanged("release_item_identifier", "release_item_id", "hash")
+		return doNothing("release_item_id", "hash")
 	case *model.ReleaseItemImage:
-		return updateOrdinalWhenChanged("release_item_image", "release_item_id", "hash")
+		return doNothing("release_item_id", "hash")
 	case *model.ReleaseItemStyle:
-		return updateOrdinalWhenChanged("release_item_style", "release_item_id", "style")
+		return doNothing("release_item_id", "style")
 	case *model.ReleaseItemTrack:
-		return updateOrdinalWhenChanged("release_item_track", "release_item_id", "hash")
+		return doNothing("release_item_id", "hash")
 	case *model.ReleaseItemVideo:
-		return updateOrdinalWhenChanged("release_item_video", "release_item_id", "hash")
+		return doNothing("release_item_id", "hash")
 	case *model.ReleaseItemWork:
-		return updateOrdinalWhenChanged("release_item_work", "release_item_id", "label_id", "hash")
+		return doNothing("release_item_id", "label_id", "hash")
 	case *model.Genre:
 		return doNothing("name")
 	case *model.Style:
@@ -105,10 +105,6 @@ func doNothing(columns ...string) clause.OnConflict {
 		Columns:   clauseColumns(columns),
 		DoNothing: true,
 	}
-}
-
-func updateOrdinalWhenChanged(table string, conflictColumns ...string) clause.OnConflict {
-	return updateWhenChanged(table, conflictColumns, []string{"ordinal"})
 }
 
 func updateWhenChanged(

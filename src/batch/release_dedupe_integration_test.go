@@ -24,7 +24,6 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 		{"master backlink reconciliation", runMasterMainReleaseReconciliationConvergesAndRollsBack},
 		{"hash collision idempotency", runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently},
 		{"legacy identity reconciliation", runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows},
-		{"ordinal refresh", runRelationOrdinalRefreshUpdatesOnlyWhenChanged},
 		{"unchanged root", runUnchangedRootSkipsPostgreSQLUpdate},
 		{"changed dump convergence", runChangedDumpConvergesRootAndRelations},
 	}
@@ -87,12 +86,10 @@ func runChangedDumpConvergesRootAndRelations(t *testing.T, dsn string) {
 	require.NoError(t, db.First(&storedRoot, initial.ID).Error)
 	require.Equal(t, changedName, *storedRoot.Name)
 	var storedURLs []*model.ArtistURL
-	require.NoError(t, db.Where("artist_id = ?", initial.ID).Order("ordinal").Find(&storedURLs).Error)
+	require.NoError(t, db.Where("artist_id = ?", initial.ID).Order("url").Find(&storedURLs).Error)
 	require.Len(t, storedURLs, 2)
 	require.Equal(t, "https://b.example", storedURLs[0].URL)
-	require.Equal(t, int32(0), *storedURLs[0].Ordinal)
 	require.Equal(t, "https://c.example", storedURLs[1].URL)
-	require.Equal(t, int32(1), *storedURLs[1].Ordinal)
 }
 
 func runUnchangedRootSkipsPostgreSQLUpdate(t *testing.T, dsn string) {
@@ -133,64 +130,6 @@ func runUnchangedRootSkipsPostgreSQLUpdate(t *testing.T, dsn string) {
 	unchanged.Name = &changedName
 	changed := writeCanonicalBatch([]*model.Artist{unchanged}, 1, db, deduplicateArtists)
 	require.ErrorContains(t, changed.Err(), "unchanged root must not update")
-}
-
-func runRelationOrdinalRefreshUpdatesOnlyWhenChanged(t *testing.T, dsn string) {
-	db := resetReleaseRelationDatabase(t, dsn)
-	const releaseItemID int32 = 2_000_000_003
-	observedAt := time.Now().UTC()
-	require.NoError(t, db.Create(&model.ReleaseItem{
-		ID:             releaseItemID,
-		CreatedAt:      observedAt,
-		LastModifiedAt: observedAt,
-	}).Error)
-
-	position := "A1"
-	title := "Track"
-	ordinalFive := int32(5)
-	row := &model.ReleaseItemTrack{
-		ReleaseItemID:  releaseItemID,
-		Hash:           101,
-		Position:       &position,
-		Title:          &title,
-		Ordinal:        &ordinalFive,
-		LastModifiedAt: observedAt,
-	}
-	inserted := writeReleaseRelationBatch(
-		[]*model.ReleaseItemTrack{row},
-		1,
-		db,
-		deduplicateReleaseTracks,
-	)
-	require.NoError(t, inserted.Err())
-	require.Equal(t, 1, inserted.Count())
-
-	ordinalOne := int32(1)
-	row.Ordinal = &ordinalOne
-	row.LastModifiedAt = observedAt.Add(time.Second)
-	updated := writeReleaseRelationBatch(
-		[]*model.ReleaseItemTrack{row},
-		1,
-		db,
-		deduplicateReleaseTracks,
-	)
-	require.NoError(t, updated.Err())
-	require.Equal(t, 1, updated.Count())
-
-	var stored model.ReleaseItemTrack
-	require.NoError(t, db.Where("release_item_id = ?", releaseItemID).First(&stored).Error)
-	require.NotNil(t, stored.Ordinal)
-	require.Equal(t, ordinalOne, *stored.Ordinal)
-	require.Equal(t, row.LastModifiedAt.UTC(), stored.LastModifiedAt.UTC())
-
-	unchanged := writeReleaseRelationBatch(
-		[]*model.ReleaseItemTrack{row},
-		1,
-		db,
-		deduplicateReleaseTracks,
-	)
-	require.NoError(t, unchanged.Err())
-	require.Zero(t, unchanged.Count())
 }
 
 func resetReleaseRelationDatabase(t *testing.T, dsn string) *gorm.DB {
