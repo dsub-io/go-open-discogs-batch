@@ -18,6 +18,10 @@ import (
 
 func TestDatabaseHelpers(t *testing.T) {
 	databaseConfig := GetDatabase(t, Postgres)
+	secondDatabase := GetDatabase(t, Postgres)
+	require.Equal(t, databaseConfig.Hostname, secondDatabase.Hostname)
+	require.Equal(t, databaseConfig.Port, secondDatabase.Port)
+	require.NotEqual(t, databaseConfig.DBName, secondDatabase.DBName)
 	dsn := GetDsn(Postgres, databaseConfig)
 
 	require.Contains(t, dsn, "host="+databaseConfig.Hostname)
@@ -28,6 +32,156 @@ func TestDatabaseHelpers(t *testing.T) {
 	db, err := database.GetConnect(dsn)
 	require.NoError(t, err)
 	require.NoError(t, ApplySharedSchema(db))
+}
+
+func TestPostgresFixtureLifecycleBoundaries(t *testing.T) {
+	expected := errors.New("fixture")
+	request := func() (testcontainers.ContainerRequest, error) {
+		return testcontainers.ContainerRequest{}, nil
+	}
+
+	t.Run("cached", func(t *testing.T) {
+		database := Database{DBName: "cached"}
+		fixture := &postgresFixture{container: validPostgresContainerStub(), database: database}
+		actual, err := fixture.ensure(
+			func() (testcontainers.ContainerRequest, error) {
+				t.Fatal("cached fixture must not rebuild its request")
+				return testcontainers.ContainerRequest{}, nil
+			},
+			nil,
+		)
+		require.NoError(t, err)
+		require.Equal(t, database, actual)
+	})
+
+	t.Run("request failure", func(t *testing.T) {
+		fixture := new(postgresFixture)
+		_, err := fixture.ensure(
+			func() (testcontainers.ContainerRequest, error) {
+				return testcontainers.ContainerRequest{}, expected
+			},
+			nil,
+		)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("create failure", func(t *testing.T) {
+		fixture := new(postgresFixture)
+		_, err := fixture.ensure(
+			request,
+			func(context.Context, testcontainers.ContainerRequest) (postgresContainer, error) {
+				return nil, expected
+			},
+		)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("resolution failure terminates container", func(t *testing.T) {
+		fixture := new(postgresFixture)
+		container := validPostgresContainerStub()
+		container.inspectErr = expected
+		container.terminateErr = errors.New("termination fixture")
+		_, err := fixture.ensure(
+			request,
+			func(context.Context, testcontainers.ContainerRequest) (postgresContainer, error) {
+				return container, nil
+			},
+		)
+		require.ErrorContains(t, err, expected.Error())
+		require.ErrorContains(t, err, container.terminateErr.Error())
+		require.Nil(t, fixture.container)
+	})
+
+	t.Run("start and stop", func(t *testing.T) {
+		fixture := new(postgresFixture)
+		container := validPostgresContainerStub()
+		database, err := fixture.ensure(
+			request,
+			func(context.Context, testcontainers.ContainerRequest) (postgresContainer, error) {
+				return container, nil
+			},
+		)
+		require.NoError(t, err)
+		require.Equal(t, postgresDatabase, database.DBName)
+		require.NoError(t, fixture.stop())
+		require.Nil(t, fixture.container)
+		require.Equal(t, Database{}, fixture.database)
+		require.Zero(t, fixture.nextID)
+		require.NoError(t, fixture.stop())
+	})
+
+	t.Run("stop reports termination failure and resets state", func(t *testing.T) {
+		container := validPostgresContainerStub()
+		container.terminateErr = expected
+		fixture := &postgresFixture{
+			container: container,
+			database:  Database{DBName: "fixture"},
+			nextID:    3,
+		}
+		require.ErrorIs(t, fixture.stop(), expected)
+		require.Nil(t, fixture.container)
+		require.Equal(t, Database{}, fixture.database)
+		require.Zero(t, fixture.nextID)
+	})
+}
+
+func TestIsolatedPostgresDatabaseFailureBoundaries(t *testing.T) {
+	originalEnsure := ensurePostgresDatabase
+	originalDDL := executePostgresDDL
+	originalShared := sharedPostgres
+	t.Cleanup(func() {
+		ensurePostgresDatabase = originalEnsure
+		executePostgresDDL = originalDDL
+		sharedPostgres = originalShared
+	})
+	sharedPostgres = new(postgresFixture)
+	expected := errors.New("fixture")
+
+	reporter := &reporterStub{}
+	ensurePostgresDatabase = func() (Database, error) { return Database{}, expected }
+	require.Equal(t, Database{}, isolatedPostgresDatabase(reporter))
+	require.Len(t, reporter.fatals, 1)
+	require.Empty(t, reporter.cleanups)
+
+	reporter = &reporterStub{}
+	base := Database{DBName: postgresDatabase}
+	ensurePostgresDatabase = func() (Database, error) { return base, nil }
+	executePostgresDDL = func(Database, string) error { return expected }
+	require.Equal(t, Database{}, isolatedPostgresDatabase(reporter))
+	require.Len(t, reporter.fatals, 1)
+	require.Empty(t, reporter.cleanups)
+
+	reporter = &reporterStub{}
+	calls := 0
+	executePostgresDDL = func(Database, string) error {
+		calls++
+		if calls == 1 {
+			return nil
+		}
+		return expected
+	}
+	actual := isolatedPostgresDatabase(reporter)
+	require.NotEqual(t, postgresDatabase, actual.DBName)
+	require.Len(t, reporter.cleanups, 1)
+	reporter.cleanups[0]()
+	require.Len(t, reporter.errors, 1)
+}
+
+func TestStopSharedPostgresDelegatesToCurrentFixture(t *testing.T) {
+	original := sharedPostgres
+	t.Cleanup(func() { sharedPostgres = original })
+	sharedPostgres = new(postgresFixture)
+	require.NoError(t, StopSharedPostgres())
+}
+
+func TestExecuteDatabaseDDLReportsConnectionAndStatementFailures(t *testing.T) {
+	require.Error(t, executeDatabaseDDL(Database{
+		Username: "invalid", Password: "invalid", Hostname: "127.0.0.1",
+		DBName: "invalid", Type: Postgres, Port: "1",
+	}, "select 1"))
+
+	databaseConfig := GetDatabase(t, Postgres)
+	require.Error(t, executeDatabaseDDL(databaseConfig, "invalid SQL"))
 }
 
 type reporterStub struct {

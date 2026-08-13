@@ -2,12 +2,15 @@ package testutils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	containerapi "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
@@ -23,6 +26,7 @@ const (
 
 const (
 	postgresDatabase      = "test_db"
+	postgresTestDBPrefix  = "test_db_case"
 	postgresImage         = "postgres:18.4-alpine"
 	postgresPassword      = "postgres"
 	postgresPort          = "5432/tcp"
@@ -45,8 +49,18 @@ var (
 		os.Getpid(),
 		time.Now().UTC().UnixNano(),
 	)
-	testRunIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	testRunIDPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	sharedPostgres         = new(postgresFixture)
+	ensurePostgresDatabase = ensureSharedPostgres
+	executePostgresDDL     = executeDatabaseDDL
 )
+
+type postgresFixture struct {
+	sync.Mutex
+	container postgresContainer
+	database  Database
+	nextID    uint64
+}
 
 type Database struct {
 	Username string
@@ -101,20 +115,134 @@ func GetDsn(dt DatabaseType, db Database) string {
 func GetDatabase(t testing.TB, db DatabaseType) Database {
 	t.Helper()
 	if db == Postgres {
-		return setupPostgres(t)
+		return isolatedPostgresDatabase(t)
 	}
 	panic("unsupported database type")
 }
 
-func setupPostgres(t testReporter) Database {
+func isolatedPostgresDatabase(t testReporter) Database {
 	t.Helper()
-	testRunID, err := currentTestRunID()
+	base, err := ensurePostgresDatabase()
 	if err != nil {
-		t.Fatalf("resolve PostgreSQL test run identity: %v", err)
+		t.Fatalf("start shared PostgreSQL test container: %v", err)
 		return Database{}
 	}
+
+	sharedPostgres.Lock()
+	sharedPostgres.nextID++
+	databaseName := fmt.Sprintf(
+		"%s_%d_%d",
+		postgresTestDBPrefix,
+		os.Getpid(),
+		sharedPostgres.nextID,
+	)
+	sharedPostgres.Unlock()
+	if err := executePostgresDDL(base, "create database "+pgx.Identifier{databaseName}.Sanitize()); err != nil {
+		t.Fatalf("create isolated PostgreSQL test database %q: %v", databaseName, err)
+		return Database{}
+	}
+	t.Cleanup(func() {
+		statement := "drop database if exists " + pgx.Identifier{databaseName}.Sanitize() + " with (force)"
+		if err := executePostgresDDL(base, statement); err != nil {
+			t.Errorf("drop isolated PostgreSQL test database %q: %v", databaseName, err)
+		}
+	})
+	database := base
+	database.DBName = databaseName
+	return database
+}
+
+func ensureSharedPostgres() (Database, error) {
+	return sharedPostgres.ensure(postgresContainerRequest, createPostgresContainer)
+}
+
+func (fixture *postgresFixture) ensure(
+	request func() (testcontainers.ContainerRequest, error),
+	create func(context.Context, testcontainers.ContainerRequest) (postgresContainer, error),
+) (Database, error) {
+	fixture.Lock()
+	defer fixture.Unlock()
+	if fixture.container != nil {
+		return fixture.database, nil
+	}
+	containerRequest, err := request()
+	if err != nil {
+		return Database{}, err
+	}
 	ctx := context.Background()
-	req := testcontainers.ContainerRequest{
+	container, err := create(ctx, containerRequest)
+	if err != nil {
+		return Database{}, err
+	}
+	database, err := databaseFromContainer(ctx, container)
+	if err != nil {
+		return Database{}, errors.Join(err, container.Terminate(ctx))
+	}
+	fixture.container = container
+	fixture.database = database
+	return database, nil
+}
+
+// StopSharedPostgres releases the package-scoped PostgreSQL fixture.
+func StopSharedPostgres() error {
+	return sharedPostgres.stop()
+}
+
+func (fixture *postgresFixture) stop() error {
+	fixture.Lock()
+	defer fixture.Unlock()
+	if fixture.container == nil {
+		return nil
+	}
+	err := fixture.container.Terminate(context.Background())
+	fixture.container = nil
+	fixture.database = Database{}
+	fixture.nextID = 0
+	return err
+}
+
+func executeDatabaseDDL(database Database, statement string) error {
+	ctx := context.Background()
+	connection, err := pgx.Connect(ctx, GetDsn(Postgres, database))
+	if err != nil {
+		return err
+	}
+	defer connection.Close(ctx)
+	_, err = connection.Exec(ctx, statement)
+	return err
+}
+
+func setupPostgres(t testReporter) Database {
+	t.Helper()
+	ctx := context.Background()
+	req, err := postgresContainerRequest()
+	if err != nil {
+		t.Fatalf("configure PostgreSQL test container: %v", err)
+		return Database{}
+	}
+	dbContainer, err := createPostgresContainer(ctx, req)
+	if err != nil {
+		t.Fatalf("start PostgreSQL test container: %v", err)
+		return Database{}
+	}
+	t.Cleanup(func() {
+		reportPostgresTermination(t, dbContainer)
+	})
+
+	database, err := databaseFromContainer(ctx, dbContainer)
+	if err != nil {
+		t.Fatalf("resolve PostgreSQL test container: %v", err)
+		return Database{}
+	}
+	return database
+}
+
+func postgresContainerRequest() (testcontainers.ContainerRequest, error) {
+	testRunID, err := currentTestRunID()
+	if err != nil {
+		return testcontainers.ContainerRequest{}, err
+	}
+	return testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{},
 		Image:          postgresImage,
 		Entrypoint:     nil,
@@ -136,22 +264,7 @@ func setupPostgres(t testReporter) Database {
 			wait.ForExposedPort().WithStartupTimeout(time.Second*180),
 			wait.ForListeningPort(postgresPort).WithStartupTimeout(10*time.Second),
 		).WithDeadline(time.Second * 120),
-	}
-	dbContainer, err := createPostgresContainer(ctx, req)
-	if err != nil {
-		t.Fatalf("start PostgreSQL test container: %v", err)
-		return Database{}
-	}
-	t.Cleanup(func() {
-		reportPostgresTermination(t, dbContainer)
-	})
-
-	database, err := databaseFromContainer(ctx, dbContainer)
-	if err != nil {
-		t.Fatalf("resolve PostgreSQL test container: %v", err)
-		return Database{}
-	}
-	return database
+	}, nil
 }
 
 func currentTestRunID() (string, error) {
