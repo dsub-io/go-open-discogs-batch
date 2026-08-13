@@ -2,8 +2,7 @@ package batch
 
 import (
 	"context"
-	"fmt"
-	"sync"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -22,7 +21,7 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 		name string
 		run  func(*testing.T, string)
 	}{
-		{"overlapping master lock order", runConcurrentReleaseChunksLockOverlappingMastersInOneOrder},
+		{"master backlink reconciliation", runMasterMainReleaseReconciliationConvergesAndRollsBack},
 		{"hash collision idempotency", runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently},
 		{"legacy identity reconciliation", runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows},
 	}
@@ -53,62 +52,98 @@ func resetReleaseRelationDatabase(t *testing.T, dsn string) *gorm.DB {
 	return db
 }
 
-func runConcurrentReleaseChunksLockOverlappingMastersInOneOrder(t *testing.T, dsn string) {
+func runMasterMainReleaseReconciliationConvergesAndRollsBack(t *testing.T, dsn string) {
 	db := resetReleaseRelationDatabase(t, dsn)
 
 	const (
-		firstMasterID int32 = 2_000_000_100
-		masterCount         = 4
-		workerCount         = 4
+		masterA  int32 = 2_000_000_100
+		masterB  int32 = 2_000_000_101
+		masterC  int32 = 2_000_000_102
+		releaseA int32 = 2_000_001_000
+		releaseB int32 = 2_000_001_001
+		releaseC int32 = 2_000_001_002
 	)
 	now := time.Now().UTC()
-	for offset := int32(0); offset < masterCount; offset++ {
-		masterID := firstMasterID + offset
-		cache.MasterIDs.Add(masterID)
-		require.NoError(t, db.Create(&model.Master{
-			ID: masterID, CreatedAt: now, LastModifiedAt: now,
-		}).Error)
-	}
+	require.NoError(t, db.Exec(
+		`INSERT INTO master (id, created_at, last_modified_at)
+		 VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)`,
+		masterA, now, now, masterB, now, now, masterC, now, now,
+	).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO release_item
+		     (id, created_at, last_modified_at, master_id, is_master)
+		 VALUES (?, ?, ?, ?, true), (?, ?, ?, ?, true), (?, ?, ?, null, false)`,
+		releaseA, now, now, masterA,
+		releaseB, now, now, masterC,
+		releaseC, now, now,
+	).Error)
+	order := NewOrder(context.Background(), 1, 1, "unused", db)
 
-	start := make(chan struct{})
-	errorsByWorker := make(chan error, workerCount)
-	var workers sync.WaitGroup
-	for worker := int32(0); worker < workerCount; worker++ {
-		workers.Add(1)
-		go func(workerID int32) {
-			defer workers.Done()
-			items := make([]*XmlReleaseRelation, 0, masterCount)
-			for index := int32(0); index < masterCount; index++ {
-				masterOffset := (index + workerID) % masterCount
-				masterID := firstMasterID + masterOffset
-				releaseID := int32(2_000_001_000) + workerID*masterCount + masterOffset
-				title := fmt.Sprintf("worker-%d-master-%d", workerID, masterOffset)
-				items = append(items, &XmlReleaseRelation{
-					ID: releaseID, Title: &title,
-					MasterInfo: XmlReleaseMasterInfo{MasterID: &masterID, IsMaster: true},
-				})
-			}
-			<-start
-			written := writeReleaseRelationChunk(
-				NewOrder(context.Background(), masterCount, 1, "unused", db),
-				ChunkMetadata{Index: int64(workerID), ItemCount: masterCount},
-				items,
-			)
-			errorsByWorker <- written.Err()
-		}(worker)
-	}
-	close(start)
-	workers.Wait()
-	close(errorsByWorker)
-	for writeError := range errorsByWorker {
-		require.NoError(t, writeError)
-	}
+	first := reconcileMasterMainReleases(order)
+	require.NoError(t, first.Err())
+	require.Equal(t, releaseA, masterMainReleaseID(t, db, masterA))
+	require.Equal(t, releaseB, masterMainReleaseID(t, db, masterC))
 
-	var linkedMasters int64
-	require.NoError(t, db.Model(&model.Master{}).
-		Where("id >= ? and id < ? and main_release_id is not null", firstMasterID, firstMasterID+masterCount).
-		Count(&linkedMasters).Error)
-	require.Equal(t, int64(masterCount), linkedMasters)
+	require.NoError(t, db.Exec(
+		`UPDATE release_item
+		    SET master_id = ?, last_modified_at = ?
+		  WHERE id = ?`,
+		masterB, now.Add(time.Second), releaseA,
+	).Error)
+	require.NoError(t, reconcileMasterMainReleases(order).Err())
+	require.Zero(t, masterMainReleaseID(t, db, masterA))
+	require.Equal(t, releaseA, masterMainReleaseID(t, db, masterB))
+
+	require.NoError(t, db.Exec(
+		`UPDATE release_item
+		    SET is_master = false, last_modified_at = ?
+		  WHERE id = ?`,
+		now.Add(2*time.Second), releaseA,
+	).Error)
+	require.NoError(t, reconcileMasterMainReleases(order).Err())
+	require.Zero(t, masterMainReleaseID(t, db, masterB))
+
+	require.NoError(t, db.Exec(
+		`UPDATE release_item
+		    SET master_id = ?, is_master = true, last_modified_at = ?
+		  WHERE id = ?`,
+		masterC, now.Add(3*time.Second), releaseC,
+	).Error)
+	require.NoError(t, db.Exec(
+		`CREATE FUNCTION reject_release_c_backlink() RETURNS trigger
+		 LANGUAGE plpgsql AS $$
+		 BEGIN
+		   IF NEW.main_release_id = 2000001002 THEN
+		     RAISE EXCEPTION 'rejected release C backlink';
+		   END IF;
+		   RETURN NEW;
+		 END
+		 $$;
+		 CREATE TRIGGER reject_release_c_backlink
+		 BEFORE UPDATE OF main_release_id ON master
+		 FOR EACH ROW EXECUTE FUNCTION reject_release_c_backlink()`,
+	).Error)
+	require.ErrorContains(t, reconcileMasterMainReleases(order).Err(), "rejected release C backlink")
+	require.Equal(t, releaseB, masterMainReleaseID(t, db, masterC))
+	require.NoError(t, db.Exec(
+		`DROP TRIGGER reject_release_c_backlink ON master;
+		 DROP FUNCTION reject_release_c_backlink()`,
+	).Error)
+	require.NoError(t, reconcileMasterMainReleases(order).Err())
+	require.Equal(t, releaseC, masterMainReleaseID(t, db, masterC))
+	require.Zero(t, reconcileMasterMainReleases(order).Count())
+}
+
+func masterMainReleaseID(t *testing.T, db *gorm.DB, masterID int32) int32 {
+	t.Helper()
+	var releaseID sql.NullInt64
+	require.NoError(t, db.Raw(
+		"SELECT main_release_id FROM master WHERE id = ?", masterID,
+	).Scan(&releaseID).Error)
+	if !releaseID.Valid {
+		return 0
+	}
+	return int32(releaseID.Int64)
 }
 
 func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(

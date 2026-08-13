@@ -3,29 +3,71 @@ package batch
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/open-discogs-model/model"
+	"gorm.io/gorm"
 )
 
 const (
-	releaseIdentityColumn = "identity_sha256"
-	releaseMasterLockSQL  = `with candidate_master_ids as (
-	    select unnest(?::integer[]) as id
-	    union
-	    select current.id
-	      from master as current
-	     where current.main_release_id = any(?::integer[])
+	releaseIdentityColumn      = "identity_sha256"
+	releaseMainReleaseClearSQL = `WITH desired AS MATERIALIZED (
+		SELECT DISTINCT ON (release_item.master_id)
+		       release_item.master_id,
+		       release_item.id AS release_id,
+		       release_item.last_modified_at AS observed_at
+		  FROM release_item
+		 WHERE release_item.is_master IS TRUE
+		   AND release_item.master_id IS NOT NULL
+		 ORDER BY release_item.master_id,
+		          release_item.last_modified_at DESC,
+		          release_item.id DESC
+	),
+	stale AS MATERIALIZED (
+		SELECT target.id,
+		       current_release.last_modified_at AS observed_at
+		  FROM master AS target
+		  JOIN release_item AS current_release
+		    ON current_release.id = target.main_release_id
+		  LEFT JOIN desired ON desired.master_id = target.id
+		 WHERE target.main_release_id IS DISTINCT FROM desired.release_id
+		 ORDER BY target.id
+		 FOR UPDATE OF target
 	)
-	select target.id
-	  from master as target
-	  join candidate_master_ids as candidate
-	    on candidate.id = target.id
-	 order by target.id
-	 for update of target`
+	UPDATE master AS target
+	   SET main_release_id = NULL,
+	       last_modified_at = stale.observed_at
+	  FROM stale
+	 WHERE target.id = stale.id`
+	releaseMainReleaseSetSQL = `WITH desired AS MATERIALIZED (
+		SELECT DISTINCT ON (release_item.master_id)
+		       release_item.master_id,
+		       release_item.id AS release_id,
+		       release_item.last_modified_at AS observed_at
+		  FROM release_item
+		 WHERE release_item.is_master IS TRUE
+		   AND release_item.master_id IS NOT NULL
+		 ORDER BY release_item.master_id,
+		          release_item.last_modified_at DESC,
+		          release_item.id DESC
+	),
+	pending AS MATERIALIZED (
+		SELECT target.id,
+		       desired.release_id,
+		       desired.observed_at
+		  FROM desired
+		  JOIN master AS target ON target.id = desired.master_id
+		 WHERE target.main_release_id IS DISTINCT FROM desired.release_id
+		 ORDER BY target.id
+		 FOR UPDATE OF target
+	)
+	UPDATE master AS target
+	   SET main_release_id = pending.release_id,
+	       last_modified_at = pending.observed_at
+	  FROM pending
+	 WHERE target.id = pending.id`
 )
 
 var (
@@ -81,7 +123,7 @@ func GetReleaseStep(order Order) Step {
 }
 
 func insertReleases(order Order) result.Result {
-	return processRelationChunks(
+	return processRelationChunksWithFinalizer(
 		order,
 		"release relations",
 		"release",
@@ -89,6 +131,7 @@ func insertReleases(order Order) result.Result {
 		func(order Order, chunk ChunkMetadata, items []*XmlReleaseRelation) result.Result {
 			return writeReleaseRelationChunk(order, chunk, items)
 		},
+		finalizeReleaseImport,
 	)
 }
 
@@ -193,9 +236,6 @@ func writeReleaseRelationChunk(
 		)
 		if existingRootsError != nil {
 			return result.NewResult(0, existingRootsError)
-		}
-		if lockError := lockReleaseMasterRows(transactionOrder, rootIDs, items); lockError != nil {
-			return result.NewResult(0, lockError)
 		}
 		if referenceResult := writeReferenceEntities(
 			transactionOrder,
@@ -335,7 +375,7 @@ func writeReleaseRelationChunk(
 				return written
 			}
 		}
-		return written.Sum(updateMasterMainReleases(transactionOrder, items, observedAt))
+		return written
 	})
 	if !written.IsErr() {
 		confirmReferenceEntities(genres, styles)
@@ -343,118 +383,35 @@ func writeReleaseRelationChunk(
 	return written
 }
 
-func lockReleaseMasterRows(
-	order Order,
-	releaseIDs []int32,
-	releases []*XmlReleaseRelation,
-) error {
-	if len(releaseIDs) == 0 {
-		return nil
+func finalizeReleaseImport(order Order, totalItems, totalChunks int64) result.Result {
+	reconciled := reconcileMasterMainReleases(order)
+	if reconciled.IsErr() {
+		return reconciled
 	}
-	masterIDs := releaseMasterIDsToLock(releases)
-
-	type lockedMaster struct {
-		ID int32
-	}
-	locked := make([]lockedMaster, 0, len(masterIDs))
-	query := order.getDB().Raw(
-		releaseMasterLockSQL,
-		postgresArray(masterIDs),
-		postgresArray(releaseIDs),
-	).Scan(&locked)
-	if query.Error != nil {
-		return fmt.Errorf("lock release master rows: %w", query.Error)
-	}
-	return nil
-}
-
-func releaseMasterIDsToLock(releases []*XmlReleaseRelation) []int32 {
-	masterIDs := make([]int32, 0, len(releases))
-	for _, release := range releases {
-		if release == nil || !release.MasterInfo.IsMaster || release.MasterInfo.MasterID == nil {
-			continue
-		}
-		masterIDs = append(masterIDs, *release.MasterInfo.MasterID)
-	}
-	masterIDs = deduplicateComparable(masterIDs)
-	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
-	return masterIDs
-}
-
-func updateMasterMainReleases(
-	order Order,
-	releases []*XmlReleaseRelation,
-	observedAt time.Time,
-) result.Result {
-	updates := make(map[int32]int32)
-	releaseIDs := make([]int32, 0, len(releases))
-	for _, release := range releases {
-		if release == nil {
-			continue
-		}
-		releaseIDs = append(releaseIDs, release.ID)
-		if !release.MasterInfo.IsMaster || release.MasterInfo.MasterID == nil {
-			continue
-		}
-		updates[*release.MasterInfo.MasterID] = release.ID
-	}
-	releaseIDs = deduplicateComparable(releaseIDs)
-	mainReleaseIDs := make([]int32, 0, len(updates))
-	for _, releaseID := range updates {
-		mainReleaseIDs = append(mainReleaseIDs, releaseID)
-	}
-	cleared := order.getDB().Exec(
-		`update master
-		    set main_release_id = null,
-		        last_modified_at = ?
-		  where main_release_id = any(?::integer[])
-		    and not (main_release_id = any(?::integer[]))`,
-		observedAt,
-		postgresArray(releaseIDs),
-		postgresArray(mainReleaseIDs),
+	return reconciled.Sum(
+		result.NewResult(0, completeEntityProgress(order, totalItems, totalChunks)),
 	)
-	if cleared.Error != nil {
-		return result.NewResult(0, cleared.Error)
-	}
-	if len(updates) == 0 {
-		return result.NewResult(int(cleared.RowsAffected), nil)
-	}
-
-	masterIDs := make([]int32, 0, len(updates))
-	for masterID := range updates {
-		masterIDs = append(masterIDs, masterID)
-	}
-	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
-
-	updated := int(cleared.RowsAffected)
-	query, arguments := masterMainReleaseUpdateStatement(masterIDs, updates, observedAt)
-	tx := order.getDB().Exec(query, arguments...)
-	if tx.Error != nil {
-		return result.NewResult(updated, tx.Error)
-	}
-	updated += int(tx.RowsAffected)
-	return result.NewResult(updated, nil)
 }
 
-func masterMainReleaseUpdateStatement(
-	masterIDs []int32,
-	updates map[int32]int32,
-	observedAt time.Time,
-) (string, []any) {
-	releaseIDs := make([]int32, len(masterIDs))
-	for index, masterID := range masterIDs {
-		releaseIDs[index] = updates[masterID]
-	}
-	return `UPDATE master AS target
-		SET main_release_id = incoming.release_id,
-			last_modified_at = ?
-		FROM unnest(?::integer[], ?::integer[]) AS incoming(master_id, release_id)
-		WHERE target.id = incoming.master_id
-			AND target.main_release_id IS DISTINCT FROM incoming.release_id`, []any{
-			observedAt,
-			postgresArray(masterIDs),
-			postgresArray(releaseIDs),
+// Historical roots are retained, so the newest observed main root wins; release ID breaks ties.
+func reconcileMasterMainReleases(order Order) result.Result {
+	written := result.NewResult(0, nil)
+	err := order.getDB().WithContext(order.getContext()).Transaction(func(tx *gorm.DB) error {
+		cleared := tx.Exec(releaseMainReleaseClearSQL)
+		if cleared.Error != nil {
+			return fmt.Errorf("clear stale master main releases: %w", cleared.Error)
 		}
+		set := tx.Exec(releaseMainReleaseSetSQL)
+		if set.Error != nil {
+			return fmt.Errorf("set current master main releases: %w", set.Error)
+		}
+		written = result.NewResult(int(cleared.RowsAffected+set.RowsAffected), nil)
+		return nil
+	})
+	if err != nil {
+		return result.NewResult(0, err)
+	}
+	return written
 }
 
 func filterGenres(genres []*model.Genre) []*model.Genre {

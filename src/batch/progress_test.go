@@ -21,6 +21,8 @@ const (
 	progressCompletionFailureTrigger  = "fail_import_completion_trigger"
 	progressTransferFailureFunction   = "fail_import_progress_transfer"
 	progressTransferFailureTrigger    = "fail_import_progress_transfer_trigger"
+	progressBacklinkFailureFunction   = "fail_master_backlink_reconciliation"
+	progressBacklinkFailureTrigger    = "fail_master_backlink_reconciliation_trigger"
 	intentionalChunkFailure           = "intentional chunk failure"
 	chunkSynchronizationTimeout       = 10 * time.Second
 )
@@ -35,6 +37,7 @@ func TestProgressDurability(t *testing.T) {
 		{"failed run fencing", runFailedRunRejectsLateChunkAndEntityCompletion},
 		{"out-of-order resume", runImportResumesOutOfOrderChunks},
 		{"completion failure resume", runImportCompletionFailureRemainsResumable},
+		{"release backlink failure resume", runReleaseBacklinkFailureRemainsResumable},
 		{"atomic admission transfer", runResumeAdmissionTransferIsAtomic},
 		{"completed entity skip", runMultiEntityResumeSkipsCompletedEntity},
 		{"expanded manifest convergence", runReleaseInterruptionConvergesWhenManifestExpands},
@@ -320,6 +323,89 @@ func runImportCompletionFailureRemainsResumable(t *testing.T, dsn string) {
 	))
 	require.NoError(t, retried.Err())
 	require.Zero(t, retried.Count())
+	require.NoError(t, retry.Complete(ctx, nil))
+}
+
+func runReleaseBacklinkFailureRemainsResumable(t *testing.T, dsn string) {
+	const (
+		chunkSize  = 1
+		maxWorkers = 2
+		entityType = "release"
+	)
+	ctx := context.Background()
+	db := resetProgressDatabase(t, dsn)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+
+	cache.ResetIDs()
+	for _, seed := range []struct {
+		path string
+		step func(Order) Step
+	}{
+		{path: "testdata/artist.xml.gz", step: newBatch().UpdateArtist},
+		{path: "testdata/label.xml.gz", step: newBatch().UpdateLabel},
+		{path: "testdata/master.xml.gz", step: newBatch().UpdateMaster},
+	} {
+		seedResult := seed.step(NewOrder(ctx, chunkSize, maxWorkers, seed.path, db))()
+		require.NoError(t, seedResult.Err())
+	}
+
+	dumps := []*model.DiscogsDump{
+		importDump(entityType, "2026-07-01", "c"),
+	}
+	coordinator := NewImportExecutionCoordinator(sqlDB, "backlink-failure-test")
+	preparation, err := coordinator.Prepare(ctx, dumps, chunkSize, false, false)
+	require.NoError(t, err)
+	installBacklinkFailure(t, db)
+	failed := insertReleases(NewTrackedOrder(
+		ctx,
+		chunkSize,
+		maxWorkers,
+		"testdata/release.xml.gz",
+		db,
+		preparation.RunID,
+		entityType,
+		false,
+	))
+	require.ErrorContains(t, failed.Err(), "intentional backlink reconciliation failure")
+	require.ElementsMatch(
+		t,
+		[]int64{0, 1, 2},
+		completedChunkIndexes(t, db, preparation.RunID, entityType),
+	)
+	assertEntityIncomplete(t, db, preparation.RunID, entityType)
+	require.Zero(t, masterMainReleaseID(t, db, 1))
+	require.Zero(t, masterMainReleaseID(t, db, 2))
+	require.NoError(t, coordinator.Complete(ctx, failed.Err()))
+	removeBacklinkFailure(t, db)
+
+	retry := NewImportExecutionCoordinator(sqlDB, "backlink-failure-test")
+	retryPreparation, err := retry.Prepare(ctx, dumps, chunkSize, false, false)
+	require.NoError(t, err)
+	require.Equal(t, preparation.RunID, retryPreparation.ResumedFromRunID)
+	retried := processRelationChunksWithFinalizer(
+		NewTrackedOrder(
+			ctx,
+			chunkSize,
+			maxWorkers,
+			"testdata/release.xml.gz",
+			db,
+			retryPreparation.RunID,
+			entityType,
+			true,
+		),
+		"release relations",
+		"release",
+		"source-read release relations",
+		func(Order, ChunkMetadata, []*XmlReleaseRelation) result.Result {
+			return result.NewResult(0, errors.New("committed release chunk was rewritten"))
+		},
+		finalizeReleaseImport,
+	)
+	require.NoError(t, retried.Err())
+	require.Equal(t, int32(1), masterMainReleaseID(t, db, 1))
+	require.Equal(t, int32(2), masterMainReleaseID(t, db, 2))
+	assertCompletedRunSummary(t, db, retryPreparation.RunID, entityType, 3, 3)
 	require.NoError(t, retry.Complete(ctx, nil))
 }
 
@@ -663,6 +749,55 @@ func removeCompletionFailure(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.Exec(
 		"drop function if exists public."+progressCompletionFailureFunction+"()",
 	).Error)
+}
+
+func installBacklinkFailure(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+		create or replace function public.fail_master_backlink_reconciliation()
+		returns trigger
+		language plpgsql
+		as $function$
+		begin
+		    raise exception 'intentional backlink reconciliation failure';
+		end
+		$function$;
+
+		create trigger fail_master_backlink_reconciliation_trigger
+		before update of main_release_id on public.master
+		for each row execute function public.fail_master_backlink_reconciliation();`).Error)
+	t.Cleanup(func() {
+		removeBacklinkFailure(t, db)
+	})
+}
+
+func removeBacklinkFailure(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		"drop trigger if exists "+progressBacklinkFailureTrigger+" on public.master",
+	).Error)
+	require.NoError(t, db.Exec(
+		"drop function if exists public."+progressBacklinkFailureFunction+"()",
+	).Error)
+}
+
+func assertEntityIncomplete(
+	t *testing.T,
+	db *gorm.DB,
+	runID int64,
+	entityType string,
+) {
+	t.Helper()
+	var completed bool
+	require.NoError(t, db.Raw(
+		`select completed_at is not null
+		   from public.discogs_import_run_dump
+		  where import_run_id = ?
+		    and entity_type = ?`,
+		runID,
+		entityType,
+	).Scan(&completed).Error)
+	require.False(t, completed)
 }
 
 func installTransferFailure(t *testing.T, db *gorm.DB) {

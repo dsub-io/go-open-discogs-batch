@@ -394,7 +394,7 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 	run(t, false, nil, func(order Order) result.Result {
 		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{nil})
 	})
-	run(t, true, nil, func(order Order) result.Result {
+	run(t, false, nil, func(order Order) result.Result {
 		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{nil})
 	})
 
@@ -406,7 +406,6 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 	})
 	run(t, true, func(mock sqlmock.Sqlmock) {
 		expectExistingRelationRoots(mock, releaseArtistRelation.table)
-		expectReleaseMasterLock(mock)
 	}, func(order Order) result.Result {
 		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}})
 	})
@@ -493,57 +492,52 @@ func TestConfirmedReferenceEntitiesAreNotSentToPostgreSQLAgain(t *testing.T) {
 
 func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	expected := errors.New("fixture")
-	poisonedDB := poisonedGorm(t, expected)
-	releaseID := int32(1)
-	require.ErrorIs(t, lockReleaseMasterRows(
-		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
-		[]int32{releaseID},
-		[]*XmlReleaseRelation{{ID: releaseID}, nil},
-	), expected)
-	mockDB, mock, _ := newMockGorm(t)
+	db, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
-	expectExistingRelationRoots(mock, releaseArtistRelation.table)
-	mock.ExpectQuery("select target.id").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnError(expected)
+	mock.ExpectExec("WITH desired").WillReturnError(expected)
 	mock.ExpectRollback()
-	require.ErrorIs(t, writeReleaseRelationChunk(
-		NewOrder(context.Background(), 1, 1, "unused", mockDB),
-		ChunkMetadata{},
-		[]*XmlReleaseRelation{{ID: releaseID}},
-	).Err(), expected)
-	actual := updateMasterMainReleases(
-		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
-		[]*XmlReleaseRelation{nil},
-		time.Unix(1, 0).UTC(),
+	actual := reconcileMasterMainReleases(
+		NewOrder(context.Background(), 1, 1, "unused", db),
 	)
 	require.ErrorIs(t, actual.Err(), expected)
 	require.Empty(t, filterGenres([]*opendiscogsmodel.Genre{{Name: " "}}))
 	require.Empty(t, filterStyles([]*opendiscogsmodel.Style{{Name: " "}}))
 
-	db, mock, _ := newMockGorm(t)
-	mock.ExpectExec("update master").
+	db, mock, _ = newMockGorm(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("WITH desired").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE master AS target").
+	mock.ExpectExec("WITH desired").
 		WillReturnError(expected)
-	masterID := int32(1)
-	actual = updateMasterMainReleases(
+	mock.ExpectRollback()
+	actual = reconcileMasterMainReleases(
 		NewOrder(context.Background(), 1, 1, "unused", db),
-		[]*XmlReleaseRelation{{
-			ID:         2,
-			MasterInfo: XmlReleaseMasterInfo{MasterID: &masterID, IsMaster: true},
-		}},
-		time.Unix(1, 0).UTC(),
 	)
 	require.ErrorIs(t, actual.Err(), expected)
+
+	db, mock, _ = newMockGorm(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("WITH desired").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec("WITH desired").
+		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectCommit()
+	actual = finalizeReleaseImport(
+		NewOrder(context.Background(), 1, 1, "unused", db),
+		5,
+		2,
+	)
+	require.NoError(t, actual.Err())
+	require.Equal(t, 5, actual.Count())
 }
 
-func TestReleaseMasterLockUsesIndexedCandidateSets(t *testing.T) {
-	require.Contains(t, releaseMasterLockSQL, "with candidate_master_ids")
-	require.Contains(t, releaseMasterLockSQL, "current.main_release_id = any")
-	require.NotContains(t, releaseMasterLockSQL, "release_item")
-	require.NotContains(t, releaseMasterLockSQL, "where target.id = any")
-	require.NotContains(t, releaseMasterLockSQL, " or ")
+func TestReleaseMasterReconciliationUsesFixedSetStatements(t *testing.T) {
+	require.Contains(t, releaseMainReleaseClearSQL, "FOR UPDATE OF target")
+	require.Contains(t, releaseMainReleaseSetSQL, "FOR UPDATE OF target")
+	require.Contains(t, releaseMainReleaseClearSQL, "main_release_id = NULL")
+	require.Contains(t, releaseMainReleaseSetSQL, "main_release_id = pending.release_id")
+	require.NotContains(t, releaseMainReleaseClearSQL, "VALUES")
+	require.NotContains(t, releaseMainReleaseSetSQL, "VALUES")
 }
 
 func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
@@ -555,15 +549,15 @@ func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
 	expected := errors.New("fixture")
 
 	writes := []struct {
-		prepare func(sqlmock.Sqlmock)
-		write   func(Order) result.Result
+		table string
+		write func(Order) result.Result
 	}{
-		{write: func(order Order) result.Result {
+		{table: masterArtistRelation.table, write: func(order Order) result.Result {
 			return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{
 				ID: 1, Genres: []string{"genre"},
 			}})
 		}},
-		{prepare: expectReleaseMasterLock, write: func(order Order) result.Result {
+		{table: releaseArtistRelation.table, write: func(order Order) result.Result {
 			return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{
 				ID: 1, Genres: []string{"genre"},
 			}})
@@ -572,25 +566,12 @@ func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
 	for _, fixture := range writes {
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
-		if fixture.prepare == nil {
-			expectExistingRelationRoots(mock, masterArtistRelation.table)
-		} else {
-			expectExistingRelationRoots(mock, releaseArtistRelation.table)
-		}
-		if fixture.prepare != nil {
-			fixture.prepare(mock)
-		}
+		expectExistingRelationRoots(mock, fixture.table)
 		mock.ExpectExec(`INSERT INTO .*genre`).WithArgs("genre").WillReturnError(expected)
 		mock.ExpectRollback()
 		require.ErrorIs(t, fixture.write(NewOrder(context.Background(), 1, 1, "unused", db)).Err(), expected)
 		require.False(t, cache.GenreNames.Contains("genre"))
 	}
-}
-
-func expectReleaseMasterLock(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery("select target.id").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 }
 
 func TestLabelSubLabelReconcileAccessors(t *testing.T) {

@@ -58,19 +58,18 @@ PostgreSQL advisory locks cover selected entities and their references:
 | Master | Artist, Master |
 | Release | Artist, Label, Master, Release |
 
-Release takes all locks because it also updates `master.main_release_id`.
+Release takes all locks because its post-chunk finalizer updates
+`master.main_release_id`.
 Independent sets such as Artist and Label may run together; overlapping Go and
 Java imports cannot write concurrently. Schema migration takes the same shared
 lock family, so migration cannot race an active importer.
 
-Concurrent Release chunks may touch the same Master when a main release changes
-or when several releases for one Master cross chunk boundaries. Each chunk
-therefore locks every affected Master row in ascending ID order before writing
-Release roots or reconciling `main_release_id`. This database lock order is
-independent of XML and worker scheduling order. Candidate IDs are collected by
-three indexed lookups and then joined to `master`; do not combine those paths
-with `OR` in the locking query because PostgreSQL may scan the entire Master
-table once per worker.
+Release chunks never update Master backlinks. After every Release chunk has
+committed, one fixed set-based finalizer derives the desired backlink from
+`release_item`, locks changed Master rows in ascending ID order, clears stale
+links, and assigns current links in one transaction. The newest observed main
+Release wins; Release ID breaks timestamp ties. The Release entity is marked
+complete only after this transaction succeeds.
 
 A partial Master or Release import is admitted only when each omitted reference
 entity has a compatible completed checkpoint at the current import contract
@@ -86,6 +85,11 @@ For each tracked chunk, one PostgreSQL transaction contains:
 - canonical root rows and each root's exact supported relation set;
 - the committed-chunk ledger entry;
 - the processed-item counter.
+
+Release backlink reconciliation is a separate transaction after all chunks.
+Its clear and assign statements commit together. If it fails, committed chunks
+and their ledger remain resumable, the Release entity stays incomplete, and a
+retry skips those chunks and reruns finalization.
 
 The model v0.3.1 import contract is part of resume and success compatibility.
 An older successful Release contract cannot suppress the corrected Release

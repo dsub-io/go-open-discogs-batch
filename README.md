@@ -42,8 +42,8 @@ otherwise discovery performs the bounded request sequence documented in
 | --- | --- |
 | Source | Monthly public dumps only; no Discogs API, live hydration, or user writes |
 | Memory | Dumps are decompressed and parsed as streams; the full dump is never held in memory |
-| Commit | A root, its supported relations, and durable chunk progress commit atomically |
-| Retry | Compatible interrupted runs resume verified chunks; `--force` restarts the same manifest from zero |
+| Commit | A root, its supported relations, and durable chunk progress commit atomically; Release backlinks reconcile once after all chunks |
+| Retry | Compatible interrupted runs resume verified chunks and rerun pending finalization; `--force` restarts the same manifest from zero |
 | Convergence | Supported missing relations are removed; roots absent from a newer dump are not deleted |
 | Visibility | Readers can observe committed chunks; a complete monthly import is not an atomic snapshot switch |
 | Files | Failed-run downloads remain; `--cleanup` removes only this run's selected files after success |

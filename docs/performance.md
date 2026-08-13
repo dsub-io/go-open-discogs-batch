@@ -12,14 +12,26 @@ against canonical `open-discogs-model` v0.3.1.
 | Reference ID cache | 25.4× lower median time; 99.88% fewer allocated bytes | 1,000,000 sequential IDs |
 | Durable import contract | Higher fixed latency and allocation | 12-record PostgreSQL fixture |
 | Successful-manifest preflight | 95.4% lower p50; avoided 64 MiB file I/O | Cached sparse file |
-| Release Master lock order | Prevented deadlock in 10/10 concurrent regression runs | 4 writers × 4 overlapping Masters |
-| Release Master lock candidates | 161 s observed maximum to 158.144 ms; about 1,018× faster | One real 5,000-Release production chunk |
+| Historical Release Master lock order | Prevented deadlock in 10/10 concurrent regression runs | Superseded per-chunk path; 4 writers × 4 overlapping Masters |
+| Historical Release Master lock candidates | 161 s observed maximum to 158.144 ms; about 1,018× faster | Superseded per-chunk path; one real 5,000-Release production chunk |
 | Format quantity parser | 89.3–95.0% lower median time; up to 100% fewer allocations | Typical and 52-digit values |
 
 Do not compare rows across these harnesses. Their inputs, paths, and units are
 different.
 
-## Release Master lock order
+## Current Release backlink finalization
+
+Release chunks no longer query or update `master.main_release_id`. One fixed
+set-based reconciliation runs after every Release chunk has committed, and
+entity completion follows only after that transaction succeeds. PostgreSQL
+contract tests cover assignment, movement, clearing, deterministic winner
+selection, rollback, idempotent retry, and skipping already committed chunks.
+
+The controlled full-dump before/after latency, throughput, memory, query-plan,
+lock, and WAL measurements belong to the final performance gate and are not yet
+reported here.
+
+## Historical Release Master lock order
 
 A production-like 2026-08 import with `chunk-size=5000` and `max-workers=4`
 exposed a PostgreSQL deadlock after one Release chunk had committed. The server
@@ -37,7 +49,7 @@ correctness result rather than a latency or throughput improvement claim. A
 successful full-dump retry is required before reporting end-to-end throughput,
 latency distribution, or RSS.
 
-## Release Master lock candidates
+## Historical Release Master lock candidates
 
 The first production retry exposed a separate problem in the ordered lock
 query. A predicate combining target IDs, current main-release IDs, and an
@@ -65,6 +77,10 @@ same-run before/after RSS comparison are unavailable. The after measurement
 ran once inside a rolled-back transaction after refreshing planner statistics
 and applying production PostgreSQL limits. Full-import throughput and steady
 state RSS remain to be measured during the next import.
+
+Both historical sections describe the removed per-chunk backlink path. Their
+numbers remain as incident evidence and are not measurements of the current
+post-chunk finalizer.
 
 ## Reference ID cache
 

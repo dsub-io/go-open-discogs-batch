@@ -12,6 +12,7 @@ import (
 )
 
 type relationChunkWriter[T any] func(Order, ChunkMetadata, []*T) result.Result
+type relationFinalizer func(Order, int64, int64) result.Result
 
 type sourceErrorRecorder struct {
 	mu  sync.Mutex
@@ -43,6 +44,24 @@ func processRelationChunks[T any](
 	localName string,
 	progressText string,
 	writeRelationChunk relationChunkWriter[T],
+) result.Result {
+	return processRelationChunksWithFinalizer(
+		order,
+		topic,
+		localName,
+		progressText,
+		writeRelationChunk,
+		completeRelationImport,
+	)
+}
+
+func processRelationChunksWithFinalizer[T any](
+	order Order,
+	topic string,
+	localName string,
+	progressText string,
+	writeRelationChunk relationChunkWriter[T],
+	finalize relationFinalizer,
 ) result.Result {
 	reporter := newEntityProgressReporter(order)
 	reporter.Start()
@@ -121,14 +140,16 @@ func processRelationChunks[T any](
 	}
 	sum = mergeSourceError(sum, sourceErrors.get())
 	if !sum.IsErr() {
-		if progressErr := completeEntityProgress(order, totalItems, totalChunks); progressErr != nil {
-			sum = sum.Sum(result.NewResult(0, progressErr))
-		}
+		sum = sum.Sum(finalize(order, totalItems, totalChunks))
 	}
 	reporter.Finish(!sum.IsErr())
 
 	fmt.Printf("\nUpdated %+v %s\n", sum.Count(), topic)
 	return sum
+}
+
+func completeRelationImport(order Order, totalItems, totalChunks int64) result.Result {
+	return result.NewResult(0, completeEntityProgress(order, totalItems, totalChunks))
 }
 
 func mergeSourceError(sum result.Result, sourceErr error) result.Result {
