@@ -270,7 +270,7 @@ func writeReleaseRelationChunk(
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.ArtistID },
 					func(item *model.ReleaseItemCreditedArtist) int32 { return item.Hash },
-					func(item *model.ReleaseItemCreditedArtist) []byte { return item.IdentitySHA256 },
+					func(item *model.ReleaseItemCreditedArtist) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
@@ -283,7 +283,7 @@ func writeReleaseRelationChunk(
 					func(item *model.ReleaseItemWork) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemWork) int32 { return item.LabelID },
 					func(item *model.ReleaseItemWork) int32 { return item.Hash },
-					func(item *model.ReleaseItemWork) []byte { return item.IdentitySHA256 },
+					func(item *model.ReleaseItemWork) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
@@ -329,7 +329,7 @@ func writeReleaseRelationChunk(
 					formats,
 					func(item *model.ReleaseItemFormat) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemFormat) int32 { return item.Hash },
-					func(item *model.ReleaseItemFormat) []byte { return item.IdentitySHA256 },
+					func(item *model.ReleaseItemFormat) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
@@ -341,7 +341,7 @@ func writeReleaseRelationChunk(
 					identifiers,
 					func(item *model.ReleaseItemIdentifier) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemIdentifier) int32 { return item.Hash },
-					func(item *model.ReleaseItemIdentifier) []byte { return item.IdentitySHA256 },
+					func(item *model.ReleaseItemIdentifier) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
@@ -353,7 +353,7 @@ func writeReleaseRelationChunk(
 					tracks,
 					func(item *model.ReleaseItemTrack) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemTrack) int32 { return item.Hash },
-					func(item *model.ReleaseItemTrack) []byte { return item.IdentitySHA256 },
+					func(item *model.ReleaseItemTrack) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 			func() result.Result {
@@ -365,7 +365,7 @@ func writeReleaseRelationChunk(
 					videos,
 					func(item *model.ReleaseItemVideo) int32 { return item.ReleaseItemID },
 					func(item *model.ReleaseItemVideo) int32 { return item.Hash },
-					func(item *model.ReleaseItemVideo) []byte { return item.IdentitySHA256 },
+					func(item *model.ReleaseItemVideo) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 		}

@@ -1030,10 +1030,12 @@ func TestGormErrorPropagationBoundaries(t *testing.T) {
 		digestIntegerRelation{table: "fixture", parentColumn: "parent", keyColumn: "key", identityColumn: "identity"},
 		true,
 		[]int32{1},
-		[]*opendiscogsmodel.ReleaseItemIdentifier{{ReleaseItemID: 1, Hash: 2, IdentitySHA256: make([]byte, 32)}},
+		[]*opendiscogsmodel.ReleaseItemIdentifier{{ReleaseItemID: 1, Hash: 2, IdentitySHA256: &opendiscogsmodel.SHA256Digest{}}},
 		func(item *opendiscogsmodel.ReleaseItemIdentifier) int32 { return item.ReleaseItemID },
 		func(item *opendiscogsmodel.ReleaseItemIdentifier) int32 { return item.Hash },
-		func(item *opendiscogsmodel.ReleaseItemIdentifier) []byte { return item.IdentitySHA256 },
+		func(item *opendiscogsmodel.ReleaseItemIdentifier) *opendiscogsmodel.SHA256Digest {
+			return item.IdentitySHA256
+		},
 	).Err(), expected)
 	require.ErrorIs(t, reconcileTwoIntegerKeyRelation(
 		order,
@@ -1054,12 +1056,15 @@ func TestGormErrorPropagationBoundaries(t *testing.T) {
 		true,
 		[]int32{1},
 		[]*opendiscogsmodel.ReleaseItemCreditedArtist{{
-			ReleaseItemID: 1, ArtistID: 2, Hash: 3, IdentitySHA256: make([]byte, 32),
+			ReleaseItemID: 1, ArtistID: 2, Hash: 3,
+			IdentitySHA256: &opendiscogsmodel.SHA256Digest{},
 		}},
 		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.ReleaseItemID },
 		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.ArtistID },
 		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.Hash },
-		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) []byte { return item.IdentitySHA256 },
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) *opendiscogsmodel.SHA256Digest {
+			return item.IdentitySHA256
+		},
 	).Err(), expected)
 	_, err := findExistingRelationRoots(
 		order,

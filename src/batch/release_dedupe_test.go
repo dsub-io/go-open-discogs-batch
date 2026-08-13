@@ -373,7 +373,7 @@ func TestReleaseRelationBatchAllocatesCollisionSafeStorageSlots(t *testing.T) {
 				})
 				return hashedRowsResult(rows, err,
 					func(row *model.ReleaseItemCreditedArtist) int32 { return row.Hash },
-					func(row *model.ReleaseItemCreditedArtist) []byte { return row.IdentitySHA256 })
+					func(row *model.ReleaseItemCreditedArtist) *model.SHA256Digest { return row.IdentitySHA256 })
 			},
 		},
 		{
@@ -385,7 +385,7 @@ func TestReleaseRelationBatchAllocatesCollisionSafeStorageSlots(t *testing.T) {
 				})
 				return hashedRowsResult(rows, err,
 					func(row *model.ReleaseItemWork) int32 { return row.Hash },
-					func(row *model.ReleaseItemWork) []byte { return row.IdentitySHA256 })
+					func(row *model.ReleaseItemWork) *model.SHA256Digest { return row.IdentitySHA256 })
 			},
 		},
 		{
@@ -397,7 +397,7 @@ func TestReleaseRelationBatchAllocatesCollisionSafeStorageSlots(t *testing.T) {
 				})
 				return hashedRowsResult(rows, err,
 					func(row *model.ReleaseItemFormat) int32 { return row.Hash },
-					func(row *model.ReleaseItemFormat) []byte { return row.IdentitySHA256 })
+					func(row *model.ReleaseItemFormat) *model.SHA256Digest { return row.IdentitySHA256 })
 			},
 		},
 		{
@@ -409,7 +409,7 @@ func TestReleaseRelationBatchAllocatesCollisionSafeStorageSlots(t *testing.T) {
 				})
 				return hashedRowsResult(rows, err,
 					func(row *model.ReleaseItemIdentifier) int32 { return row.Hash },
-					func(row *model.ReleaseItemIdentifier) []byte { return row.IdentitySHA256 })
+					func(row *model.ReleaseItemIdentifier) *model.SHA256Digest { return row.IdentitySHA256 })
 			},
 		},
 		{
@@ -421,7 +421,7 @@ func TestReleaseRelationBatchAllocatesCollisionSafeStorageSlots(t *testing.T) {
 				})
 				return hashedRowsResult(rows, err,
 					func(row *model.ReleaseItemTrack) int32 { return row.Hash },
-					func(row *model.ReleaseItemTrack) []byte { return row.IdentitySHA256 })
+					func(row *model.ReleaseItemTrack) *model.SHA256Digest { return row.IdentitySHA256 })
 			},
 		},
 		{
@@ -433,7 +433,7 @@ func TestReleaseRelationBatchAllocatesCollisionSafeStorageSlots(t *testing.T) {
 				})
 				return hashedRowsResult(rows, err,
 					func(row *model.ReleaseItemVideo) int32 { return row.Hash },
-					func(row *model.ReleaseItemVideo) []byte { return row.IdentitySHA256 })
+					func(row *model.ReleaseItemVideo) *model.SHA256Digest { return row.IdentitySHA256 })
 			},
 		},
 	}
@@ -462,7 +462,7 @@ func hashedRowsResult[T any](
 	rows []*T,
 	err error,
 	hash func(*T) int32,
-	identity func(*T) []byte,
+	identity func(*T) *model.SHA256Digest,
 ) ([]int32, [][]byte, error) {
 	if err != nil {
 		return nil, nil, err
@@ -471,7 +471,7 @@ func hashedRowsResult[T any](
 	identities := make([][]byte, 0, len(rows))
 	for _, row := range rows {
 		hashes = append(hashes, hash(row))
-		identities = append(identities, identity(row))
+		identities = append(identities, identity(row).Bytes())
 	}
 	return hashes, identities, nil
 }

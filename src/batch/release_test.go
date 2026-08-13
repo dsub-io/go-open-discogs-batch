@@ -89,7 +89,8 @@ func TestReleaseFormatQuantityPreservesOversizedDiscogsValue(t *testing.T) {
 	require.Equal(t, oversizedReleaseFormatQuantity, *formats[0].QuantityText)
 	deduplicated, err := deduplicateReleaseFormats(formats)
 	require.NoError(t, err)
-	require.Len(t, deduplicated[0].IdentitySHA256, 32)
+	require.NotNil(t, deduplicated[0].IdentitySHA256)
+	require.Len(t, deduplicated[0].IdentitySHA256.Bytes(), 32)
 }
 
 func TestReleaseFormatQuantityCanonicalizesAndRejectsInvalidValues(t *testing.T) {

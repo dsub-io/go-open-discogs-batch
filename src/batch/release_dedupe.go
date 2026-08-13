@@ -77,7 +77,7 @@ func deduplicateReleaseCreditedArtists(
 		},
 		func(row *model.ReleaseItemCreditedArtist, hash int32, digest relationidentity.Digest) {
 			row.Hash = hash
-			row.IdentitySHA256 = digest.Bytes()
+			row.IdentitySHA256 = modelIdentityDigest(digest)
 		},
 	)
 }
@@ -104,7 +104,7 @@ func deduplicateReleaseWorks(
 		},
 		func(row *model.ReleaseItemWork, hash int32, digest relationidentity.Digest) {
 			row.Hash = hash
-			row.IdentitySHA256 = digest.Bytes()
+			row.IdentitySHA256 = modelIdentityDigest(digest)
 		},
 	)
 }
@@ -189,7 +189,7 @@ func deduplicateReleaseFormats(
 		},
 		func(row *model.ReleaseItemFormat, hash int32, digest relationidentity.Digest) {
 			row.Hash = hash
-			row.IdentitySHA256 = digest.Bytes()
+			row.IdentitySHA256 = modelIdentityDigest(digest)
 		},
 	)
 }
@@ -280,7 +280,7 @@ func deduplicateReleaseIdentifiers(
 		},
 		func(row *model.ReleaseItemIdentifier, hash int32, digest relationidentity.Digest) {
 			row.Hash = hash
-			row.IdentitySHA256 = digest.Bytes()
+			row.IdentitySHA256 = modelIdentityDigest(digest)
 		},
 	)
 }
@@ -326,7 +326,7 @@ func deduplicateReleaseTracks(
 		},
 		func(row *model.ReleaseItemTrack, hash int32, digest relationidentity.Digest) {
 			row.Hash = hash
-			row.IdentitySHA256 = digest.Bytes()
+			row.IdentitySHA256 = modelIdentityDigest(digest)
 		},
 	)
 }
@@ -357,9 +357,14 @@ func deduplicateReleaseVideos(
 		},
 		func(row *model.ReleaseItemVideo, hash int32, digest relationidentity.Digest) {
 			row.Hash = hash
-			row.IdentitySHA256 = digest.Bytes()
+			row.IdentitySHA256 = modelIdentityDigest(digest)
 		},
 	)
+}
+
+func modelIdentityDigest(digest relationidentity.Digest) *model.SHA256Digest {
+	value := model.SHA256Digest(digest)
+	return &value
 }
 
 type hashedReleaseRow[T any] struct {

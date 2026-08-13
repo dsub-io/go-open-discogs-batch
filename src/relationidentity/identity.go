@@ -22,6 +22,7 @@ const (
 	CreditedArtist Relation = "credited_artist"
 	Format         Relation = "format"
 	Identifier     Relation = "identifier"
+	Image          Relation = "image"
 	Track          Relation = "track"
 	Video          Relation = "video"
 	Work           Relation = "work"

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -150,7 +151,7 @@ func reconcileDigestIntegerRelation[T any](
 	incoming []T,
 	parentID func(T) int32,
 	key func(T) int32,
-	identity func(T) []byte,
+	identity func(T) *model.SHA256Digest,
 ) result.Result {
 	if !deleteStale {
 		return doWrite(incoming, order.getChunkSize(), order.getDB())
@@ -161,7 +162,7 @@ func reconcileDigestIntegerRelation[T any](
 	for _, item := range incoming {
 		parents = append(parents, parentID(item))
 		keys = append(keys, key(item))
-		identities = append(identities, identity(item))
+		identities = append(identities, identity(item).Bytes())
 	}
 	deleted := order.getDB().Exec(
 		fmt.Sprintf(
@@ -297,7 +298,7 @@ func reconcileDigestTwoIntegerKeyRelation[T any](
 	parentID func(T) int32,
 	firstKey func(T) int32,
 	secondKey func(T) int32,
-	identity func(T) []byte,
+	identity func(T) *model.SHA256Digest,
 ) result.Result {
 	if !deleteStale {
 		return doWrite(incoming, order.getChunkSize(), order.getDB())
@@ -310,7 +311,7 @@ func reconcileDigestTwoIntegerKeyRelation[T any](
 		parents = append(parents, parentID(item))
 		firstKeys = append(firstKeys, firstKey(item))
 		secondKeys = append(secondKeys, secondKey(item))
-		identities = append(identities, identity(item))
+		identities = append(identities, identity(item).Bytes())
 	}
 	deleted := order.getDB().Exec(
 		fmt.Sprintf(
