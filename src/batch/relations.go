@@ -14,6 +14,17 @@ import (
 type relationChunkWriter[T any] func(Order, ChunkMetadata, []*T) result.Result
 type relationFinalizer func(Order, int64, int64) result.Result
 
+func reconcileRelations(reconcile []func() result.Result) result.Result {
+	written := result.NewResult(0, nil)
+	for _, reconcileRelation := range reconcile {
+		written = written.Sum(reconcileRelation())
+		if written.IsErr() {
+			return written
+		}
+	}
+	return written
+}
+
 type sourceErrorRecorder struct {
 	mu  sync.Mutex
 	err error

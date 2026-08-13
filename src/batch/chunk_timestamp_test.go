@@ -37,6 +37,13 @@ func TestSimpleSourceChunkHonorsCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestSimpleSourceChunkSkipsNilTransformResults(t *testing.T) {
+	transform := transformSourceChunk(func(*XmlArtist, time.Time) *model.Artist { return nil })
+	value, err := transform(context.Background(), []*XmlArtist{{ID: 1}})
+	require.NoError(t, err)
+	require.Empty(t, value)
+}
+
 func TestRelationRowsUseSourceObservedAt(t *testing.T) {
 	observedAt := time.Unix(123, 0).UTC()
 	artist := &XmlArtistRelation{

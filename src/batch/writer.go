@@ -15,10 +15,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func writeChunk(order Order, slices ...interface{}) result.Result {
-	return NewWriter(order.getDB()).Write(order.getChunkSize(), slices...)
-}
-
 func writeReferenceEntities(
 	order Order,
 	genres []*model.Genre,
@@ -85,7 +81,7 @@ type modelWriteMetadata struct {
 }
 
 var modelWriteMetadataCache = struct {
-	sync.RWMutex
+	sync.Mutex
 	values map[reflect.Type]modelWriteMetadata
 }{values: make(map[reflect.Type]modelWriteMetadata)}
 
@@ -238,16 +234,10 @@ func doWrite[T any](items []T, chunkSize int, db *gorm.DB) result.Result {
 
 func writeMetadataFor[T any](item T, db *gorm.DB) (modelWriteMetadata, error) {
 	modelType := reflect.TypeOf(item)
-	modelWriteMetadataCache.RLock()
-	metadata, exists := modelWriteMetadataCache.values[modelType]
-	modelWriteMetadataCache.RUnlock()
-	if exists {
-		return metadata, nil
-	}
-
 	modelWriteMetadataCache.Lock()
 	defer modelWriteMetadataCache.Unlock()
-	if metadata, exists = modelWriteMetadataCache.values[modelType]; exists {
+	metadata, exists := cachedWriteMetadata(modelType)
+	if exists {
 		return metadata, nil
 	}
 	statement := &gorm.Statement{DB: db}
@@ -260,6 +250,11 @@ func writeMetadataFor[T any](item T, db *gorm.DB) (modelWriteMetadata, error) {
 	}
 	modelWriteMetadataCache.values[modelType] = metadata
 	return metadata, nil
+}
+
+func cachedWriteMetadata(modelType reflect.Type) (modelWriteMetadata, bool) {
+	metadata, exists := modelWriteMetadataCache.values[modelType]
+	return metadata, exists
 }
 
 func postgresSafeBatchSize(requested, columnCount int) (int, error) {

@@ -53,10 +53,7 @@ func transformSourceChunk[F, T any](
 			if row == nil {
 				continue
 			}
-			_, err := registerCache(ctx, row)
-			if err != nil {
-				return nil, err
-			}
+			registerCache(row)
 			rows = append(rows, row)
 		}
 		return rows, nil
@@ -87,9 +84,9 @@ func insertBySlice[T any](order Order) func(_ context.Context, i interface{}) (i
 	}
 }
 
-func registerCache(_ context.Context, i interface{}) (interface{}, error) {
+func registerCache(i interface{}) {
 	if i == nil {
-		return i, nil
+		return
 	}
 	switch o := i.(type) {
 	case *model.Artist:
@@ -99,5 +96,4 @@ func registerCache(_ context.Context, i interface{}) (interface{}, error) {
 	case *model.Master:
 		cache.MasterIDs.Add(o.ID)
 	}
-	return i, nil
 }

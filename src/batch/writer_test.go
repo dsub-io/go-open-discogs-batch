@@ -1,6 +1,8 @@
 package batch
 
 import (
+	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -13,6 +15,29 @@ type metadataCacheFixture struct {
 }
 
 func (metadataCacheFixture) TableName() string { return "metadata_cache_fixture" }
+
+func TestCachedWriteMetadataFindsLockedEntry(t *testing.T) {
+	modelType := reflect.TypeOf(metadataCacheFixture{})
+	expected := modelWriteMetadata{columnCount: 1}
+	modelWriteMetadataCache.Lock()
+	modelWriteMetadataCache.values[modelType] = expected
+	actual, exists := cachedWriteMetadata(modelType)
+	delete(modelWriteMetadataCache.values, modelType)
+	modelWriteMetadataCache.Unlock()
+	require.True(t, exists)
+	require.Equal(t, expected, actual)
+}
+
+func TestCanonicalBatchReturnsDedupeFailureWithoutWriting(t *testing.T) {
+	expected := errors.New("fixture dedupe failure")
+	actual := writeCanonicalBatch(
+		[]*model.Artist{{}},
+		1,
+		nil,
+		func([]*model.Artist) ([]*model.Artist, error) { return nil, expected },
+	)
+	require.ErrorIs(t, actual.Err(), expected)
+}
 
 func TestPostgresSafeBatchSize(t *testing.T) {
 	tests := []struct {

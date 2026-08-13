@@ -1177,6 +1177,39 @@ func TestProgressTransactionErrorBoundaries(t *testing.T) {
 		require.False(t, completed)
 		require.ErrorContains(t, err, "does not match source range")
 	})
+
+	t.Run("resume completed chunk", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select first_item_index, item_count").
+			WillReturnRows(sqlmock.NewRows([]string{"first_item_index", "item_count"}).AddRow(1, 1))
+		order := NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true)
+		completed, err := chunkAlreadyCompleted(
+			db,
+			order,
+			ChunkMetadata{Index: 1, FirstItemIndex: 1, ItemCount: 1},
+		)
+		require.NoError(t, err)
+		require.True(t, completed)
+	})
+
+	t.Run("execute skips completed chunk", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery("select first_item_index, item_count").
+			WillReturnRows(sqlmock.NewRows([]string{"first_item_index", "item_count"}).AddRow(1, 1))
+		mock.ExpectCommit()
+		order := NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true)
+		actual := executeChunk(
+			order,
+			ChunkMetadata{Index: 1, FirstItemIndex: 1, ItemCount: 1},
+			func(Order) result.Result {
+				t.Fatal("completed chunk must not be written")
+				return nil
+			},
+		)
+		require.NoError(t, actual.Err())
+		require.Zero(t, actual.Count())
+	})
 }
 
 func TestCompletedChunkInventoryPreloadAndValidation(t *testing.T) {

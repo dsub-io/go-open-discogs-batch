@@ -77,6 +77,55 @@ func TestCanonicalRowsRejectConflictingPayloads(t *testing.T) {
 	require.ErrorContains(t, err, "conflicting master_video rows")
 }
 
+func TestRelationChunkTransformsRejectConflictingCanonicalRowsBeforeDatabaseAccess(t *testing.T) {
+	first := "first"
+	second := "second"
+	tests := []struct {
+		name  string
+		write func() error
+	}{
+		{
+			name: "artist",
+			write: func() error {
+				return writeArtistRelationChunk(nil, ChunkMetadata{}, []*XmlArtistRelation{
+					{ID: 1, URLs: []string{"Aa", "BB"}},
+				}).Err()
+			},
+		},
+		{
+			name: "label",
+			write: func() error {
+				return writeLabelRelationChunk(nil, ChunkMetadata{}, []*XmlLabelRelation{
+					{ID: 1, URLs: []string{"Aa", "BB"}},
+				}).Err()
+			},
+		},
+		{
+			name: "master",
+			write: func() error {
+				return writeMasterRelationChunk(nil, ChunkMetadata{}, []*XmlMasterRelation{
+					{ID: 1, Title: &first},
+					{ID: 1, Title: &second},
+				}).Err()
+			},
+		},
+		{
+			name: "release",
+			write: func() error {
+				return writeReleaseRelationChunk(nil, ChunkMetadata{}, []*XmlReleaseRelation{
+					{ID: 1, Title: &first},
+					{ID: 1, Title: &second},
+				}).Err()
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.ErrorContains(t, test.write(), "conflicting")
+		})
+	}
+}
+
 func TestEveryNonReleaseCanonicalKeyCollapsesExactDuplicates(t *testing.T) {
 	requireOneCanonicalRow(t, deduplicateArtistAliases,
 		&model.ArtistAlias{ArtistID: 1, AliasID: 2},

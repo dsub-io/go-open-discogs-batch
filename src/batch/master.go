@@ -168,13 +168,7 @@ func writeMasterRelationChunk(
 				)
 			},
 		}
-		for _, reconcileRelation := range reconcile {
-			written = written.Sum(reconcileRelation())
-			if written.IsErr() {
-				return written
-			}
-		}
-		return written
+		return written.Sum(reconcileRelations(reconcile))
 	})
 	if !written.IsErr() {
 		confirmReferenceEntities(genres, styles)

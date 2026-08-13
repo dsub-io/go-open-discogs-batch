@@ -87,7 +87,6 @@ func writeLabelRelationChunk(
 		if err != nil {
 			return result.NewResult(0, err)
 		}
-		written := result.NewResult(0, nil)
 		reconcile := []func() result.Result{
 			func() result.Result {
 				return reconcileIntegerRelation(
@@ -112,12 +111,6 @@ func writeLabelRelationChunk(
 				)
 			},
 		}
-		for _, reconcileRelation := range reconcile {
-			written = written.Sum(reconcileRelation())
-			if written.IsErr() {
-				return written
-			}
-		}
-		return written
+		return reconcileRelations(reconcile)
 	})
 }

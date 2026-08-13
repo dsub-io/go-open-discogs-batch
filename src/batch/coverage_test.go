@@ -283,9 +283,7 @@ func TestRegisterCacheBoundaries(t *testing.T) {
 		&opendiscogsmodel.Master{ID: 3},
 		struct{}{},
 	} {
-		actual, err := registerCache(context.Background(), item)
-		require.NoError(t, err)
-		require.Equal(t, item, actual)
+		registerCache(item)
 	}
 	require.True(t, cache.ArtistIDs.Contains(1))
 	require.True(t, cache.LabelIDs.Contains(2))
@@ -345,6 +343,12 @@ type rejectingOrder struct {
 }
 
 func (o rejectingOrder) submitWorker(context.Context, func()) bool { return false }
+
+type untrackedResumeOrder struct {
+	Order
+}
+
+func (o untrackedResumeOrder) shouldResumeProgress() bool { return true }
 
 func TestSimpleAndRelationPipelineErrorBoundaries(t *testing.T) {
 	missingOrder := NewOrder(context.Background(), 1, 1, filepath.Join(t.TempDir(), "missing.gz"), nil)
@@ -420,6 +424,63 @@ func TestProcessRelationChunksWorkerAndProgressFailures(t *testing.T) {
 
 	require.NoError(t, mergeSourceError(result.NewResult(1, nil), nil).Err())
 	require.ErrorIs(t, mergeSourceError(result.NewResult(1, nil), expected).Err(), expected)
+}
+
+func TestRelationPipelineReportsPreloadedProgressFailuresWithoutStartingWorkers(t *testing.T) {
+	t.Run("inventory query", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(0), "").
+			WillReturnError(expected)
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, "testdata/artist.xml.gz", db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
+	t.Run("source range mismatch", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(0), "").
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"chunk_index", "first_item_index", "item_count"},
+			).AddRow(0, 99, 1))
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, "testdata/artist.xml.gz", db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.ErrorContains(t, actual.Err(), "does not match source range")
+	})
+}
+
+func TestReconcileRelationsStopsAtFirstFailure(t *testing.T) {
+	expected := errors.New("fixture")
+	thirdCalled := false
+	actual := reconcileRelations([]func() result.Result{
+		func() result.Result { return result.NewResult(2, nil) },
+		func() result.Result { return result.NewResult(3, expected) },
+		func() result.Result {
+			thirdCalled = true
+			return result.NewResult(5, nil)
+		},
+	})
+	require.Equal(t, 5, actual.Count())
+	require.ErrorIs(t, actual.Err(), expected)
+	require.False(t, thirdCalled)
 }
 
 func TestWriteRelationChunkControlFlow(t *testing.T) {
@@ -566,8 +627,8 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 		NewOrder(context.Background(), 1, 1, "unused", db),
 	)
 	require.ErrorIs(t, actual.Err(), expected)
-	require.Empty(t, filterGenres([]*opendiscogsmodel.Genre{{Name: " "}}))
-	require.Empty(t, filterStyles([]*opendiscogsmodel.Style{{Name: " "}}))
+	require.Empty(t, filterGenres([]*opendiscogsmodel.Genre{nil, {Name: " "}}))
+	require.Empty(t, filterStyles([]*opendiscogsmodel.Style{nil, {Name: " "}}))
 
 	db, mock, _ = newMockGorm(t)
 	mock.ExpectBegin()
@@ -684,6 +745,15 @@ func TestLabelChunkUsesSubLabelKeys(t *testing.T) {
 		[]*XmlLabelRelation{{ID: 1, SubLabels: []XmlRef{{ID: 2}}}},
 	)
 	require.Error(t, actual.Err())
+}
+
+func TestLabelRelationBuildsCanonicalRoot(t *testing.T) {
+	name := "Label"
+	label := (&XmlLabelRelation{ID: 7, Name: &name}).GetLabel()
+	require.Equal(t, int32(7), label.ID)
+	require.Equal(t, name, *label.Name)
+	require.False(t, label.CreatedAt.IsZero())
+	require.Equal(t, label.CreatedAt, label.LastModifiedAt)
 }
 
 func createGzipFixture(t *testing.T, body string) string {
