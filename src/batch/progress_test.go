@@ -25,16 +25,49 @@ const (
 	chunkSynchronizationTimeout       = 10 * time.Second
 )
 
-func TestFailedRunRejectsLateChunkAndEntityCompletion(t *testing.T) {
+func TestProgressDurability(t *testing.T) {
+	postgres := testutils.GetDatabase(t, testutils.Postgres)
+	dsn := testutils.GetDsn(testutils.Postgres, postgres)
+	tests := []struct {
+		name string
+		run  func(*testing.T, string)
+	}{
+		{"failed run fencing", runFailedRunRejectsLateChunkAndEntityCompletion},
+		{"out-of-order resume", runImportResumesOutOfOrderChunks},
+		{"completion failure resume", runImportCompletionFailureRemainsResumable},
+		{"atomic admission transfer", runResumeAdmissionTransferIsAtomic},
+		{"completed entity skip", runMultiEntityResumeSkipsCompletedEntity},
+		{"expanded manifest convergence", runReleaseInterruptionConvergesWhenManifestExpands},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cache.ResetIDs()
+			t.Cleanup(cache.ResetIDs)
+			test.run(t, dsn)
+		})
+	}
+}
+
+func resetProgressDatabase(t *testing.T, dsn string) *gorm.DB {
+	t.Helper()
+	db, err := database.GetConnect(dsn)
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("drop schema public cascade").Error)
+	require.NoError(t, db.Exec("create schema public").Error)
+	require.NoError(t, RunDDL(db))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	return db
+}
+
+func runFailedRunRejectsLateChunkAndEntityCompletion(t *testing.T, dsn string) {
 	const (
 		chunkSize  = 1
 		entityType = "master"
 	)
 	ctx := context.Background()
-	pg := testutils.GetDatabase(t, testutils.Postgres)
-	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
+	db := resetProgressDatabase(t, dsn)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	dumps := []*model.DiscogsDump{
@@ -93,17 +126,14 @@ func TestFailedRunRejectsLateChunkAndEntityCompletion(t *testing.T) {
 	require.False(t, completed)
 }
 
-func TestImportResumesOutOfOrderChunks(t *testing.T) {
+func runImportResumesOutOfOrderChunks(t *testing.T, dsn string) {
 	const (
 		chunkSize  = 1
 		maxWorkers = 2
 		entityType = "master"
 	)
 	ctx := context.Background()
-	pg := testutils.GetDatabase(t, testutils.Postgres)
-	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
+	db := resetProgressDatabase(t, dsn)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 
@@ -219,17 +249,14 @@ func TestImportResumesOutOfOrderChunks(t *testing.T) {
 	require.Equal(t, resumedState, normalizedBusinessState(t, db))
 }
 
-func TestImportCompletionFailureRemainsResumable(t *testing.T) {
+func runImportCompletionFailureRemainsResumable(t *testing.T, dsn string) {
 	const (
 		chunkSize  = 1
 		maxWorkers = 2
 		entityType = "master"
 	)
 	ctx := context.Background()
-	pg := testutils.GetDatabase(t, testutils.Postgres)
-	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
+	db := resetProgressDatabase(t, dsn)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 
@@ -296,17 +323,14 @@ func TestImportCompletionFailureRemainsResumable(t *testing.T) {
 	require.NoError(t, retry.Complete(ctx, nil))
 }
 
-func TestResumeAdmissionTransferIsAtomic(t *testing.T) {
+func runResumeAdmissionTransferIsAtomic(t *testing.T, dsn string) {
 	const (
 		chunkSize  = 1
 		maxWorkers = 2
 		entityType = "master"
 	)
 	ctx := context.Background()
-	pg := testutils.GetDatabase(t, testutils.Postgres)
-	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
+	db := resetProgressDatabase(t, dsn)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 
@@ -373,16 +397,13 @@ func TestResumeAdmissionTransferIsAtomic(t *testing.T) {
 	require.NoError(t, retry.Complete(ctx, nil))
 }
 
-func TestMultiEntityResumeSkipsCompletedEntity(t *testing.T) {
+func runMultiEntityResumeSkipsCompletedEntity(t *testing.T, dsn string) {
 	const (
 		chunkSize  = 1
 		maxWorkers = 2
 	)
 	ctx := context.Background()
-	pg := testutils.GetDatabase(t, testutils.Postgres)
-	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
+	db := resetProgressDatabase(t, dsn)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	dumps := []*model.DiscogsDump{
@@ -443,16 +464,13 @@ func TestMultiEntityResumeSkipsCompletedEntity(t *testing.T) {
 	require.Empty(t, completedChunkIndexes(t, db, retryPreparation.RunID, "master"))
 }
 
-func TestReleaseInterruptionConvergesWhenManifestExpands(t *testing.T) {
+func runReleaseInterruptionConvergesWhenManifestExpands(t *testing.T, dsn string) {
 	const (
 		chunkSize  = 1
 		maxWorkers = 2
 	)
 	ctx := context.Background()
-	pg := testutils.GetDatabase(t, testutils.Postgres)
-	db, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, pg))
-	require.NoError(t, err)
-	require.NoError(t, RunDDL(db))
+	db := resetProgressDatabase(t, dsn)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 
