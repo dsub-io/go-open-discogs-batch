@@ -4,8 +4,8 @@ package batch
 
 import "testing"
 
-// TestBatchE2E reuses the complete fixture-to-PostgreSQL scenario in the
-// separately required E2E lane. TestBatch remains in the regular test suite.
+// TestBatchE2E runs the complete fixture-to-PostgreSQL scenario only in the
+// separately required E2E lane.
 func TestBatchE2E(t *testing.T) {
-	TestBatch(t)
+	runBatchE2E(t)
 }

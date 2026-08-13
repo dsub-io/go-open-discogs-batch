@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func TestBatch(t *testing.T) {
+func runBatchE2E(t *testing.T) {
 	pg := testutils.GetDatabase(t, testutils.Postgres)
 	dsn := testutils.GetDsn(testutils.Postgres, pg)
 	db, err := database.GetConnect(dsn)

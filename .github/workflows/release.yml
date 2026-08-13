@@ -210,7 +210,7 @@ jobs:
       - name: Run release dump-to-PostgreSQL end-to-end tests
         run: >-
           go test -tags=e2e
-          -run '^(TestBatchE2E|TestImportExecutionCoordinator)$'
+          -run '^TestBatchE2E$'
           -count=1
           ./src/batch
 

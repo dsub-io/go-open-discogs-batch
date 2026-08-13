@@ -98,6 +98,7 @@ func writeReleaseRelationChunk(
 	items []*XmlReleaseRelation,
 ) result.Result {
 	observedAt := time.Now().UTC()
+	assignChunkObservedAt(items, observedAt)
 	genres := make([]*model.Genre, 0)
 	styles := make([]*model.Style, 0)
 	rootIDs := make([]int32, 0, len(items))
@@ -116,7 +117,6 @@ func writeReleaseRelationChunk(
 		if item == nil {
 			continue
 		}
-		item.observedAt = observedAt
 		rootIDs = append(rootIDs, item.ID)
 		genres = append(genres, item.GetGenres()...)
 		styles = append(styles, item.GetStyles()...)

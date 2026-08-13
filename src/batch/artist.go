@@ -65,6 +65,7 @@ func writeArtistRelationChunk(
 	items []*XmlArtistRelation,
 ) result.Result {
 	observedAt := time.Now().UTC()
+	assignChunkObservedAt(items, observedAt)
 	rootIDs := make([]int32, 0, len(items))
 	nameVariations := make([]*model.ArtistNameVariation, 0)
 	aliases := make([]*model.ArtistAlias, 0)
@@ -75,7 +76,6 @@ func writeArtistRelationChunk(
 		if item == nil {
 			continue
 		}
-		item.observedAt = observedAt
 		rootIDs = append(rootIDs, item.ID)
 		aliases = append(aliases, item.GetAliases()...)
 		groups = append(groups, item.GetGroups()...)

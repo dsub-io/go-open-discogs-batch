@@ -57,6 +57,13 @@ type XmlArtistRelation struct {
 	observedAt  time.Time
 }
 
+func (a *XmlArtistRelation) setObservedAt(observedAt time.Time) {
+	if a == nil {
+		return
+	}
+	a.observedAt = observedAt
+}
+
 func (a *XmlArtistRelation) timestamp() time.Time {
 	if a.observedAt.IsZero() {
 		a.observedAt = time.Now().UTC()
@@ -197,6 +204,13 @@ type XmlLabelRelation struct {
 	observedAt  time.Time
 }
 
+func (l *XmlLabelRelation) setObservedAt(observedAt time.Time) {
+	if l == nil {
+		return
+	}
+	l.observedAt = observedAt
+}
+
 func (l *XmlLabelRelation) timestamp() time.Time {
 	if l.observedAt.IsZero() {
 		l.observedAt = time.Now().UTC()
@@ -288,6 +302,13 @@ type XmlMasterRelation struct {
 	Artists       []int32    `xml:"artists>artist>id"`
 	Videos        []XmlVideo `xml:"videos>video"`
 	observedAt    time.Time
+}
+
+func (m *XmlMasterRelation) setObservedAt(observedAt time.Time) {
+	if m == nil {
+		return
+	}
+	m.observedAt = observedAt
 }
 
 func (m *XmlMasterRelation) timestamp() time.Time {
@@ -526,6 +547,13 @@ type XmlReleaseRelation struct {
 	Videos            []XmlVideo           `xml:"videos>video"`
 	Works             []XmlWork            `xml:"companies>company"`
 	observedAt        time.Time
+}
+
+func (r *XmlReleaseRelation) setObservedAt(observedAt time.Time) {
+	if r == nil {
+		return
+	}
+	r.observedAt = observedAt
 }
 
 func (r *XmlReleaseRelation) timestamp() time.Time {

@@ -58,6 +58,7 @@ func writeLabelRelationChunk(
 	items []*XmlLabelRelation,
 ) result.Result {
 	observedAt := time.Now().UTC()
+	assignChunkObservedAt(items, observedAt)
 	rootIDs := make([]int32, 0, len(items))
 	urls := make([]*model.LabelURL, 0)
 	subLabels := make([]*model.LabelSubLabel, 0)
@@ -65,7 +66,6 @@ func writeLabelRelationChunk(
 		if item == nil {
 			continue
 		}
-		item.observedAt = observedAt
 		rootIDs = append(rootIDs, item.ID)
 		urls = append(urls, item.GetUrls()...)
 		subLabels = append(subLabels, item.GetSubLabels()...)

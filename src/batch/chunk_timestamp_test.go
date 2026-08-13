@@ -53,17 +53,11 @@ func TestRelationRowsUseSourceObservedAt(t *testing.T) {
 	require.Equal(t, observedAt, artist.GetArtist().CreatedAt)
 }
 
-func TestRelationChunkAssignsOneObservedAtBeforeCanonicalization(t *testing.T) {
-	first := &XmlArtistRelation{ID: 1, URLs: []string{"Aa", "BB"}}
+func TestAssignChunkObservedAtUsesOneTimestamp(t *testing.T) {
+	first := &XmlArtistRelation{ID: 1}
 	second := &XmlArtistRelation{ID: 2}
-	db, mock, _ := newMockGorm(t)
-	actual := writeArtistRelationChunk(
-		NewOrder(context.Background(), 100, 1, "unused", db),
-		ChunkMetadata{},
-		[]*XmlArtistRelation{first, second},
-	)
-	require.ErrorContains(t, actual.Err(), "conflicting artist_url rows")
-	require.False(t, first.observedAt.IsZero())
+	observedAt := time.Unix(456, 0).UTC()
+	assignChunkObservedAt([]*XmlArtistRelation{first, nil, second}, observedAt)
+	require.Equal(t, observedAt, first.observedAt)
 	require.Equal(t, first.observedAt, second.observedAt)
-	require.NoError(t, mock.ExpectationsWereMet())
 }

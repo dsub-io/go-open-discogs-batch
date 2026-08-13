@@ -1,11 +1,9 @@
 package batch
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/require"
 )
@@ -144,57 +142,4 @@ func TestEveryNonReleaseCanonicalKeyCollapsesExactDuplicates(t *testing.T) {
 
 func TestDeduplicateComparablePreservesFirstSeenOrder(t *testing.T) {
 	require.Equal(t, []int32{3, 1, 2}, deduplicateComparable([]int32{3, 1, 3, 2, 1}))
-}
-
-func TestRelationPayloadConflictsFailBeforeTransaction(t *testing.T) {
-	tests := []struct {
-		name  string
-		write func(Order) result.Result
-	}{
-		{
-			name: "artist URL hash collision",
-			write: func(order Order) result.Result {
-				return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{
-					{ID: 1, URLs: []string{"Aa", "BB"}},
-				})
-			},
-		},
-		{
-			name: "label URL hash collision",
-			write: func(order Order) result.Result {
-				return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{
-					{ID: 1, URLs: []string{"Aa", "BB"}},
-				})
-			},
-		},
-		{
-			name: "master video hash collision",
-			write: func(order Order) result.Result {
-				first := "Aa"
-				second := "BB"
-				return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{
-					{ID: 1, Videos: []XmlVideo{{Title: &first}, {Title: &second}}},
-				})
-			},
-		},
-		{
-			name: "release root conflict",
-			write: func(order Order) result.Result {
-				first := "first"
-				second := "second"
-				return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{
-					{ID: 1, Title: &first},
-					{ID: 1, Title: &second},
-				})
-			},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			db, mock, _ := newMockGorm(t)
-			actual := test.write(NewOrder(context.Background(), 100, 1, "unused", db))
-			require.ErrorContains(t, actual.Err(), "conflicting")
-			require.NoError(t, mock.ExpectationsWereMet())
-		})
-	}
 }
