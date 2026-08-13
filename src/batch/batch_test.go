@@ -109,7 +109,6 @@ func runBatchE2E(t *testing.T) {
 		ArtistID:       1,
 		Hash:           staleArtistURLHash,
 		URL:            "https://stale.invalid/artist",
-		CreatedAt:      now,
 		LastModifiedAt: now,
 	}).Error)
 	require.NoError(t, db.Model(&model.LabelReleaseItem{}).

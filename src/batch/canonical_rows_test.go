@@ -33,10 +33,10 @@ func TestCanonicalRowsIgnoreDatabaseManagedColumns(t *testing.T) {
 	requireOneCanonicalRow(t, deduplicateArtists, first, second)
 
 	firstURL := &model.ArtistURL{
-		ArtistID: 1, Hash: 2, URL: "https://example.test", CreatedAt: firstTimestamp,
+		ArtistID: 1, Hash: 2, URL: "https://example.test", LastModifiedAt: firstTimestamp,
 	}
 	secondURL := &model.ArtistURL{
-		ArtistID: 1, Hash: 2, URL: "https://example.test", CreatedAt: secondTimestamp,
+		ArtistID: 1, Hash: 2, URL: "https://example.test", LastModifiedAt: secondTimestamp,
 	}
 	requireOneCanonicalRow(t, deduplicateArtistURLs, firstURL, secondURL)
 }

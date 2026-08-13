@@ -54,7 +54,6 @@ func runRelationOrdinalRefreshUpdatesOnlyWhenChanged(t *testing.T, dsn string) {
 		Position:       &position,
 		Title:          &title,
 		Ordinal:        &ordinalFive,
-		CreatedAt:      observedAt,
 		LastModifiedAt: observedAt,
 	}
 	inserted := writeReleaseRelationBatch(
@@ -229,7 +228,6 @@ func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(
 			Hash:           101,
 			Name:           &name,
 			Quantity:       &quantityOne,
-			CreatedAt:      now,
 			LastModifiedAt: now,
 		},
 		{
@@ -237,7 +235,6 @@ func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(
 			Hash:           101,
 			Name:           &name,
 			Quantity:       &quantityTwo,
-			CreatedAt:      now.Add(time.Second),
 			LastModifiedAt: now.Add(time.Second),
 		},
 	}
@@ -268,7 +265,6 @@ func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(
 			Hash:           202,
 			Name:           &name,
 			Quantity:       &quantityOne,
-			CreatedAt:      now,
 			LastModifiedAt: now,
 		},
 		{
@@ -277,7 +273,6 @@ func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(
 			Hash:           202,
 			Name:           &name,
 			Quantity:       &quantityOne,
-			CreatedAt:      now.Add(time.Minute),
 			LastModifiedAt: now.Add(time.Minute),
 		},
 	}
@@ -347,7 +342,6 @@ func runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(
 		Hash:           legacyHash,
 		Position:       &firstPosition,
 		Title:          &firstTitle,
-		CreatedAt:      now,
 		LastModifiedAt: now,
 	}).Error)
 

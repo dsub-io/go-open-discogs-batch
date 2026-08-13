@@ -47,7 +47,6 @@ func TestRelationRowsUseSourceObservedAt(t *testing.T) {
 	rows := artist.GetUrls()
 	require.Len(t, rows, 2)
 	for _, row := range rows {
-		require.Equal(t, observedAt, row.CreatedAt)
 		require.Equal(t, observedAt, row.LastModifiedAt)
 	}
 	require.Equal(t, observedAt, artist.GetArtist().CreatedAt)

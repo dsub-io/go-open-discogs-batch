@@ -107,7 +107,6 @@ func (a *XmlArtistRelation) GetUrls() []*opendiscogsmodel.ArtistURL {
 			Ordinal:        relationOrdinal(index),
 			Hash:           helper.JavaStringHash(url),
 			URL:            url,
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -127,7 +126,6 @@ func (a *XmlArtistRelation) GetNameVars() []*opendiscogsmodel.ArtistNameVariatio
 			Ordinal:        relationOrdinal(index),
 			NameVariation:  nameVariation,
 			Hash:           helper.JavaStringHash(nameVariation),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -145,7 +143,6 @@ func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
 			ArtistID:       a.ID,
 			AliasID:        alias.ID,
 			Ordinal:        relationOrdinal(index),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -163,7 +160,6 @@ func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
 			ArtistID:       a.ID,
 			GroupID:        group.ID,
 			Ordinal:        relationOrdinal(index),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -181,7 +177,6 @@ func (a *XmlArtistRelation) GetMembers() []*opendiscogsmodel.ArtistMember {
 			ArtistID:       a.ID,
 			MemberID:       member.ID,
 			Ordinal:        relationOrdinal(index),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -259,7 +254,6 @@ func (l *XmlLabelRelation) GetUrls() []*opendiscogsmodel.LabelURL {
 			Ordinal:        relationOrdinal(index),
 			Hash:           helper.JavaStringHash(url),
 			URL:            url,
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -277,7 +271,6 @@ func (l *XmlLabelRelation) GetSubLabels() []*opendiscogsmodel.LabelSubLabel {
 			ParentLabelID:  l.ID,
 			SubLabelID:     subLabel.ID,
 			Ordinal:        relationOrdinal(index),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -373,7 +366,6 @@ func (m *XmlMasterRelation) GetMasterStyles() []*opendiscogsmodel.MasterStyle {
 			MasterID:       m.ID,
 			Ordinal:        relationOrdinal(index),
 			Style:          style,
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -392,7 +384,6 @@ func (m *XmlMasterRelation) GetMasterGenres() []*opendiscogsmodel.MasterGenre {
 			MasterID:       m.ID,
 			Ordinal:        relationOrdinal(index),
 			Genre:          genre,
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -417,7 +408,6 @@ func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
 			URL:            url,
 			Description:    description,
 			Title:          title,
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -435,7 +425,6 @@ func (m *XmlMasterRelation) GetMasterArtists() []*opendiscogsmodel.MasterArtist 
 			ArtistID:       artistID,
 			MasterID:       m.ID,
 			Ordinal:        relationOrdinal(index),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -624,7 +613,6 @@ func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
 			Ordinal:        relationOrdinal(index),
 			Work:           &value,
 			Hash:           helper.JavaStringHash(value),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -649,7 +637,6 @@ func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
 			Title:          title,
 			URL:            url,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -674,7 +661,6 @@ func (r *XmlReleaseRelation) GetIdentifiers() []*opendiscogsmodel.ReleaseItemIde
 			Type:           identifierType,
 			Value:          value,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -699,7 +685,6 @@ func (r *XmlReleaseRelation) GetTracks() []*opendiscogsmodel.ReleaseItemTrack {
 			Position:       position,
 			Title:          title,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -728,7 +713,6 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 			QuantityText:   quantityText,
 			Text:           text,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -772,7 +756,6 @@ func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseIte
 			Ordinal:        relationOrdinal(index),
 			Role:           &role,
 			Hash:           helper.JavaStringHash(role),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -790,7 +773,6 @@ func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItem
 			ReleaseItemID:  r.ID,
 			ArtistID:       artistID,
 			Ordinal:        relationOrdinal(index),
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -820,7 +802,6 @@ func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
 			ReleaseItemID:    r.ID,
 			Ordinal:          relationOrdinal(index),
 			CategoryNotation: helper.FilterStr(&categoryNotation),
-			CreatedAt:        observedAt,
 			LastModifiedAt:   observedAt,
 		})
 	}
@@ -844,7 +825,6 @@ func (r *XmlReleaseRelation) GetReleaseStyles() []*opendiscogsmodel.ReleaseItemS
 			ReleaseItemID:  r.ID,
 			Ordinal:        relationOrdinal(index),
 			Style:          style,
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}
@@ -868,7 +848,6 @@ func (r *XmlReleaseRelation) GetReleaseGenres() []*opendiscogsmodel.ReleaseItemG
 			ReleaseItemID:  r.ID,
 			Ordinal:        relationOrdinal(index),
 			Genre:          genre,
-			CreatedAt:      observedAt,
 			LastModifiedAt: observedAt,
 		})
 	}

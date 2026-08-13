@@ -249,15 +249,15 @@ func TestReleaseRelationBatchDeduplicatesCanonicalConflictKeys(t *testing.T) {
 	t.Run("repeated artist", func(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseArtists,
-			&model.ReleaseItemArtist{ReleaseItemID: 1, ArtistID: 2, CreatedAt: createdAt},
-			&model.ReleaseItemArtist{ID: 99, ReleaseItemID: 1, ArtistID: 2, CreatedAt: modifiedAt},
+			&model.ReleaseItemArtist{ReleaseItemID: 1, ArtistID: 2, LastModifiedAt: createdAt},
+			&model.ReleaseItemArtist{ID: 99, ReleaseItemID: 1, ArtistID: 2, LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("credited artist hash", func(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseCreditedArtists,
 			&model.ReleaseItemCreditedArtist{ReleaseItemID: 1, ArtistID: 2, Hash: 3, Role: &role},
-			&model.ReleaseItemCreditedArtist{ID: 99, ReleaseItemID: 1, ArtistID: 2, Hash: 3, Role: &role, CreatedAt: modifiedAt},
+			&model.ReleaseItemCreditedArtist{ID: 99, ReleaseItemID: 1, ArtistID: 2, Hash: 3, Role: &role, LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("work hash", func(t *testing.T) {
@@ -270,23 +270,23 @@ func TestReleaseRelationBatchDeduplicatesCanonicalConflictKeys(t *testing.T) {
 	t.Run("style", func(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseStyles,
-			&model.ReleaseItemStyle{ReleaseItemID: 1, Style: "Techno", CreatedAt: createdAt},
-			&model.ReleaseItemStyle{ID: 99, ReleaseItemID: 1, Style: "Techno", CreatedAt: modifiedAt},
+			&model.ReleaseItemStyle{ReleaseItemID: 1, Style: "Techno", LastModifiedAt: createdAt},
+			&model.ReleaseItemStyle{ID: 99, ReleaseItemID: 1, Style: "Techno", LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("genre", func(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseGenres,
-			&model.ReleaseItemGenre{ReleaseItemID: 1, Genre: "Electronic", CreatedAt: createdAt},
-			&model.ReleaseItemGenre{ID: 99, ReleaseItemID: 1, Genre: "Electronic", CreatedAt: modifiedAt},
+			&model.ReleaseItemGenre{ReleaseItemID: 1, Genre: "Electronic", LastModifiedAt: createdAt},
+			&model.ReleaseItemGenre{ID: 99, ReleaseItemID: 1, Genre: "Electronic", LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("nullable catalog number and distinct spellings", func(t *testing.T) {
 		spacedCatalogNumber := "SK 026"
 		compactCatalogNumber := "SK026"
 		rows, err := deduplicateLabelReleaseItems([]*model.LabelReleaseItem{
-			{ReleaseItemID: 1, LabelID: 2, CategoryNotation: nil, CreatedAt: createdAt},
-			{ID: 99, ReleaseItemID: 1, LabelID: 2, CategoryNotation: nil, CreatedAt: modifiedAt},
+			{ReleaseItemID: 1, LabelID: 2, CategoryNotation: nil, LastModifiedAt: createdAt},
+			{ID: 99, ReleaseItemID: 1, LabelID: 2, CategoryNotation: nil, LastModifiedAt: modifiedAt},
 			{ReleaseItemID: 1, LabelID: 2, CategoryNotation: &spacedCatalogNumber},
 			{ReleaseItemID: 1, LabelID: 2, CategoryNotation: &compactCatalogNumber},
 		})
@@ -300,7 +300,7 @@ func TestReleaseRelationBatchDeduplicatesCanonicalConflictKeys(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseFormats,
 			&model.ReleaseItemFormat{ReleaseItemID: 1, Hash: 2, Description: &description, Name: &name, Quantity: &quantity, Text: &text},
-			&model.ReleaseItemFormat{ID: 99, ReleaseItemID: 1, Hash: 2, Description: &description, Name: &name, Quantity: &quantity, Text: &text, CreatedAt: modifiedAt},
+			&model.ReleaseItemFormat{ID: 99, ReleaseItemID: 1, Hash: 2, Description: &description, Name: &name, Quantity: &quantity, Text: &text, LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("identifier hash", func(t *testing.T) {
@@ -314,21 +314,21 @@ func TestReleaseRelationBatchDeduplicatesCanonicalConflictKeys(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseImages,
 			&model.ReleaseItemImage{ReleaseItemID: 1, Hash: 2, FileName: &fileName},
-			&model.ReleaseItemImage{ID: 99, ReleaseItemID: 1, Hash: 2, FileName: &fileName, CreatedAt: modifiedAt},
+			&model.ReleaseItemImage{ID: 99, ReleaseItemID: 1, Hash: 2, FileName: &fileName, LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("track hash", func(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseTracks,
 			&model.ReleaseItemTrack{ReleaseItemID: 1, Hash: 2, Duration: &duration, Position: &position, Title: &title},
-			&model.ReleaseItemTrack{ID: 99, ReleaseItemID: 1, Hash: 2, Duration: &duration, Position: &position, Title: &title, CreatedAt: modifiedAt},
+			&model.ReleaseItemTrack{ID: 99, ReleaseItemID: 1, Hash: 2, Duration: &duration, Position: &position, Title: &title, LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("video hash", func(t *testing.T) {
 		assertExactReleaseRelationDeduplication(t,
 			deduplicateReleaseVideos,
 			&model.ReleaseItemVideo{ReleaseItemID: 1, Hash: 2, Description: &description, Title: &title, URL: &url},
-			&model.ReleaseItemVideo{ID: 99, ReleaseItemID: 1, Hash: 2, Description: &description, Title: &title, URL: &url, CreatedAt: modifiedAt},
+			&model.ReleaseItemVideo{ID: 99, ReleaseItemID: 1, Hash: 2, Description: &description, Title: &title, URL: &url, LastModifiedAt: modifiedAt},
 		)
 	})
 	t.Run("nil row", func(t *testing.T) {
