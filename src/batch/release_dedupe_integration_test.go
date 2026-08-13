@@ -307,7 +307,6 @@ func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(
 			LastModifiedAt: now,
 		},
 		{
-			ID:             99,
 			ReleaseItemID:  releaseItemID,
 			Hash:           202,
 			Name:           &name,
@@ -376,7 +375,6 @@ func runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(
 	firstPosition := "6"
 	firstTitle := "Яд"
 	require.NoError(t, db.Create(&model.ReleaseItemTrack{
-		ID:             2_000_000_100,
 		ReleaseItemID:  releaseItemID,
 		Hash:           legacyHash,
 		Position:       &firstPosition,
@@ -400,21 +398,13 @@ func runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(
 	)
 	require.NoError(t, firstWrite.Err())
 
-	var firstIDs []int32
-	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
-		Where("release_item_id = ?", releaseItemID).
-		Order("id").
-		Pluck("id", &firstIDs).Error)
-	require.Len(t, firstIDs, 2)
-	var identities [][]byte
-	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
-		Where("release_item_id = ?", releaseItemID).
-		Order("id").
-		Pluck("identity_sha256", &identities).Error)
-	require.Len(t, identities, 2)
-	require.Len(t, identities[0], 32)
-	require.Len(t, identities[1], 32)
-	require.NotEqual(t, identities[0], identities[1])
+	var firstTracks []model.ReleaseItemTrack
+	require.NoError(t, db.Where("release_item_id = ?", releaseItemID).
+		Order("title").Find(&firstTracks).Error)
+	require.Len(t, firstTracks, 2)
+	require.Len(t, firstTracks[0].IdentitySHA256, 32)
+	require.Len(t, firstTracks[1].IdentitySHA256, 32)
+	require.NotEqual(t, firstTracks[0].IdentitySHA256, firstTracks[1].IdentitySHA256)
 
 	retry := writeReleaseRelationChunk(
 		NewOrder(context.Background(), 10, 1, "unused", db),
@@ -422,17 +412,11 @@ func runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(
 		[]*XmlReleaseRelation{release},
 	)
 	require.NoError(t, retry.Err())
-	var retryIDs []int32
-	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
-		Where("release_item_id = ?", releaseItemID).
-		Order("id").
-		Pluck("id", &retryIDs).Error)
-	require.Equal(t, firstIDs, retryIDs)
+	var retryTracks []model.ReleaseItemTrack
+	require.NoError(t, db.Where("release_item_id = ?", releaseItemID).
+		Order("title").Find(&retryTracks).Error)
+	require.Equal(t, firstTracks, retryTracks)
 
-	var collidedID int32
-	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
-		Where("release_item_id = ? and title = ?", releaseItemID, secondTitle).
-		Select("id").Scan(&collidedID).Error)
 	reducedRelease := &XmlReleaseRelation{
 		ID: releaseItemID,
 		Tracks: []XmlTrack{
@@ -447,8 +431,9 @@ func runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(
 	require.NoError(t, reassigned.Err())
 	var remaining model.ReleaseItemTrack
 	require.NoError(t, db.Where("release_item_id = ?", releaseItemID).First(&remaining).Error)
-	require.NotEqual(t, collidedID, remaining.ID)
 	require.Equal(t, legacyHash, remaining.Hash)
+	require.Equal(t, secondTitle, *remaining.Title)
+	require.Len(t, remaining.IdentitySHA256, 32)
 
 	stable := writeReleaseRelationChunk(
 		NewOrder(context.Background(), 10, 1, "unused", db),
@@ -456,11 +441,9 @@ func runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows(
 		[]*XmlReleaseRelation{reducedRelease},
 	)
 	require.NoError(t, stable.Err())
-	var stableID int32
-	require.NoError(t, db.Model(&model.ReleaseItemTrack{}).
-		Where("release_item_id = ?", releaseItemID).
-		Select("id").Scan(&stableID).Error)
-	require.Equal(t, remaining.ID, stableID)
+	var stableTrack model.ReleaseItemTrack
+	require.NoError(t, db.Where("release_item_id = ?", releaseItemID).First(&stableTrack).Error)
+	require.Equal(t, remaining, stableTrack)
 }
 
 func requireRelationRowCount(

@@ -138,7 +138,7 @@ func runBatchE2E(t *testing.T) {
 		preservedURL.ArtistID,
 		preservedURL.Hash,
 	).First(&retainedURL).Error)
-	require.Equal(t, preservedURL.ID, retainedURL.ID)
+	require.Equal(t, preservedURL.LastModifiedAt, retainedURL.LastModifiedAt)
 	require.Equal(t, canonical, normalizedBusinessState(t, db))
 
 	goldenPath := filepath.Join("testdata", "cross-language-state.json")
