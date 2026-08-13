@@ -7,7 +7,6 @@ import (
 
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -97,37 +96,37 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 		var r result.Result
 		switch o := slice.(type) {
 		case []*model.Artist:
-			r = doWrite[*model.Artist](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateArtists)
 		case []*model.ArtistURL:
-			r = doWrite[*model.ArtistURL](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateArtistURLs)
 		case []*model.ArtistAlias:
-			r = doWrite[*model.ArtistAlias](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateArtistAliases)
 		case []*model.ArtistGroup:
-			r = doWrite[*model.ArtistGroup](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateArtistGroups)
 		case []*model.ArtistMember:
-			r = doWrite[*model.ArtistMember](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateArtistMembers)
 		case []*model.ArtistNameVariation:
-			r = doWrite[*model.ArtistNameVariation](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateArtistNameVariations)
 		case []*model.Label:
-			r = doWrite[*model.Label](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateLabels)
 		case []*model.LabelURL:
-			r = doWrite[*model.LabelURL](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateLabelURLs)
 		case []*model.LabelSubLabel:
-			r = doWrite[*model.LabelSubLabel](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateLabelSubLabels)
 		case []*model.LabelReleaseItem:
 			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateLabelReleaseItems)
 		case []*model.Master:
-			r = doWrite[*model.Master](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateMasters)
 		case []*model.MasterArtist:
-			r = doWrite[*model.MasterArtist](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateMasterArtists)
 		case []*model.MasterGenre:
-			r = doWrite[*model.MasterGenre](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateMasterGenres)
 		case []*model.MasterStyle:
-			r = doWrite[*model.MasterStyle](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateMasterStyles)
 		case []*model.MasterVideo:
-			r = doWrite[*model.MasterVideo](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateMasterVideos)
 		case []*model.ReleaseItem:
-			r = doWrite[*model.ReleaseItem](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateReleaseItems)
 		case []*model.ReleaseItemArtist:
 			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseArtists)
 		case []*model.ReleaseItemWork:
@@ -149,9 +148,9 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 		case []*model.ReleaseItemVideo:
 			r = writeReleaseRelationBatch(o, chunkSize, g.db, deduplicateReleaseVideos)
 		case []*model.Style:
-			r = doWrite[*model.Style](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateStyles)
 		case []*model.Genre:
-			r = doWrite[*model.Genre](o, chunkSize, g.db)
+			r = writeCanonicalBatch(o, chunkSize, g.db, deduplicateGenres)
 		}
 		if r != nil {
 			updated += r.Count()
@@ -160,6 +159,19 @@ func (g gormWriter) Write(chunkSize int, slices ...interface{}) result.Result {
 	}
 
 	return result.NewResult(updated, err)
+}
+
+func writeCanonicalBatch[T any](
+	items []T,
+	chunkSize int,
+	db *gorm.DB,
+	deduplicate func([]T) ([]T, error),
+) result.Result {
+	deduplicated, err := deduplicate(items)
+	if err != nil {
+		return result.NewResult(0, err)
+	}
+	return doWrite(deduplicated, chunkSize, db)
 }
 
 func writeReleaseRelationBatch[T any](
@@ -204,7 +216,7 @@ func doWrite[T any](items []T, chunkSize int, db *gorm.DB) result.Result {
 		if end > size {
 			end = size
 		}
-		part := unique.Slice(items[start:end])
+		part := items[start:end]
 		tx := db.Clauses(cl).CreateInBatches(&part, len(part))
 		resultSum = resultSum.Sum(result.NewResult(int(tx.RowsAffected), tx.Error))
 		start += chunkSize

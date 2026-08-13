@@ -6,7 +6,6 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/cavaliergopher/grab/v3 v3.0.1
 	github.com/knadh/koanf v1.5.0
-	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/moby/moby/api v1.55.0
 	github.com/reactivex/rxgo/v2 v2.5.0
 	github.com/schollz/progressbar/v3 v3.19.1

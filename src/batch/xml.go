@@ -10,7 +10,6 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/dateparser"
 	"github.com/dsub-io/go-open-discogs-batch/src/helper"
-	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
 	"github.com/reactivex/rxgo/v2"
 )
@@ -88,7 +87,7 @@ func (a *XmlArtistRelation) GetUrls() []*opendiscogsmodel.ArtistURL {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (a *XmlArtistRelation) GetNameVars() []*opendiscogsmodel.ArtistNameVariation {
@@ -107,7 +106,7 @@ func (a *XmlArtistRelation) GetNameVars() []*opendiscogsmodel.ArtistNameVariatio
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
@@ -124,7 +123,7 @@ func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
@@ -141,7 +140,7 @@ func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (a *XmlArtistRelation) GetMembers() []*opendiscogsmodel.ArtistMember {
@@ -158,7 +157,7 @@ func (a *XmlArtistRelation) GetMembers() []*opendiscogsmodel.ArtistMember {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 type XmlLabel struct {
@@ -221,7 +220,7 @@ func (l *XmlLabelRelation) GetUrls() []*opendiscogsmodel.LabelURL {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (l *XmlLabelRelation) GetSubLabels() []*opendiscogsmodel.LabelSubLabel {
@@ -238,7 +237,7 @@ func (l *XmlLabelRelation) GetSubLabels() []*opendiscogsmodel.LabelSubLabel {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 type XmlMaster struct {
@@ -306,7 +305,7 @@ func (m *XmlMasterRelation) GetMaster() *opendiscogsmodel.Master {
 
 func (m *XmlMasterRelation) GetMasterStyles() []*opendiscogsmodel.MasterStyle {
 	items := make([]*opendiscogsmodel.MasterStyle, 0, len(m.Styles))
-	for _, value := range unique.Slice(m.Styles) {
+	for _, value := range m.Styles {
 		style := strings.TrimSpace(value)
 		if style == "" {
 			continue
@@ -324,7 +323,7 @@ func (m *XmlMasterRelation) GetMasterStyles() []*opendiscogsmodel.MasterStyle {
 
 func (m *XmlMasterRelation) GetMasterGenres() []*opendiscogsmodel.MasterGenre {
 	items := make([]*opendiscogsmodel.MasterGenre, 0, len(m.Genres))
-	for _, value := range unique.Slice(m.Genres) {
+	for _, value := range m.Genres {
 		genre := strings.TrimSpace(value)
 		if genre == "" {
 			continue
@@ -361,7 +360,7 @@ func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 func (m *XmlMasterRelation) GetMasterArtists() []*opendiscogsmodel.MasterArtist {
@@ -378,7 +377,7 @@ func (m *XmlMasterRelation) GetMasterArtists() []*opendiscogsmodel.MasterArtist 
 			LastModifiedAt: now,
 		})
 	}
-	return unique.Slice(items)
+	return items
 }
 
 type XmlRelease struct {
@@ -854,7 +853,7 @@ func parsedReleaseDate(value *string) (*time.Time, bool, bool, bool) {
 
 func genres(values []string) []*opendiscogsmodel.Genre {
 	items := make([]*opendiscogsmodel.Genre, 0, len(values))
-	for _, value := range unique.Slice(values) {
+	for _, value := range deduplicateComparable(values) {
 		name := strings.TrimSpace(value)
 		if name != "" {
 			items = append(items, &opendiscogsmodel.Genre{Name: name})
@@ -865,7 +864,7 @@ func genres(values []string) []*opendiscogsmodel.Genre {
 
 func styles(values []string) []*opendiscogsmodel.Style {
 	items := make([]*opendiscogsmodel.Style, 0, len(values))
-	for _, value := range unique.Slice(values) {
+	for _, value := range deduplicateComparable(values) {
 		name := strings.TrimSpace(value)
 		if name != "" {
 			items = append(items, &opendiscogsmodel.Style{Name: name})

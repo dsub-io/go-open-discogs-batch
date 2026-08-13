@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 )
 
@@ -133,6 +132,7 @@ func writeReleaseRelationChunk(
 	}
 	var (
 		artistError         error
+		releaseError        error
 		creditedArtistError error
 		workError           error
 		styleError          error
@@ -143,6 +143,7 @@ func writeReleaseRelationChunk(
 		trackError          error
 		videoError          error
 	)
+	releases, releaseError = deduplicateReleaseItems(releases)
 	artists, artistError = deduplicateReleaseArtists(artists)
 	creditedArtists, creditedArtistError = deduplicateReleaseCreditedArtists(creditedArtists)
 	works, workError = deduplicateReleaseWorks(works)
@@ -154,6 +155,7 @@ func writeReleaseRelationChunk(
 	tracks, trackError = deduplicateReleaseTracks(tracks)
 	videos, videoError = deduplicateReleaseVideos(videos)
 	if deduplicateError := errors.Join(
+		releaseError,
 		artistError,
 		creditedArtistError,
 		workError,
@@ -167,7 +169,7 @@ func writeReleaseRelationChunk(
 	); deduplicateError != nil {
 		return result.NewResult(0, deduplicateError)
 	}
-	rootIDs = unique.Slice(rootIDs)
+	rootIDs = deduplicateComparable(rootIDs)
 	genres = filterGenres(genres)
 	styles = filterStyles(styles)
 	sortReferenceEntities(genres, styles)
@@ -200,7 +202,7 @@ func writeReleaseRelationChunk(
 		); referenceResult.IsErr() {
 			return referenceResult
 		}
-		written := writeChunk(transactionOrder, releases)
+		written := doWrite(releases, transactionOrder.getChunkSize(), transactionOrder.getDB())
 		if written.IsErr() {
 			return written
 		}
@@ -372,7 +374,7 @@ func releaseMasterIDsToLock(releases []*XmlReleaseRelation) []int32 {
 		}
 		masterIDs = append(masterIDs, *release.MasterInfo.MasterID)
 	}
-	masterIDs = unique.Slice(masterIDs)
+	masterIDs = deduplicateComparable(masterIDs)
 	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
 	return masterIDs
 }
@@ -390,7 +392,7 @@ func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) resul
 		}
 		updates[*release.MasterInfo.MasterID] = release.ID
 	}
-	releaseIDs = unique.Slice(releaseIDs)
+	releaseIDs = deduplicateComparable(releaseIDs)
 	mainReleaseIDs := make([]int32, 0, len(updates))
 	for _, releaseID := range updates {
 		mainReleaseIDs = append(mainReleaseIDs, releaseID)
@@ -449,23 +451,43 @@ func masterMainReleaseUpdateStatement(
 }
 
 func filterGenres(genres []*model.Genre) []*model.Genre {
-	r := make([]*model.Genre, 0)
-	for _, v := range unique.Slice(genres) {
-		if name := strings.TrimSpace(v.Name); len(name) == 0 {
+	seen := make(map[string]struct{}, len(genres))
+	r := make([]*model.Genre, 0, len(genres))
+	for _, value := range genres {
+		if value == nil {
 			continue
 		}
-		r = append(r, v)
+		name := strings.TrimSpace(value.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		value.Name = name
+		r = append(r, value)
 	}
 	return r
 }
 
 func filterStyles(styles []*model.Style) []*model.Style {
-	r := make([]*model.Style, 0)
-	for _, v := range unique.Slice(styles) {
-		if name := strings.TrimSpace(v.Name); len(name) == 0 {
+	seen := make(map[string]struct{}, len(styles))
+	r := make([]*model.Style, 0, len(styles))
+	for _, value := range styles {
+		if value == nil {
 			continue
 		}
-		r = append(r, v)
+		name := strings.TrimSpace(value.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		value.Name = name
+		r = append(r, value)
 	}
 	return r
 }

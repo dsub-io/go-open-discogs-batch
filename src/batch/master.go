@@ -1,9 +1,10 @@
 package batch
 
 import (
+	"errors"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 )
 
@@ -69,7 +70,28 @@ func writeMasterRelationChunk(
 		videos = append(videos, item.GetMasterVideos()...)
 		artists = append(artists, item.GetMasterArtists()...)
 	}
-	rootIDs = unique.Slice(rootIDs)
+	var (
+		masterError error
+		artistError error
+		genreError  error
+		styleError  error
+		videoError  error
+	)
+	masters, masterError = deduplicateMasters(masters)
+	artists, artistError = deduplicateMasterArtists(artists)
+	masterGenres, genreError = deduplicateMasterGenres(masterGenres)
+	masterStyles, styleError = deduplicateMasterStyles(masterStyles)
+	videos, videoError = deduplicateMasterVideos(videos)
+	if deduplicateError := errors.Join(
+		masterError,
+		artistError,
+		genreError,
+		styleError,
+		videoError,
+	); deduplicateError != nil {
+		return result.NewResult(0, deduplicateError)
+	}
+	rootIDs = deduplicateComparable(rootIDs)
 	genres = filterGenres(genres)
 	styles = filterStyles(styles)
 	sortReferenceEntities(genres, styles)
@@ -93,7 +115,7 @@ func writeMasterRelationChunk(
 		); referenceResult.IsErr() {
 			return referenceResult
 		}
-		written := writeChunk(transactionOrder, masters)
+		written := doWrite(masters, transactionOrder.getChunkSize(), transactionOrder.getDB())
 		if written.IsErr() {
 			return written
 		}

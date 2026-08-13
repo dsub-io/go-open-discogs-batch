@@ -1,8 +1,9 @@
 package batch
 
 import (
+	"errors"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 )
 
@@ -66,7 +67,13 @@ func writeLabelRelationChunk(
 		urls = append(urls, item.GetUrls()...)
 		subLabels = append(subLabels, item.GetSubLabels()...)
 	}
-	rootIDs = unique.Slice(rootIDs)
+	var urlError, subLabelError error
+	urls, urlError = deduplicateLabelURLs(urls)
+	subLabels, subLabelError = deduplicateLabelSubLabels(subLabels)
+	if deduplicateError := errors.Join(urlError, subLabelError); deduplicateError != nil {
+		return result.NewResult(0, deduplicateError)
+	}
+	rootIDs = deduplicateComparable(rootIDs)
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		existingRoots, err := findExistingRelationRoots(
 			transactionOrder,

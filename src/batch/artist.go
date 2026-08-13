@@ -1,8 +1,9 @@
 package batch
 
 import (
+	"errors"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 )
 
@@ -79,7 +80,28 @@ func writeArtistRelationChunk(
 		nameVariations = append(nameVariations, item.GetNameVars()...)
 		urls = append(urls, item.GetUrls()...)
 	}
-	rootIDs = unique.Slice(rootIDs)
+	var (
+		aliasError         error
+		groupError         error
+		memberError        error
+		nameVariationError error
+		urlError           error
+	)
+	aliases, aliasError = deduplicateArtistAliases(aliases)
+	groups, groupError = deduplicateArtistGroups(groups)
+	members, memberError = deduplicateArtistMembers(members)
+	nameVariations, nameVariationError = deduplicateArtistNameVariations(nameVariations)
+	urls, urlError = deduplicateArtistURLs(urls)
+	if deduplicateError := errors.Join(
+		aliasError,
+		groupError,
+		memberError,
+		nameVariationError,
+		urlError,
+	); deduplicateError != nil {
+		return result.NewResult(0, deduplicateError)
+	}
+	rootIDs = deduplicateComparable(rootIDs)
 	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
 		existingRoots, err := findExistingRelationRoots(
 			transactionOrder,
