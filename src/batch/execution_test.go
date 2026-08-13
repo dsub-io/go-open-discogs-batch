@@ -1340,12 +1340,14 @@ func TestImportExecutionCoordinator(t *testing.T) {
 			ctx, artistDump, testChunkSize, false, false,
 		)
 		require.NoError(t, err)
+		assertBootstrapForeignKeys(t, db, artistEntityType, 0, 0)
 		assertCatalogEntityState(
 			t, db, artistEntityType, catalogStatusImporting, "bootstrap",
 			bootstrapPreparation.RunID, 0,
 		)
 		complete(t, bootstrapPreparation, artistDump)
 		require.NoError(t, bootstrap.Complete(ctx, nil))
+		assertBootstrapForeignKeys(t, db, artistEntityType, 8, 8)
 		assertCatalogEntityState(
 			t, db, artistEntityType, catalogStatusReady, "",
 			0, bootstrapPreparation.RunID,
@@ -1360,6 +1362,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 			ctx, refreshDump, testChunkSize, false, false,
 		)
 		require.NoError(t, err)
+		assertBootstrapForeignKeys(t, db, artistEntityType, 8, 8)
 		assertCatalogEntityState(
 			t, db, artistEntityType, catalogStatusImporting, "refresh",
 			failedPreparation.RunID, bootstrapPreparation.RunID,
@@ -1452,6 +1455,30 @@ func assertCatalogReadiness(
 	require.Equal(t, ready, state.Ready)
 	require.Equal(t, status, state.Status)
 	require.Equal(t, readyEntities, state.ReadyEntities)
+}
+
+func assertBootstrapForeignKeys(
+	t *testing.T,
+	db *gorm.DB,
+	entityType string,
+	expectedExisting int64,
+	expectedValidated int64,
+) {
+	t.Helper()
+	var state struct {
+		Existing  int64
+		Validated int64
+	}
+	require.NoError(t, db.Raw(`
+		select count(constraint_state.oid) as existing,
+		       count(constraint_state.oid) filter (where constraint_state.convalidated) as validated
+		from discogs_bootstrap_foreign_keys() foreign_key
+		left join pg_constraint constraint_state
+		  on constraint_state.conrelid = to_regclass(format('public.%I', foreign_key.table_name))
+		 and constraint_state.conname = foreign_key.constraint_name
+		where foreign_key.entity_type = ?`, entityType).Scan(&state).Error)
+	require.Equal(t, expectedExisting, state.Existing)
+	require.Equal(t, expectedValidated, state.Validated)
 }
 
 func seedPendingCatalogStates(t *testing.T, db *gorm.DB) {

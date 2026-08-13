@@ -27,6 +27,8 @@ const (
 	undefinedColumnSQLState               = "42703"
 	importContractRevisionMigration       = "V009"
 	importContractRevisionColumnReference = "discogs_import_run_dump.import_contract_revision"
+	prepareBootstrapForeignKeysSQL        = "select prepare_discogs_bootstrap_foreign_keys($1)"
+	finalizeBootstrapSQL                  = "select finalize_discogs_bootstrap($1)"
 )
 
 var fingerprintImportManifest = opendiscogsmanifest.Fingerprint
@@ -303,6 +305,17 @@ func (c *ImportExecutionCoordinator) Prepare(
 		c.release(ctx)
 		return nil, err
 	}
+	if err := runBootstrapOperation(
+		ctx,
+		tx,
+		prepareBootstrapForeignKeysSQL,
+		runID,
+		"prepare",
+	); err != nil {
+		_ = tx.Rollback()
+		c.release(ctx)
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		_ = tx.Rollback()
 		c.release(ctx)
@@ -358,7 +371,6 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 			statusReason = completionErr
 		}
 	}
-
 	status := "success"
 	failure := sql.NullString{}
 	if statusReason != nil {
@@ -391,6 +403,16 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 		return fmt.Errorf("import run %d was not running", c.runID)
 	}
 	if statusReason == nil {
+		if err := runBootstrapOperation(
+			ctx,
+			tx,
+			finalizeBootstrapSQL,
+			c.runID,
+			"finalize",
+		); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 		if err := markCatalogStatesReady(ctx, tx, c.runID, c.entities); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -424,6 +446,20 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 	}
 	c.runID = 0
 	return completionErr
+}
+
+func runBootstrapOperation(
+	ctx context.Context,
+	tx *sql.Tx,
+	query string,
+	runID int64,
+	action string,
+) error {
+	var affectedConstraints int
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&affectedConstraints); err != nil {
+		return fmt.Errorf("%s import run %d bootstrap: %w", action, runID, err)
+	}
+	return nil
 }
 
 func (c *ImportExecutionCoordinator) acquireEntityLocks(

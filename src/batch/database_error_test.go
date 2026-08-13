@@ -1793,6 +1793,26 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 			want: "copy import run 7 summaries",
 		},
 		{
+			name: "prepare bootstrap",
+			setup: func(mock sqlmock.Sqlmock) {
+				expectEntityLock(mock)
+				mock.ExpectBegin()
+				expectMarkAbandoned(mock)
+				expectNoCheckpoint(mock)
+				expectInsertedDump(mock, dump)
+				expectNoSuccessfulRun(mock)
+				expectNoResumableRun(mock)
+				expectInsertedRun(mock, sqlmock.AnyArg())
+				expectInsertedRunDump(mock)
+				expectCatalogImporting(mock, 2, 1)
+				mock.ExpectQuery("select prepare_discogs_bootstrap_foreign_keys").
+					WithArgs(int64(2)).WillReturnError(expected)
+				mock.ExpectRollback()
+				expectEntityUnlock(mock)
+			},
+			want: "prepare import run 2 bootstrap",
+		},
+		{
 			name: "commit",
 			setup: func(mock sqlmock.Sqlmock) {
 				expectEntityLock(mock)
@@ -1805,6 +1825,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectInsertedRun(mock, sqlmock.AnyArg())
 				expectInsertedRunDump(mock)
 				expectCatalogImporting(mock, 2, 1)
+				expectPreparedBootstrap(mock, 2)
 				mock.ExpectCommit().WillReturnError(expected)
 				expectEntityUnlock(mock)
 			},
@@ -1869,6 +1890,18 @@ func expectCatalogReady(mock sqlmock.Sqlmock, runID int64, rows int64) {
 	mock.ExpectExec("update discogs_catalog_entity_state").
 		WithArgs(catalogStatusReady, runID, "array").
 		WillReturnResult(sqlmock.NewResult(0, rows))
+}
+
+func expectPreparedBootstrap(mock sqlmock.Sqlmock, runID int64) {
+	mock.ExpectQuery("select prepare_discogs_bootstrap_foreign_keys").
+		WithArgs(runID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+}
+
+func expectFinalizedBootstrap(mock sqlmock.Sqlmock, runID int64) {
+	mock.ExpectQuery("select finalize_discogs_bootstrap").
+		WithArgs(runID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 }
 
 func expectCompletionValidation(mock sqlmock.Sqlmock) {
@@ -1949,11 +1982,24 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 			want:   "was not running",
 		},
 		{
+			name: "finalize bootstrap",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectBegin()
+				expectCompletionValidation(mock)
+				expectCompletedRunUpdate(mock)
+				mock.ExpectQuery("select finalize_discogs_bootstrap").
+					WithArgs(int64(1)).WillReturnError(expected)
+				mock.ExpectRollback()
+			},
+			want: "finalize import run 1 bootstrap",
+		},
+		{
 			name: "ready catalog state",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
 				mock.ExpectExec("update discogs_catalog_entity_state").WillReturnError(expected)
 				mock.ExpectRollback()
 			},
@@ -1978,6 +2024,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
 				expectCatalogReady(mock, 1, 1)
 				mock.ExpectExec("delete from discogs_import_run_chunk run_chunk").WillReturnError(expected)
 				mock.ExpectRollback()
@@ -1990,6 +2037,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
 				expectCatalogReady(mock, 1, 1)
 				expectPrunedSupersededProgress(mock)
 				mock.ExpectExec("delete from discogs_import_run_chunk where import_run_id").
@@ -2005,6 +2053,7 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
 				expectCatalogReady(mock, 1, 1)
 				expectPrunedSupersededProgress(mock)
 				mock.ExpectExec("delete from discogs_import_run_chunk where import_run_id").
