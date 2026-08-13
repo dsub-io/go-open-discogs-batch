@@ -218,8 +218,11 @@ func runMasterMainReleaseReconciliationConvergesAndRollsBack(t *testing.T, dsn s
 
 	first := reconcileMasterMainReleases(order)
 	require.NoError(t, first.Err())
+	require.Equal(t, 2, first.Count())
 	require.Equal(t, releaseA, masterMainReleaseID(t, db, masterA))
 	require.Equal(t, releaseB, masterMainReleaseID(t, db, masterC))
+	require.Equal(t, now, masterLastModifiedAt(t, db, masterA))
+	require.Equal(t, now, masterLastModifiedAt(t, db, masterC))
 
 	require.NoError(t, db.Exec(
 		`UPDATE release_item
@@ -281,6 +284,15 @@ func masterMainReleaseID(t *testing.T, db *gorm.DB, masterID int32) int32 {
 		return 0
 	}
 	return int32(releaseID.Int64)
+}
+
+func masterLastModifiedAt(t *testing.T, db *gorm.DB, masterID int32) time.Time {
+	t.Helper()
+	var observedAt time.Time
+	require.NoError(t, db.Raw(
+		"SELECT last_modified_at FROM master WHERE id = ?", masterID,
+	).Scan(&observedAt).Error)
+	return observedAt.UTC()
 }
 
 func runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently(

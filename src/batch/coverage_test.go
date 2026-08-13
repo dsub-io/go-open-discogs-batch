@@ -597,6 +597,9 @@ func TestReleaseMasterReconciliationUsesFixedSetStatements(t *testing.T) {
 	require.Contains(t, releaseMainReleaseSetSQL, "FOR UPDATE OF target")
 	require.Contains(t, releaseMainReleaseClearSQL, "main_release_id = NULL")
 	require.Contains(t, releaseMainReleaseSetSQL, "main_release_id = pending.release_id")
+	require.Contains(t, releaseMainReleaseClearSQL, "LEFT JOIN desired")
+	require.NotContains(t, releaseMainReleaseClearSQL, "last_modified_at =")
+	require.NotContains(t, releaseMainReleaseSetSQL, "last_modified_at =")
 	require.NotContains(t, releaseMainReleaseClearSQL, "VALUES")
 	require.NotContains(t, releaseMainReleaseSetSQL, "VALUES")
 }

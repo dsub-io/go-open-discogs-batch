@@ -16,8 +16,7 @@ const (
 	releaseMainReleaseClearSQL = `WITH desired AS MATERIALIZED (
 		SELECT DISTINCT ON (release_item.master_id)
 		       release_item.master_id,
-		       release_item.id AS release_id,
-		       release_item.last_modified_at AS observed_at
+		       release_item.id AS release_id
 		  FROM release_item
 		 WHERE release_item.is_master IS TRUE
 		   AND release_item.master_id IS NOT NULL
@@ -26,26 +25,22 @@ const (
 		          release_item.id DESC
 	),
 	stale AS MATERIALIZED (
-		SELECT target.id,
-		       current_release.last_modified_at AS observed_at
+		SELECT target.id
 		  FROM master AS target
-		  JOIN release_item AS current_release
-		    ON current_release.id = target.main_release_id
 		  LEFT JOIN desired ON desired.master_id = target.id
 		 WHERE target.main_release_id IS DISTINCT FROM desired.release_id
+		   AND target.main_release_id IS NOT NULL
 		 ORDER BY target.id
 		 FOR UPDATE OF target
 	)
 	UPDATE master AS target
-	   SET main_release_id = NULL,
-	       last_modified_at = stale.observed_at
+	   SET main_release_id = NULL
 	  FROM stale
 	 WHERE target.id = stale.id`
 	releaseMainReleaseSetSQL = `WITH desired AS MATERIALIZED (
 		SELECT DISTINCT ON (release_item.master_id)
 		       release_item.master_id,
-		       release_item.id AS release_id,
-		       release_item.last_modified_at AS observed_at
+		       release_item.id AS release_id
 		  FROM release_item
 		 WHERE release_item.is_master IS TRUE
 		   AND release_item.master_id IS NOT NULL
@@ -55,8 +50,7 @@ const (
 	),
 	pending AS MATERIALIZED (
 		SELECT target.id,
-		       desired.release_id,
-		       desired.observed_at
+		       desired.release_id
 		  FROM desired
 		  JOIN master AS target ON target.id = desired.master_id
 		 WHERE target.main_release_id IS DISTINCT FROM desired.release_id
@@ -64,8 +58,7 @@ const (
 		 FOR UPDATE OF target
 	)
 	UPDATE master AS target
-	   SET main_release_id = pending.release_id,
-	       last_modified_at = pending.observed_at
+	   SET main_release_id = pending.release_id
 	  FROM pending
 	 WHERE target.id = pending.id`
 )
