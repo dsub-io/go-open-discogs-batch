@@ -114,6 +114,7 @@ jobs:
     env:
       IMAGE_REPOSITORY: ghcr.io/dsub-io/go-open-discogs-batch
       OPEN_DISCOGS_TEST_RUN_ID: gh-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+      TESTCONTAINERS_RYUK_DISABLED: "true"
     permissions:
       contents: write
       packages: write

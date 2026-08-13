@@ -232,12 +232,12 @@ func validPostgresContainerStub() *postgresContainerStub {
 
 func TestCurrentTestRunID(t *testing.T) {
 	t.Setenv(testRunIDEnv, "")
-	actual, err := currentTestRunID()
+	actual, err := CurrentTestRunID()
 	require.NoError(t, err)
 	require.Equal(t, localTestRunID, actual)
 
 	t.Setenv(testRunIDEnv, "ci-123.4_job")
-	actual, err = currentTestRunID()
+	actual, err = CurrentTestRunID()
 	require.NoError(t, err)
 	require.Equal(t, "ci-123.4_job", actual)
 
@@ -247,7 +247,7 @@ func TestCurrentTestRunID(t *testing.T) {
 		strings.Repeat("a", testRunIDMaxLength+1),
 	} {
 		t.Setenv(testRunIDEnv, invalid)
-		_, err = currentTestRunID()
+		_, err = CurrentTestRunID()
 		require.ErrorContains(t, err, testRunIDEnv)
 	}
 }

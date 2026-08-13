@@ -238,7 +238,7 @@ func setupPostgres(t testReporter) Database {
 }
 
 func postgresContainerRequest() (testcontainers.ContainerRequest, error) {
-	testRunID, err := currentTestRunID()
+	testRunID, err := CurrentTestRunID()
 	if err != nil {
 		return testcontainers.ContainerRequest{}, err
 	}
@@ -267,7 +267,8 @@ func postgresContainerRequest() (testcontainers.ContainerRequest, error) {
 	}, nil
 }
 
-func currentTestRunID() (string, error) {
+// CurrentTestRunID identifies resources owned by the current test invocation.
+func CurrentTestRunID() (string, error) {
 	testRunID := os.Getenv(testRunIDEnv)
 	if testRunID == "" {
 		testRunID = localTestRunID

@@ -237,15 +237,17 @@ func startRestartablePostgres(
 	ctx context.Context,
 ) (testcontainers.Container, testutils.Database) {
 	t.Helper()
-	runID := fmt.Sprintf("postgres-restart-%d-%d", os.Getpid(), time.Now().UTC().UnixNano())
-	volumeName := "open-discogs-" + runID
+	testRunID, err := testutils.CurrentTestRunID()
+	require.NoError(t, err)
+	resourceID := fmt.Sprintf("postgres-restart-%d-%d", os.Getpid(), time.Now().UTC().UnixNano())
+	volumeName := "open-discogs-" + resourceID
 	docker, err := testcontainers.NewDockerClientWithOpts(ctx)
 	require.NoError(t, err)
 	_, err = docker.VolumeCreate(ctx, dockerclient.VolumeCreateOptions{
 		Name: volumeName,
 		Labels: map[string]string{
 			restartPostgresOwnerLabel:    restartPostgresOwnerValue,
-			restartPostgresRunLabel:      runID,
+			restartPostgresRunLabel:      testRunID,
 			restartPostgresResourceLabel: restartPostgresResourceValue,
 		},
 	})
@@ -298,7 +300,7 @@ func startRestartablePostgres(
 				ExposedPorts: []string{restartPostgresPort},
 				Labels: map[string]string{
 					restartPostgresOwnerLabel:    restartPostgresOwnerValue,
-					restartPostgresRunLabel:      runID,
+					restartPostgresRunLabel:      testRunID,
 					restartPostgresResourceLabel: restartPostgresResourceValue,
 				},
 				Mounts: testcontainers.Mounts(
