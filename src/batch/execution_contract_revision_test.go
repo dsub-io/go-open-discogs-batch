@@ -20,10 +20,10 @@ func TestImportContractRevisionDefinition(t *testing.T) {
 		releaseEntityType,
 	})
 	require.NoError(t, err)
-	require.Equal(t, []importContractRevision{1, 1, 1, 3}, revisions)
+	require.Equal(t, []importContractRevision{2, 2, 2, 3}, revisions)
 	require.Equal(
 		t,
-		"case relation.entity_type when 'artist' then 1 when 'label' then 1 when 'master' then 1 when 'release' then 3 end",
+		"case relation.entity_type when 'artist' then 2 when 'label' then 2 when 'master' then 2 when 'release' then 3 end",
 		importContractRevisionSQL("relation.entity_type"),
 	)
 

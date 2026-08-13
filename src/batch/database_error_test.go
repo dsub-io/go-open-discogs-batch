@@ -1526,7 +1526,7 @@ func expectInsertedRun(mock sqlmock.Sqlmock, resumedFrom interface{}) {
 
 func expectInsertedRunDump(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("insert into discogs_import_run_dump").
-		WithArgs(int64(2), "artist", int64(1), 5, importContractRevision(1)).
+		WithArgs(int64(2), "artist", int64(1), 5, currentImportContractRevisions[artistEntityType]).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -1766,7 +1766,8 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoResumableRun(mock)
 				expectInsertedRun(mock, sqlmock.AnyArg())
 				mock.ExpectExec("insert into discogs_import_run_dump").WithArgs(
-					int64(2), "artist", int64(1), 5, importContractRevision(1),
+					int64(2), "artist", int64(1), 5,
+					currentImportContractRevisions[artistEntityType],
 				).WillReturnError(expected)
 				mock.ExpectRollback()
 				expectEntityUnlock(mock)

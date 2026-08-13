@@ -18,11 +18,17 @@ var (
 	artistMemberRelation = integerRelation{
 		table: "artist_member", parentColumn: "artist_id", keyColumn: "member_id",
 	}
-	artistNameVariationRelation = integerRelation{
-		table: "artist_name_variation", parentColumn: "artist_id", keyColumn: "hash",
+	artistNameVariationRelation = digestIntegerRelation{
+		table:          "artist_name_variation",
+		parentColumn:   "artist_id",
+		keyColumn:      "hash",
+		identityColumn: "identity_sha256",
 	}
-	artistURLRelation = integerRelation{
-		table: "artist_url", parentColumn: "artist_id", keyColumn: "hash",
+	artistURLRelation = digestIntegerRelation{
+		table:          "artist_url",
+		parentColumn:   "artist_id",
+		keyColumn:      "hash",
+		identityColumn: "identity_sha256",
 	}
 )
 
@@ -95,86 +101,89 @@ func writeArtistRelationChunk(
 	members, memberError = deduplicateArtistMembers(members)
 	nameVariations, nameVariationError = deduplicateArtistNameVariations(nameVariations)
 	urls, urlError = deduplicateArtistURLs(urls)
-	if deduplicateError := errors.Join(
+	return afterCanonicalization(errors.Join(
 		aliasError,
 		groupError,
 		memberError,
 		nameVariationError,
 		urlError,
-	); deduplicateError != nil {
-		return result.NewResult(0, deduplicateError)
-	}
-	rootIDs = deduplicateComparable(rootIDs)
-	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
-		existingRoots, err := findExistingRelationRoots(
-			transactionOrder,
-			rootIDs,
-			relationRootTable{artistAliasRelation.table, artistAliasRelation.parentColumn},
-			relationRootTable{artistGroupRelation.table, artistGroupRelation.parentColumn},
-			relationRootTable{artistMemberRelation.table, artistMemberRelation.parentColumn},
-			relationRootTable{artistNameVariationRelation.table, artistNameVariationRelation.parentColumn},
-			relationRootTable{artistURLRelation.table, artistURLRelation.parentColumn},
-		)
-		if err != nil {
-			return result.NewResult(0, err)
-		}
-		reconcile := []func() result.Result{
-			func() result.Result {
-				return reconcileIntegerRelation(
-					transactionOrder,
-					artistAliasRelation,
-					len(existingRoots.forTable(artistAliasRelation.table)) > 0,
-					existingRoots.forTable(artistAliasRelation.table),
-					aliases,
-					func(item *model.ArtistAlias) int32 { return item.ArtistID },
-					func(item *model.ArtistAlias) int32 { return item.AliasID },
-				)
-			},
-			func() result.Result {
-				return reconcileIntegerRelation(
-					transactionOrder,
-					artistGroupRelation,
-					len(existingRoots.forTable(artistGroupRelation.table)) > 0,
-					existingRoots.forTable(artistGroupRelation.table),
-					groups,
-					func(item *model.ArtistGroup) int32 { return item.ArtistID },
-					func(item *model.ArtistGroup) int32 { return item.GroupID },
-				)
-			},
-			func() result.Result {
-				return reconcileIntegerRelation(
-					transactionOrder,
-					artistMemberRelation,
-					len(existingRoots.forTable(artistMemberRelation.table)) > 0,
-					existingRoots.forTable(artistMemberRelation.table),
-					members,
-					func(item *model.ArtistMember) int32 { return item.ArtistID },
-					func(item *model.ArtistMember) int32 { return item.MemberID },
-				)
-			},
-			func() result.Result {
-				return reconcileIntegerRelation(
-					transactionOrder,
-					artistNameVariationRelation,
-					len(existingRoots.forTable(artistNameVariationRelation.table)) > 0,
-					existingRoots.forTable(artistNameVariationRelation.table),
-					nameVariations,
-					func(item *model.ArtistNameVariation) int32 { return item.ArtistID },
-					func(item *model.ArtistNameVariation) int32 { return item.Hash },
-				)
-			},
-			func() result.Result {
-				return reconcileIntegerRelation(
-					transactionOrder,
-					artistURLRelation,
-					len(existingRoots.forTable(artistURLRelation.table)) > 0,
-					existingRoots.forTable(artistURLRelation.table),
-					urls,
-					func(item *model.ArtistURL) int32 { return item.ArtistID },
-					func(item *model.ArtistURL) int32 { return item.Hash },
-				)
-			},
-		}
-		return reconcileRelations(reconcile)
+	), func() result.Result {
+		rootIDs = deduplicateComparable(rootIDs)
+		return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
+			existingRoots, err := findExistingRelationRoots(
+				transactionOrder,
+				rootIDs,
+				relationRootTable{artistAliasRelation.table, artistAliasRelation.parentColumn},
+				relationRootTable{artistGroupRelation.table, artistGroupRelation.parentColumn},
+				relationRootTable{artistMemberRelation.table, artistMemberRelation.parentColumn},
+				relationRootTable{artistNameVariationRelation.table, artistNameVariationRelation.parentColumn},
+				relationRootTable{artistURLRelation.table, artistURLRelation.parentColumn},
+			)
+			if err != nil {
+				return result.NewResult(0, err)
+			}
+			reconcile := []func() result.Result{
+				func() result.Result {
+					return reconcileIntegerRelation(
+						transactionOrder,
+						artistAliasRelation,
+						len(existingRoots.forTable(artistAliasRelation.table)) > 0,
+						existingRoots.forTable(artistAliasRelation.table),
+						aliases,
+						func(item *model.ArtistAlias) int32 { return item.ArtistID },
+						func(item *model.ArtistAlias) int32 { return item.AliasID },
+					)
+				},
+				func() result.Result {
+					return reconcileIntegerRelation(
+						transactionOrder,
+						artistGroupRelation,
+						len(existingRoots.forTable(artistGroupRelation.table)) > 0,
+						existingRoots.forTable(artistGroupRelation.table),
+						groups,
+						func(item *model.ArtistGroup) int32 { return item.ArtistID },
+						func(item *model.ArtistGroup) int32 { return item.GroupID },
+					)
+				},
+				func() result.Result {
+					return reconcileIntegerRelation(
+						transactionOrder,
+						artistMemberRelation,
+						len(existingRoots.forTable(artistMemberRelation.table)) > 0,
+						existingRoots.forTable(artistMemberRelation.table),
+						members,
+						func(item *model.ArtistMember) int32 { return item.ArtistID },
+						func(item *model.ArtistMember) int32 { return item.MemberID },
+					)
+				},
+				func() result.Result {
+					return reconcileDigestIntegerRelation(
+						transactionOrder,
+						artistNameVariationRelation,
+						len(existingRoots.forTable(artistNameVariationRelation.table)) > 0,
+						existingRoots.forTable(artistNameVariationRelation.table),
+						nameVariations,
+						func(item *model.ArtistNameVariation) int32 { return item.ArtistID },
+						func(item *model.ArtistNameVariation) int32 { return item.Hash },
+						func(item *model.ArtistNameVariation) *model.SHA256Digest {
+							return item.IdentitySHA256
+						},
+					)
+				},
+				func() result.Result {
+					return reconcileDigestIntegerRelation(
+						transactionOrder,
+						artistURLRelation,
+						len(existingRoots.forTable(artistURLRelation.table)) > 0,
+						existingRoots.forTable(artistURLRelation.table),
+						urls,
+						func(item *model.ArtistURL) int32 { return item.ArtistID },
+						func(item *model.ArtistURL) int32 { return item.Hash },
+						func(item *model.ArtistURL) *model.SHA256Digest { return item.IdentitySHA256 },
+					)
+				},
+			}
+			return reconcileRelations(reconcile)
+		})
 	})
 }

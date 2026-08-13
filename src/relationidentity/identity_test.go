@@ -92,6 +92,19 @@ func TestCompatibilitySlot(t *testing.T) {
 	require.NotEqual(t, CompatibilitySlot(Track, digest, 0), CompatibilitySlot(Track, digest, 1))
 }
 
+func TestCatalogIdentityUsesIndependentDomain(t *testing.T) {
+	t.Parallel()
+
+	value := stringPointer("Example")
+	digest := CatalogSum(ArtistNameVariation, StringField(value))
+	require.NotEqual(t, Sum(Track, StringField(value)), digest)
+	require.NotEqual(
+		t,
+		CatalogCompatibilitySlot(ArtistNameVariation, digest, 0),
+		CatalogCompatibilitySlot(ArtistNameVariation, digest, 1),
+	)
+}
+
 func stringPointer(value string) *string {
 	return &value
 }

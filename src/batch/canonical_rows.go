@@ -1,8 +1,17 @@
 package batch
 
 import (
+	"github.com/dsub-io/go-open-discogs-batch/src/relationidentity"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/open-discogs-model/model"
 )
+
+func afterCanonicalization(err error, persist func() result.Result) result.Result {
+	if err != nil {
+		return result.NewResult(0, err)
+	}
+	return persist()
+}
 
 type twoIntegerKey struct {
 	first  int32
@@ -42,13 +51,23 @@ func deduplicateArtists(items []*model.Artist) ([]*model.Artist, error) {
 }
 
 func deduplicateArtistURLs(items []*model.ArtistURL) ([]*model.ArtistURL, error) {
-	return deduplicateCanonicalRows(
+	return deduplicateHashedCatalogRows(
 		model.ArtistURL{}.TableName(),
+		relationidentity.ArtistURL,
 		items,
-		func(row *model.ArtistURL) twoIntegerKey {
-			return twoIntegerKey{row.ArtistID, row.Hash}
+		func(row *model.ArtistURL) int32 { return row.ArtistID },
+		func(row *model.ArtistURL) int32 { return row.Hash },
+		func(row *model.ArtistURL) relationidentity.Digest {
+			return relationidentity.CatalogSum(
+				relationidentity.ArtistURL,
+				relationidentity.StringField(&row.URL),
+			)
 		},
 		func(left, right *model.ArtistURL) bool { return left.URL == right.URL },
+		func(row *model.ArtistURL, hash int32, digest relationidentity.Digest) {
+			row.Hash = hash
+			row.IdentitySHA256 = modelIdentityDigest(digest)
+		},
 	)
 }
 
@@ -88,14 +107,24 @@ func deduplicateArtistMembers(items []*model.ArtistMember) ([]*model.ArtistMembe
 func deduplicateArtistNameVariations(
 	items []*model.ArtistNameVariation,
 ) ([]*model.ArtistNameVariation, error) {
-	return deduplicateCanonicalRows(
+	return deduplicateHashedCatalogRows(
 		model.ArtistNameVariation{}.TableName(),
+		relationidentity.ArtistNameVariation,
 		items,
-		func(row *model.ArtistNameVariation) twoIntegerKey {
-			return twoIntegerKey{row.ArtistID, row.Hash}
+		func(row *model.ArtistNameVariation) int32 { return row.ArtistID },
+		func(row *model.ArtistNameVariation) int32 { return row.Hash },
+		func(row *model.ArtistNameVariation) relationidentity.Digest {
+			return relationidentity.CatalogSum(
+				relationidentity.ArtistNameVariation,
+				relationidentity.StringField(&row.NameVariation),
+			)
 		},
 		func(left, right *model.ArtistNameVariation) bool {
 			return left.NameVariation == right.NameVariation
+		},
+		func(row *model.ArtistNameVariation, hash int32, digest relationidentity.Digest) {
+			row.Hash = hash
+			row.IdentitySHA256 = modelIdentityDigest(digest)
 		},
 	)
 }
@@ -115,13 +144,23 @@ func deduplicateLabels(items []*model.Label) ([]*model.Label, error) {
 }
 
 func deduplicateLabelURLs(items []*model.LabelURL) ([]*model.LabelURL, error) {
-	return deduplicateCanonicalRows(
+	return deduplicateHashedCatalogRows(
 		model.LabelURL{}.TableName(),
+		relationidentity.LabelURL,
 		items,
-		func(row *model.LabelURL) twoIntegerKey {
-			return twoIntegerKey{row.LabelID, row.Hash}
+		func(row *model.LabelURL) int32 { return row.LabelID },
+		func(row *model.LabelURL) int32 { return row.Hash },
+		func(row *model.LabelURL) relationidentity.Digest {
+			return relationidentity.CatalogSum(
+				relationidentity.LabelURL,
+				relationidentity.StringField(&row.URL),
+			)
 		},
 		func(left, right *model.LabelURL) bool { return left.URL == right.URL },
+		func(row *model.LabelURL, hash int32, digest relationidentity.Digest) {
+			row.Hash = hash
+			row.IdentitySHA256 = modelIdentityDigest(digest)
+		},
 	)
 }
 
@@ -183,16 +222,63 @@ func deduplicateMasterStyles(items []*model.MasterStyle) ([]*model.MasterStyle, 
 }
 
 func deduplicateMasterVideos(items []*model.MasterVideo) ([]*model.MasterVideo, error) {
-	return deduplicateCanonicalRows(
+	return deduplicateHashedCatalogRows(
 		model.MasterVideo{}.TableName(),
+		relationidentity.MasterVideo,
 		items,
-		func(row *model.MasterVideo) twoIntegerKey {
-			return twoIntegerKey{row.MasterID, row.Hash}
+		func(row *model.MasterVideo) int32 { return row.MasterID },
+		func(row *model.MasterVideo) int32 { return row.Hash },
+		func(row *model.MasterVideo) relationidentity.Digest {
+			return relationidentity.CatalogSum(
+				relationidentity.MasterVideo,
+				relationidentity.StringField(row.Title),
+				relationidentity.StringField(row.Description),
+				relationidentity.StringField(row.URL),
+			)
 		},
 		func(left, right *model.MasterVideo) bool {
 			return equalOptionalValue(left.Description, right.Description) &&
 				equalOptionalValue(left.Title, right.Title) &&
 				equalOptionalValue(left.URL, right.URL)
+		},
+		func(row *model.MasterVideo, hash int32, digest relationidentity.Digest) {
+			row.Hash = hash
+			row.IdentitySHA256 = modelIdentityDigest(digest)
+		},
+	)
+}
+
+func deduplicateHashedCatalogRows[T any, K comparable](
+	table string,
+	relation relationidentity.CatalogRelation,
+	items []*T,
+	scope func(*T) K,
+	legacyHash func(*T) int32,
+	digest func(*T) relationidentity.Digest,
+	equalPayload func(*T, *T) bool,
+	setIdentity func(*T, int32, relationidentity.Digest),
+) ([]*T, error) {
+	return deduplicateHashedRowsWithAllocator(
+		table,
+		relation,
+		items,
+		scope,
+		legacyHash,
+		digest,
+		equalPayload,
+		setIdentity,
+		func(
+			relation relationidentity.CatalogRelation,
+			scope *hashedReleaseScope[T],
+			set func(*T, int32, relationidentity.Digest),
+		) error {
+			return assignRelationCompatibilitySlotsWith(
+				relation,
+				scope,
+				set,
+				compatibilitySlotAttemptCount,
+				relationidentity.CatalogCompatibilitySlot,
+			)
 		},
 	)
 }

@@ -1,9 +1,11 @@
 package batch
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +43,7 @@ func TestCanonicalRowsIgnoreDatabaseManagedColumns(t *testing.T) {
 	requireOneCanonicalRow(t, deduplicateArtistURLs, firstURL, secondURL)
 }
 
-func TestCanonicalRowsRejectConflictingPayloads(t *testing.T) {
+func TestCanonicalRootRowsRejectConflictingPayloads(t *testing.T) {
 	firstName := "first"
 	secondName := "second"
 	_, err := deduplicateArtists([]*model.Artist{
@@ -50,31 +52,106 @@ func TestCanonicalRowsRejectConflictingPayloads(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "conflicting artist rows")
 
-	_, err = deduplicateArtistURLs([]*model.ArtistURL{
-		{ArtistID: 1, Hash: 7, URL: "first"},
-		{ArtistID: 1, Hash: 7, URL: "second"},
-	})
-	require.ErrorContains(t, err, "conflicting artist_url rows")
+}
 
-	_, err = deduplicateArtistNameVariations([]*model.ArtistNameVariation{
-		{ArtistID: 1, Hash: 7, NameVariation: "first"},
-		{ArtistID: 1, Hash: 7, NameVariation: "second"},
-	})
-	require.ErrorContains(t, err, "conflicting artist_name_variation rows")
-
-	_, err = deduplicateLabelURLs([]*model.LabelURL{
-		{LabelID: 1, Hash: 7, URL: "first"},
-		{LabelID: 1, Hash: 7, URL: "second"},
-	})
-	require.ErrorContains(t, err, "conflicting label_url rows")
-
+func TestCatalogHashCollisionsPreserveDistinctPayloads(t *testing.T) {
 	firstTitle := "first"
 	secondTitle := "second"
-	_, err = deduplicateMasterVideos([]*model.MasterVideo{
-		{MasterID: 1, Hash: 7, Title: &firstTitle},
-		{MasterID: 1, Hash: 7, Title: &secondTitle},
-	})
-	require.ErrorContains(t, err, "conflicting master_video rows")
+	tests := []struct {
+		name   string
+		verify func(*testing.T)
+	}{
+		{
+			name: "artist URL",
+			verify: func(t *testing.T) {
+				rows, err := deduplicateArtistURLs([]*model.ArtistURL{
+					{ArtistID: 1, Hash: 7, URL: "first"},
+					{ArtistID: 1, Hash: 7, URL: "second"},
+				})
+				require.NoError(t, err)
+				require.Len(t, rows, 2)
+				requireCatalogCollisionPreserved(t, rows[0].Hash, rows[1].Hash,
+					rows[0].IdentitySHA256, rows[1].IdentitySHA256)
+			},
+		},
+		{
+			name: "artist name variation",
+			verify: func(t *testing.T) {
+				rows, err := deduplicateArtistNameVariations([]*model.ArtistNameVariation{
+					{ArtistID: 1, Hash: 7, NameVariation: "first"},
+					{ArtistID: 1, Hash: 7, NameVariation: "second"},
+				})
+				require.NoError(t, err)
+				require.Len(t, rows, 2)
+				requireCatalogCollisionPreserved(t, rows[0].Hash, rows[1].Hash,
+					rows[0].IdentitySHA256, rows[1].IdentitySHA256)
+			},
+		},
+		{
+			name: "label URL",
+			verify: func(t *testing.T) {
+				rows, err := deduplicateLabelURLs([]*model.LabelURL{
+					{LabelID: 1, Hash: 7, URL: "first"},
+					{LabelID: 1, Hash: 7, URL: "second"},
+				})
+				require.NoError(t, err)
+				require.Len(t, rows, 2)
+				requireCatalogCollisionPreserved(t, rows[0].Hash, rows[1].Hash,
+					rows[0].IdentitySHA256, rows[1].IdentitySHA256)
+			},
+		},
+		{
+			name: "master video",
+			verify: func(t *testing.T) {
+				rows, err := deduplicateMasterVideos([]*model.MasterVideo{
+					{MasterID: 1, Hash: 7, Title: &firstTitle},
+					{MasterID: 1, Hash: 7, Title: &secondTitle},
+				})
+				require.NoError(t, err)
+				require.Len(t, rows, 2)
+				requireCatalogCollisionPreserved(t, rows[0].Hash, rows[1].Hash,
+					rows[0].IdentitySHA256, rows[1].IdentitySHA256)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, test.verify)
+	}
+}
+
+func TestArtistNameVariationPreservesProductionHashCollision(t *testing.T) {
+	const collisionHash = int32(-1130078775)
+
+	rows := (&XmlArtistRelation{
+		ID:       33476,
+		NameVars: []string{"Al Thompson", "C. Thompson"},
+	}).GetNameVars()
+	require.Len(t, rows, 2)
+	require.Equal(t, collisionHash, rows[0].Hash)
+	require.Equal(t, collisionHash, rows[1].Hash)
+
+	deduplicated, err := deduplicateArtistNameVariations(rows)
+	require.NoError(t, err)
+	require.Len(t, deduplicated, 2)
+	requireCatalogCollisionPreserved(
+		t,
+		deduplicated[0].Hash,
+		deduplicated[1].Hash,
+		deduplicated[0].IdentitySHA256,
+		deduplicated[1].IdentitySHA256,
+	)
+}
+
+func requireCatalogCollisionPreserved(
+	t *testing.T,
+	firstHash, secondHash int32,
+	firstIdentity, secondIdentity *model.SHA256Digest,
+) {
+	t.Helper()
+	require.NotEqual(t, firstHash, secondHash)
+	require.NotNil(t, firstIdentity)
+	require.NotNil(t, secondIdentity)
+	require.NotEqual(t, firstIdentity, secondIdentity)
 }
 
 func TestRelationChunkTransformsRejectConflictingCanonicalRowsBeforeDatabaseAccess(t *testing.T) {
@@ -84,22 +161,6 @@ func TestRelationChunkTransformsRejectConflictingCanonicalRowsBeforeDatabaseAcce
 		name  string
 		write func() error
 	}{
-		{
-			name: "artist",
-			write: func() error {
-				return writeArtistRelationChunk(nil, ChunkMetadata{}, []*XmlArtistRelation{
-					{ID: 1, URLs: []string{"Aa", "BB"}},
-				}).Err()
-			},
-		},
-		{
-			name: "label",
-			write: func() error {
-				return writeLabelRelationChunk(nil, ChunkMetadata{}, []*XmlLabelRelation{
-					{ID: 1, URLs: []string{"Aa", "BB"}},
-				}).Err()
-			},
-		},
 		{
 			name: "master",
 			write: func() error {
@@ -191,4 +252,13 @@ func TestEveryNonReleaseCanonicalKeyCollapsesExactDuplicates(t *testing.T) {
 
 func TestDeduplicateComparablePreservesFirstSeenOrder(t *testing.T) {
 	require.Equal(t, []int32{3, 1, 2}, deduplicateComparable([]int32{3, 1, 3, 2, 1}))
+}
+
+func TestAfterCanonicalizationStopsBeforePersistence(t *testing.T) {
+	expected := errors.New("fixture")
+	actual := afterCanonicalization(expected, func() result.Result {
+		t.Fatal("persistence must not run after canonicalization fails")
+		return nil
+	})
+	require.ErrorIs(t, actual.Err(), expected)
 }

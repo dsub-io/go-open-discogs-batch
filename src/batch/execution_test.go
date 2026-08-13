@@ -77,10 +77,11 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, err)
 		complete(t, legacyPreparation, dumps)
 		require.NoError(t, legacy.Complete(ctx, nil))
-		setImportContractRevision(
+		setEntityImportContractRevision(
 			t,
 			db,
 			legacyPreparation.RunID,
+			releaseEntityType,
 			legacyImportContractRevision,
 		)
 
@@ -136,10 +137,11 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, err)
 		complete(t, legacyPreparation, dumps)
 		require.NoError(t, legacy.Complete(ctx, nil))
-		setImportContractRevision(
+		setEntityImportContractRevision(
 			t,
 			db,
 			legacyPreparation.RunID,
+			releaseEntityType,
 			legacyImportContractRevision,
 		)
 		checkpointRunIDs := importCheckpointRunIDs(t, db)
@@ -1539,6 +1541,27 @@ func setImportContractRevision(
 	)
 	require.NoError(t, result.Error)
 	require.Positive(t, result.RowsAffected)
+}
+
+func setEntityImportContractRevision(
+	t *testing.T,
+	db *gorm.DB,
+	runID int64,
+	entityType string,
+	revision importContractRevision,
+) {
+	t.Helper()
+	result := db.Exec(
+		`update public.discogs_import_run_dump
+		    set import_contract_revision = ?
+		  where import_run_id = ?
+		    and entity_type = ?`,
+		revision,
+		runID,
+		entityType,
+	)
+	require.NoError(t, result.Error)
+	require.Equal(t, int64(1), result.RowsAffected)
 }
 
 func requireImportContractRevision(

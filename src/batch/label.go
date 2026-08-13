@@ -12,8 +12,11 @@ var (
 	labelSubLabelRelation = integerRelation{
 		table: "label_sub_label", parentColumn: "parent_label_id", keyColumn: "sub_label_id",
 	}
-	labelURLRelation = integerRelation{
-		table: "label_url", parentColumn: "label_id", keyColumn: "hash",
+	labelURLRelation = digestIntegerRelation{
+		table:          "label_url",
+		parentColumn:   "label_id",
+		keyColumn:      "hash",
+		identityColumn: "identity_sha256",
 	}
 )
 
@@ -73,44 +76,44 @@ func writeLabelRelationChunk(
 	var urlError, subLabelError error
 	urls, urlError = deduplicateLabelURLs(urls)
 	subLabels, subLabelError = deduplicateLabelSubLabels(subLabels)
-	if deduplicateError := errors.Join(urlError, subLabelError); deduplicateError != nil {
-		return result.NewResult(0, deduplicateError)
-	}
-	rootIDs = deduplicateComparable(rootIDs)
-	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
-		existingRoots, err := findExistingRelationRoots(
-			transactionOrder,
-			rootIDs,
-			relationRootTable{labelURLRelation.table, labelURLRelation.parentColumn},
-			relationRootTable{labelSubLabelRelation.table, labelSubLabelRelation.parentColumn},
-		)
-		if err != nil {
-			return result.NewResult(0, err)
-		}
-		reconcile := []func() result.Result{
-			func() result.Result {
-				return reconcileIntegerRelation(
-					transactionOrder,
-					labelURLRelation,
-					len(existingRoots.forTable(labelURLRelation.table)) > 0,
-					existingRoots.forTable(labelURLRelation.table),
-					urls,
-					func(item *model.LabelURL) int32 { return item.LabelID },
-					func(item *model.LabelURL) int32 { return item.Hash },
-				)
-			},
-			func() result.Result {
-				return reconcileIntegerRelation(
-					transactionOrder,
-					labelSubLabelRelation,
-					len(existingRoots.forTable(labelSubLabelRelation.table)) > 0,
-					existingRoots.forTable(labelSubLabelRelation.table),
-					subLabels,
-					func(item *model.LabelSubLabel) int32 { return item.ParentLabelID },
-					func(item *model.LabelSubLabel) int32 { return item.SubLabelID },
-				)
-			},
-		}
-		return reconcileRelations(reconcile)
+	return afterCanonicalization(errors.Join(urlError, subLabelError), func() result.Result {
+		rootIDs = deduplicateComparable(rootIDs)
+		return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
+			existingRoots, err := findExistingRelationRoots(
+				transactionOrder,
+				rootIDs,
+				relationRootTable{labelURLRelation.table, labelURLRelation.parentColumn},
+				relationRootTable{labelSubLabelRelation.table, labelSubLabelRelation.parentColumn},
+			)
+			if err != nil {
+				return result.NewResult(0, err)
+			}
+			reconcile := []func() result.Result{
+				func() result.Result {
+					return reconcileDigestIntegerRelation(
+						transactionOrder,
+						labelURLRelation,
+						len(existingRoots.forTable(labelURLRelation.table)) > 0,
+						existingRoots.forTable(labelURLRelation.table),
+						urls,
+						func(item *model.LabelURL) int32 { return item.LabelID },
+						func(item *model.LabelURL) int32 { return item.Hash },
+						func(item *model.LabelURL) *model.SHA256Digest { return item.IdentitySHA256 },
+					)
+				},
+				func() result.Result {
+					return reconcileIntegerRelation(
+						transactionOrder,
+						labelSubLabelRelation,
+						len(existingRoots.forTable(labelSubLabelRelation.table)) > 0,
+						existingRoots.forTable(labelSubLabelRelation.table),
+						subLabels,
+						func(item *model.LabelSubLabel) int32 { return item.ParentLabelID },
+						func(item *model.LabelSubLabel) int32 { return item.SubLabelID },
+					)
+				},
+			}
+			return reconcileRelations(reconcile)
+		})
 	})
 }

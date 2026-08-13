@@ -666,7 +666,7 @@ func TestLabelChunkUsesSubLabelKeys(t *testing.T) {
 		existingRelationRootFixture{table: labelSubLabelRelation.table, rootID: 1},
 	)
 	mock.ExpectExec("delete from label_url").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("delete from label_sub_label").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).

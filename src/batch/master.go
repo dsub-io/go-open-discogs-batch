@@ -19,8 +19,11 @@ var (
 	masterStyleRelation = textRelation{
 		table: "master_style", parentColumn: "master_id", keyColumn: "style",
 	}
-	masterVideoRelation = integerRelation{
-		table: "master_video", parentColumn: "master_id", keyColumn: "hash",
+	masterVideoRelation = digestIntegerRelation{
+		table:          "master_video",
+		parentColumn:   "master_id",
+		keyColumn:      "hash",
+		identityColumn: "identity_sha256",
 	}
 )
 
@@ -157,7 +160,7 @@ func writeMasterRelationChunk(
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					masterVideoRelation,
 					len(existingRoots.forTable(masterVideoRelation.table)) > 0,
@@ -165,6 +168,7 @@ func writeMasterRelationChunk(
 					videos,
 					func(item *model.MasterVideo) int32 { return item.MasterID },
 					func(item *model.MasterVideo) int32 { return item.Hash },
+					func(item *model.MasterVideo) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 		}

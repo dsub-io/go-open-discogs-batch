@@ -23,6 +23,7 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 	}{
 		{"master backlink reconciliation", runMasterMainReleaseReconciliationConvergesAndRollsBack},
 		{"hash collision idempotency", runReleaseRelationWriterPersistsHashCollisionsAndRetriesIdempotently},
+		{"non-release hash collision idempotency", runArtistRelationWriterPersistsHashCollisionsAndRetriesIdempotently},
 		{"legacy identity reconciliation", runReleaseRelationReconciliationBackfillsLegacyIdentityAndRetainsRows},
 		{"unchanged root", runUnchangedRootSkipsPostgreSQLUpdate},
 		{"changed dump convergence", runChangedDumpConvergesRootAndRelations},
@@ -34,6 +35,44 @@ func TestReleaseRelationPostgreSQLContracts(t *testing.T) {
 			test.run(t, dsn)
 		})
 	}
+}
+
+func runArtistRelationWriterPersistsHashCollisionsAndRetriesIdempotently(
+	t *testing.T,
+	dsn string,
+) {
+	db := resetReleaseRelationDatabase(t, dsn)
+	const artistID = int32(33476)
+	now := time.Now().UTC()
+	require.NoError(t, db.Exec(
+		`INSERT INTO artist (id, created_at, last_modified_at) VALUES (?, ?, ?)`,
+		artistID,
+		now,
+		now,
+	).Error)
+	order := NewOrder(context.Background(), 10, 1, "unused", db)
+	items := []*XmlArtistRelation{{
+		ID:       artistID,
+		NameVars: []string{"Al Thompson", "C. Thompson"},
+	}}
+
+	first := writeArtistRelationChunk(order, ChunkMetadata{ItemCount: 1}, items)
+	require.NoError(t, first.Err())
+	require.Equal(t, 2, first.Count())
+
+	var rows []*model.ArtistNameVariation
+	require.NoError(t, db.Where("artist_id = ?", artistID).Order("name_variation").Find(&rows).Error)
+	require.Len(t, rows, 2)
+	require.Equal(t, "Al Thompson", rows[0].NameVariation)
+	require.Equal(t, "C. Thompson", rows[1].NameVariation)
+	require.NotEqual(t, rows[0].Hash, rows[1].Hash)
+	require.NotNil(t, rows[0].IdentitySHA256)
+	require.NotNil(t, rows[1].IdentitySHA256)
+	require.NotEqual(t, rows[0].IdentitySHA256, rows[1].IdentitySHA256)
+
+	retry := writeArtistRelationChunk(order, ChunkMetadata{ItemCount: 1}, items)
+	require.NoError(t, retry.Err())
+	require.Zero(t, retry.Count())
 }
 
 func runChangedDumpConvergesRootAndRelations(t *testing.T, dsn string) {

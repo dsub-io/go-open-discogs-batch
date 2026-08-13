@@ -415,6 +415,34 @@ func deduplicateHashedReleaseRowsWithAllocator[T any, K comparable](
 		func(*T, int32, relationidentity.Digest),
 	) error,
 ) ([]*T, error) {
+	return deduplicateHashedRowsWithAllocator(
+		table,
+		relation,
+		items,
+		scope,
+		legacyHash,
+		digest,
+		equalPayload,
+		setIdentity,
+		allocate,
+	)
+}
+
+func deduplicateHashedRowsWithAllocator[T any, K comparable, R ~string](
+	table string,
+	relation R,
+	items []*T,
+	scope func(*T) K,
+	legacyHash func(*T) int32,
+	digest func(*T) relationidentity.Digest,
+	equalPayload func(*T, *T) bool,
+	setIdentity func(*T, int32, relationidentity.Digest),
+	allocate func(
+		R,
+		*hashedReleaseScope[T],
+		func(*T, int32, relationidentity.Digest),
+	) error,
+) ([]*T, error) {
 	rowsByIdentity := make(map[K]map[relationidentity.Digest]*T)
 	scopes := make(map[K]*hashedReleaseScope[T])
 	deduplicated := make([]*T, 0, len(items))
@@ -492,6 +520,22 @@ func assignCompatibilitySlotsWith[T any](
 	setIdentity func(*T, int32, relationidentity.Digest),
 	attemptCount uint64,
 	generateSlot func(relationidentity.Relation, relationidentity.Digest, uint32) int32,
+) error {
+	return assignRelationCompatibilitySlotsWith(
+		relation,
+		scope,
+		setIdentity,
+		attemptCount,
+		generateSlot,
+	)
+}
+
+func assignRelationCompatibilitySlotsWith[T any, R ~string](
+	relation R,
+	scope *hashedReleaseScope[T],
+	setIdentity func(*T, int32, relationidentity.Digest),
+	attemptCount uint64,
+	generateSlot func(R, relationidentity.Digest, uint32) int32,
 ) error {
 	legacyHashes := make([]int32, 0, len(scope.groups))
 	for legacyHash := range scope.groups {
