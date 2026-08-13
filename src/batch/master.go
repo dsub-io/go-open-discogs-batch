@@ -2,6 +2,7 @@ package batch
 
 import (
 	"errors"
+	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
@@ -48,6 +49,7 @@ func writeMasterRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlMasterRelation,
 ) result.Result {
+	observedAt := time.Now().UTC()
 	styles := make([]*model.Style, 0)
 	genres := make([]*model.Genre, 0)
 	rootIDs := make([]int32, 0, len(items))
@@ -60,6 +62,7 @@ func writeMasterRelationChunk(
 		if item == nil {
 			continue
 		}
+		item.observedAt = observedAt
 		cache.MasterIDs.Add(item.ID)
 		rootIDs = append(rootIDs, item.ID)
 		genres = append(genres, item.GetGenres()...)

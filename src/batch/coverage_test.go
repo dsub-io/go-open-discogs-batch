@@ -42,15 +42,16 @@ func TestBatchConstructor(t *testing.T) {
 }
 
 func TestLegacyCoreTransforms(t *testing.T) {
+	observedAt := time.Unix(1, 0).UTC()
 	master := &XmlMaster{ID: 1, Title: testString("master")}
-	masterResult := <-master.Transform().Observe()
-	require.NoError(t, masterResult.E)
-	require.Equal(t, int32(1), masterResult.V.(*opendiscogsmodel.Master).ID)
+	masterResult := master.TransformAt(observedAt)
+	require.Equal(t, int32(1), masterResult.ID)
+	require.Equal(t, observedAt, masterResult.CreatedAt)
 
 	release := &XmlRelease{ID: 2, Title: testString("release")}
-	releaseResult := <-release.Transform().Observe()
-	require.NoError(t, releaseResult.E)
-	require.Equal(t, int32(2), releaseResult.V.(*opendiscogsmodel.ReleaseItem).ID)
+	releaseResult := release.TransformAt(observedAt)
+	require.Equal(t, int32(2), releaseResult.ID)
+	require.Equal(t, observedAt, releaseResult.CreatedAt)
 }
 
 func TestXMLRelationFiltersInvalidValues(t *testing.T) {
@@ -122,7 +123,9 @@ func TestXMLRelationFiltersInvalidValues(t *testing.T) {
 }
 
 func TestXMLValueBoundaries(t *testing.T) {
-	require.Nil(t, releaseItem(1, nil, nil, nil, nil, nil, XmlReleaseMasterInfo{}, nil).MasterID)
+	require.Nil(t, releaseItem(
+		1, nil, nil, nil, nil, nil, XmlReleaseMasterInfo{}, nil, time.Time{},
+	).MasterID)
 	unknownMaster := int32(99)
 	require.Nil(t, releaseItem(
 		1,
@@ -133,6 +136,7 @@ func TestXMLValueBoundaries(t *testing.T) {
 		nil,
 		XmlReleaseMasterInfo{MasterID: &unknownMaster},
 		nil,
+		time.Time{},
 	).MasterID)
 
 	invalidDate := "invalid"
@@ -280,7 +284,12 @@ func TestSimpleAndRelationPipelineErrorBoundaries(t *testing.T) {
 	missingOrder := NewOrder(context.Background(), 1, 1, filepath.Join(t.TempDir(), "missing.gz"), nil)
 	require.Error(t, GetArtistStep(missingOrder)().Err())
 	require.Error(t, GetLabelStep(missingOrder)().Err())
-	require.Error(t, InsertSimple[XmlArtist, opendiscogsmodel.Artist](missingOrder, "artist", "artist").Err())
+	require.Error(t, InsertSimple(
+		missingOrder,
+		"artist",
+		"artist",
+		(*XmlArtist).TransformAt,
+	).Err())
 	require.Error(t, processRelationChunks[XmlArtistRelation](
 		missingOrder,
 		"artist",
@@ -506,6 +515,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	actual := updateMasterMainReleases(
 		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
 		[]*XmlReleaseRelation{nil},
+		time.Unix(1, 0).UTC(),
 	)
 	require.ErrorIs(t, actual.Err(), expected)
 	require.Empty(t, filterGenres([]*opendiscogsmodel.Genre{{Name: " "}}))
@@ -523,6 +533,7 @@ func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 			ID:         2,
 			MasterInfo: XmlReleaseMasterInfo{MasterID: &masterID, IsMaster: true},
 		}},
+		time.Unix(1, 0).UTC(),
 	)
 	require.ErrorIs(t, actual.Err(), expected)
 }

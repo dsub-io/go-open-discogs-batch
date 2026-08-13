@@ -97,6 +97,7 @@ func writeReleaseRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlReleaseRelation,
 ) result.Result {
+	observedAt := time.Now().UTC()
 	genres := make([]*model.Genre, 0)
 	styles := make([]*model.Style, 0)
 	rootIDs := make([]int32, 0, len(items))
@@ -115,6 +116,7 @@ func writeReleaseRelationChunk(
 		if item == nil {
 			continue
 		}
+		item.observedAt = observedAt
 		rootIDs = append(rootIDs, item.ID)
 		genres = append(genres, item.GetGenres()...)
 		styles = append(styles, item.GetStyles()...)
@@ -333,7 +335,7 @@ func writeReleaseRelationChunk(
 				return written
 			}
 		}
-		return written.Sum(updateMasterMainReleases(transactionOrder, items))
+		return written.Sum(updateMasterMainReleases(transactionOrder, items, observedAt))
 	})
 	if !written.IsErr() {
 		confirmReferenceEntities(genres, styles)
@@ -379,7 +381,11 @@ func releaseMasterIDsToLock(releases []*XmlReleaseRelation) []int32 {
 	return masterIDs
 }
 
-func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) result.Result {
+func updateMasterMainReleases(
+	order Order,
+	releases []*XmlReleaseRelation,
+	observedAt time.Time,
+) result.Result {
 	updates := make(map[int32]int32)
 	releaseIDs := make([]int32, 0, len(releases))
 	for _, release := range releases {
@@ -403,7 +409,7 @@ func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) resul
 		        last_modified_at = ?
 		  where main_release_id = any(?::integer[])
 		    and not (main_release_id = any(?::integer[]))`,
-		time.Now().UTC(),
+		observedAt,
 		postgresArray(releaseIDs),
 		postgresArray(mainReleaseIDs),
 	)
@@ -421,7 +427,7 @@ func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) resul
 	sort.Slice(masterIDs, func(left, right int) bool { return masterIDs[left] < masterIDs[right] })
 
 	updated := int(cleared.RowsAffected)
-	query, arguments := masterMainReleaseUpdateStatement(masterIDs, updates)
+	query, arguments := masterMainReleaseUpdateStatement(masterIDs, updates, observedAt)
 	tx := order.getDB().Exec(query, arguments...)
 	if tx.Error != nil {
 		return result.NewResult(updated, tx.Error)
@@ -433,6 +439,7 @@ func updateMasterMainReleases(order Order, releases []*XmlReleaseRelation) resul
 func masterMainReleaseUpdateStatement(
 	masterIDs []int32,
 	updates map[int32]int32,
+	observedAt time.Time,
 ) (string, []any) {
 	releaseIDs := make([]int32, len(masterIDs))
 	for index, masterID := range masterIDs {
@@ -444,7 +451,7 @@ func masterMainReleaseUpdateStatement(
 		FROM unnest(?::integer[], ?::integer[]) AS incoming(master_id, release_id)
 		WHERE target.id = incoming.master_id
 			AND target.main_release_id IS DISTINCT FROM incoming.release_id`, []any{
-			time.Now().UTC(),
+			observedAt,
 			postgresArray(masterIDs),
 			postgresArray(releaseIDs),
 		}

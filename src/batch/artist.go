@@ -2,6 +2,7 @@ package batch
 
 import (
 	"errors"
+	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/open-discogs-model/model"
@@ -43,7 +44,7 @@ func GetArtistStep(order Order) Step {
 }
 
 func insertArtists(order Order) result.Result {
-	return InsertSimple[XmlArtist, model.Artist](order, "artists", "artist")
+	return InsertSimple(order, "artists", "artist", (*XmlArtist).TransformAt)
 }
 
 func insertArtistRelations(order Order) result.Result {
@@ -63,6 +64,7 @@ func writeArtistRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlArtistRelation,
 ) result.Result {
+	observedAt := time.Now().UTC()
 	rootIDs := make([]int32, 0, len(items))
 	nameVariations := make([]*model.ArtistNameVariation, 0)
 	aliases := make([]*model.ArtistAlias, 0)
@@ -73,6 +75,7 @@ func writeArtistRelationChunk(
 		if item == nil {
 			continue
 		}
+		item.observedAt = observedAt
 		rootIDs = append(rootIDs, item.ID)
 		aliases = append(aliases, item.GetAliases()...)
 		groups = append(groups, item.GetGroups()...)

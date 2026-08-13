@@ -3,6 +3,7 @@ package batch
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/helper"
@@ -12,20 +13,54 @@ import (
 	"github.com/reactivex/rxgo/v2"
 )
 
-func InsertSimple[F, T any](order Order, topic string, localName string) result.Result {
+type sourceTransformer[F, T any] func(*F, time.Time) *T
+
+func InsertSimple[F, T any](
+	order Order,
+	topic string,
+	localName string,
+	transform sourceTransformer[F, T],
+) result.Result {
 	r, err := newReadCloser(order.getFilePath(), fmt.Sprintf("source-read %+v", topic))
 	if err != nil {
 		return result.NewResult(0, err)
 	}
 	res := <-reader.NewReader[F](order.getContext(), r, localName).
-		FlatMap(Transform).
-		Map(registerCache).
 		WindowWithCount(order.getChunkSize()).
-		Map(helper.MapWindowedSlice[*T]()).
+		Map(helper.MapWindowedSlice[*F]()).
+		Map(transformSourceChunk(transform)).
 		Map(insertBySlice[*T](order), rxgo.WithPool(order.getMaxWorkers())).
 		Reduce(helper.MergeCount()).
 		Observe()
 	return simpleInsertResult(topic, res)
+}
+
+func transformSourceChunk[F, T any](
+	transform sourceTransformer[F, T],
+) func(context.Context, interface{}) (interface{}, error) {
+	return func(ctx context.Context, value interface{}) (interface{}, error) {
+		sources := value.([]*F)
+		observedAt := time.Now().UTC()
+		rows := make([]*T, 0, len(sources))
+		for _, source := range sources {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if source == nil {
+				continue
+			}
+			row := transform(source, observedAt)
+			if row == nil {
+				continue
+			}
+			_, err := registerCache(ctx, row)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+		return rows, nil
+	}
 }
 
 func simpleInsertResult(topic string, res rxgo.Item) result.Result {

@@ -2,6 +2,7 @@ package batch
 
 import (
 	"errors"
+	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/dsub-io/open-discogs-model/model"
@@ -36,7 +37,7 @@ func GetLabelStep(order Order) Step {
 }
 
 func insertLabels(order Order) result.Result {
-	return InsertSimple[XmlLabel, model.Label](order, "labels", "label")
+	return InsertSimple(order, "labels", "label", (*XmlLabel).TransformAt)
 }
 
 func insertLabelRelations(order Order) result.Result {
@@ -56,6 +57,7 @@ func writeLabelRelationChunk(
 	chunk ChunkMetadata,
 	items []*XmlLabelRelation,
 ) result.Result {
+	observedAt := time.Now().UTC()
 	rootIDs := make([]int32, 0, len(items))
 	urls := make([]*model.LabelURL, 0)
 	subLabels := make([]*model.LabelSubLabel, 0)
@@ -63,6 +65,7 @@ func writeLabelRelationChunk(
 		if item == nil {
 			continue
 		}
+		item.observedAt = observedAt
 		rootIDs = append(rootIDs, item.ID)
 		urls = append(urls, item.GetUrls()...)
 		subLabels = append(subLabels, item.GetSubLabels()...)

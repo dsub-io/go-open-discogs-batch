@@ -11,7 +11,6 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/src/dateparser"
 	"github.com/dsub-io/go-open-discogs-batch/src/helper"
 	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
-	"github.com/reactivex/rxgo/v2"
 )
 
 const (
@@ -32,17 +31,16 @@ type XmlArtist struct {
 	RealName    *string `xml:"realname"`
 }
 
-func (a *XmlArtist) Transform() rxgo.Observable {
-	now := time.Now().UTC()
-	return rxgo.Just(&opendiscogsmodel.Artist{
+func (a *XmlArtist) TransformAt(observedAt time.Time) *opendiscogsmodel.Artist {
+	return &opendiscogsmodel.Artist{
 		ID:             a.ID,
-		CreatedAt:      now,
-		LastModifiedAt: now,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
 		DataQuality:    helper.FilterStr(a.DataQuality),
 		Name:           helper.FilterStr(a.Name),
 		Profile:        helper.FilterStr(a.Profile),
 		RealName:       helper.FilterStr(a.RealName),
-	})()
+	}
 }
 
 type XmlArtistRelation struct {
@@ -56,14 +54,22 @@ type XmlArtistRelation struct {
 	Aliases     []XmlRef `xml:"aliases>name"`
 	Groups      []XmlRef `xml:"groups>name"`
 	Members     []XmlRef `xml:"members>name"`
+	observedAt  time.Time
+}
+
+func (a *XmlArtistRelation) timestamp() time.Time {
+	if a.observedAt.IsZero() {
+		a.observedAt = time.Now().UTC()
+	}
+	return a.observedAt
 }
 
 func (a *XmlArtistRelation) GetArtist() *opendiscogsmodel.Artist {
-	now := time.Now().UTC()
+	observedAt := a.timestamp()
 	return &opendiscogsmodel.Artist{
 		ID:             a.ID,
-		CreatedAt:      now,
-		LastModifiedAt: now,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
 		DataQuality:    helper.FilterStr(a.DataQuality),
 		Name:           helper.FilterStr(a.Name),
 		Profile:        helper.FilterStr(a.Profile),
@@ -72,89 +78,89 @@ func (a *XmlArtistRelation) GetArtist() *opendiscogsmodel.Artist {
 }
 
 func (a *XmlArtistRelation) GetUrls() []*opendiscogsmodel.ArtistURL {
+	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistURL, 0, len(a.URLs))
 	for _, value := range a.URLs {
 		url := strings.TrimSpace(value)
 		if url == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ArtistURL{
 			ArtistID:       a.ID,
 			Hash:           helper.JavaStringHash(url),
 			URL:            url,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (a *XmlArtistRelation) GetNameVars() []*opendiscogsmodel.ArtistNameVariation {
+	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistNameVariation, 0, len(a.NameVars))
 	for _, value := range a.NameVars {
 		nameVariation := strings.TrimSpace(value)
 		if nameVariation == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ArtistNameVariation{
 			ArtistID:       a.ID,
 			NameVariation:  nameVariation,
 			Hash:           helper.JavaStringHash(nameVariation),
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (a *XmlArtistRelation) GetAliases() []*opendiscogsmodel.ArtistAlias {
+	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistAlias, 0, len(a.Aliases))
 	for _, alias := range a.Aliases {
 		if !cache.ArtistIDs.Contains(alias.ID) {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ArtistAlias{
 			ArtistID:       a.ID,
 			AliasID:        alias.ID,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (a *XmlArtistRelation) GetGroups() []*opendiscogsmodel.ArtistGroup {
+	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistGroup, 0, len(a.Groups))
 	for _, group := range a.Groups {
 		if !cache.ArtistIDs.Contains(group.ID) {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ArtistGroup{
 			ArtistID:       a.ID,
 			GroupID:        group.ID,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (a *XmlArtistRelation) GetMembers() []*opendiscogsmodel.ArtistMember {
+	observedAt := a.timestamp()
 	items := make([]*opendiscogsmodel.ArtistMember, 0, len(a.Members))
 	for _, member := range a.Members {
 		if !cache.ArtistIDs.Contains(member.ID) {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ArtistMember{
 			ArtistID:       a.ID,
 			MemberID:       member.ID,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
@@ -168,17 +174,16 @@ type XmlLabel struct {
 	DataQuality *string `xml:"data_quality"`
 }
 
-func (l *XmlLabel) Transform() rxgo.Observable {
-	now := time.Now().UTC()
-	return rxgo.Just(&opendiscogsmodel.Label{
+func (l *XmlLabel) TransformAt(observedAt time.Time) *opendiscogsmodel.Label {
+	return &opendiscogsmodel.Label{
 		ID:             l.ID,
-		CreatedAt:      now,
-		LastModifiedAt: now,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
 		Name:           helper.FilterStr(l.Name),
 		ContactInfo:    helper.FilterStr(l.ContactInfo),
 		Profile:        helper.FilterStr(l.Profile),
 		DataQuality:    helper.FilterStr(l.DataQuality),
-	})()
+	}
 }
 
 type XmlLabelRelation struct {
@@ -189,14 +194,22 @@ type XmlLabelRelation struct {
 	DataQuality *string  `xml:"data_quality"`
 	URLs        []string `xml:"urls>url"`
 	SubLabels   []XmlRef `xml:"sublabels>label"`
+	observedAt  time.Time
+}
+
+func (l *XmlLabelRelation) timestamp() time.Time {
+	if l.observedAt.IsZero() {
+		l.observedAt = time.Now().UTC()
+	}
+	return l.observedAt
 }
 
 func (l *XmlLabelRelation) GetLabel() *opendiscogsmodel.Label {
-	now := time.Now().UTC()
+	observedAt := l.timestamp()
 	return &opendiscogsmodel.Label{
 		ID:             l.ID,
-		CreatedAt:      now,
-		LastModifiedAt: now,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
 		Name:           helper.FilterStr(l.Name),
 		ContactInfo:    helper.FilterStr(l.ContactInfo),
 		Profile:        helper.FilterStr(l.Profile),
@@ -205,36 +218,36 @@ func (l *XmlLabelRelation) GetLabel() *opendiscogsmodel.Label {
 }
 
 func (l *XmlLabelRelation) GetUrls() []*opendiscogsmodel.LabelURL {
+	observedAt := l.timestamp()
 	items := make([]*opendiscogsmodel.LabelURL, 0, len(l.URLs))
 	for _, value := range l.URLs {
 		url := strings.TrimSpace(value)
 		if url == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.LabelURL{
 			LabelID:        l.ID,
 			Hash:           helper.JavaStringHash(url),
 			URL:            url,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (l *XmlLabelRelation) GetSubLabels() []*opendiscogsmodel.LabelSubLabel {
+	observedAt := l.timestamp()
 	items := make([]*opendiscogsmodel.LabelSubLabel, 0, len(l.SubLabels))
 	for _, subLabel := range l.SubLabels {
 		if !cache.LabelIDs.Contains(subLabel.ID) {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.LabelSubLabel{
 			ParentLabelID:  l.ID,
 			SubLabelID:     subLabel.ID,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
@@ -253,16 +266,15 @@ type XmlGenreStyle struct {
 	Genres []string `xml:"genres>genre"`
 }
 
-func (m *XmlMaster) Transform() rxgo.Observable {
-	now := time.Now().UTC()
-	return rxgo.Just(&opendiscogsmodel.Master{
+func (m *XmlMaster) TransformAt(observedAt time.Time) *opendiscogsmodel.Master {
+	return &opendiscogsmodel.Master{
 		ID:             m.ID,
-		CreatedAt:      now,
-		LastModifiedAt: now,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
 		Title:          helper.FilterStr(m.Title),
 		DataQuality:    helper.FilterStr(m.DataQuality),
 		Year:           m.Year,
-	})()
+	}
 }
 
 type XmlMasterRelation struct {
@@ -275,6 +287,14 @@ type XmlMasterRelation struct {
 	Genres        []string   `xml:"genres>genre"`
 	Artists       []int32    `xml:"artists>artist>id"`
 	Videos        []XmlVideo `xml:"videos>video"`
+	observedAt    time.Time
+}
+
+func (m *XmlMasterRelation) timestamp() time.Time {
+	if m.observedAt.IsZero() {
+		m.observedAt = time.Now().UTC()
+	}
+	return m.observedAt
 }
 
 type XmlVideo struct {
@@ -292,11 +312,11 @@ func (m *XmlMasterRelation) GetGenres() []*opendiscogsmodel.Genre {
 }
 
 func (m *XmlMasterRelation) GetMaster() *opendiscogsmodel.Master {
-	now := time.Now().UTC()
+	observedAt := m.timestamp()
 	return &opendiscogsmodel.Master{
 		ID:             m.ID,
-		CreatedAt:      now,
-		LastModifiedAt: now,
+		CreatedAt:      observedAt,
+		LastModifiedAt: observedAt,
 		Title:          helper.FilterStr(m.Title),
 		DataQuality:    helper.FilterStr(m.DataQuality),
 		Year:           m.Year,
@@ -304,42 +324,43 @@ func (m *XmlMasterRelation) GetMaster() *opendiscogsmodel.Master {
 }
 
 func (m *XmlMasterRelation) GetMasterStyles() []*opendiscogsmodel.MasterStyle {
+	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterStyle, 0, len(m.Styles))
 	for _, value := range m.Styles {
 		style := strings.TrimSpace(value)
 		if style == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.MasterStyle{
 			MasterID:       m.ID,
 			Style:          style,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (m *XmlMasterRelation) GetMasterGenres() []*opendiscogsmodel.MasterGenre {
+	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterGenre, 0, len(m.Genres))
 	for _, value := range m.Genres {
 		genre := strings.TrimSpace(value)
 		if genre == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.MasterGenre{
 			MasterID:       m.ID,
 			Genre:          genre,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
+	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterVideo, 0, len(m.Videos))
 	for _, video := range m.Videos {
 		title := helper.FilterStr(video.Title)
@@ -349,32 +370,31 @@ func (m *XmlMasterRelation) GetMasterVideos() []*opendiscogsmodel.MasterVideo {
 		if strings.TrimSpace(hashSource) == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.MasterVideo{
 			MasterID:       m.ID,
 			Hash:           helper.JavaStringHash(hashSource),
 			URL:            url,
 			Description:    description,
 			Title:          title,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (m *XmlMasterRelation) GetMasterArtists() []*opendiscogsmodel.MasterArtist {
+	observedAt := m.timestamp()
 	items := make([]*opendiscogsmodel.MasterArtist, 0, len(m.Artists))
 	for _, artistID := range m.Artists {
 		if !cache.ArtistIDs.Contains(artistID) {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.MasterArtist{
 			ArtistID:       artistID,
 			MasterID:       m.ID,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
@@ -396,8 +416,8 @@ type XmlReleaseMasterInfo struct {
 	IsMaster bool   `xml:"is_main_release,attr"`
 }
 
-func (r *XmlRelease) Transform() rxgo.Observable {
-	return rxgo.Just(releaseItem(
+func (r *XmlRelease) TransformAt(observedAt time.Time) *opendiscogsmodel.ReleaseItem {
+	return releaseItem(
 		r.ID,
 		r.Title,
 		r.Country,
@@ -406,7 +426,8 @@ func (r *XmlRelease) Transform() rxgo.Observable {
 		r.Notes,
 		r.MasterInfo,
 		r.Status,
-	))()
+		observedAt,
+	)
 }
 
 type XmlLabelRelease struct {
@@ -504,6 +525,14 @@ type XmlReleaseRelation struct {
 	Identifiers       []XmlIdentifier      `xml:"identifiers>identifier"`
 	Videos            []XmlVideo           `xml:"videos>video"`
 	Works             []XmlWork            `xml:"companies>company"`
+	observedAt        time.Time
+}
+
+func (r *XmlReleaseRelation) timestamp() time.Time {
+	if r.observedAt.IsZero() {
+		r.observedAt = time.Now().UTC()
+	}
+	return r.observedAt
 }
 
 func (r *XmlReleaseRelation) GetGenres() []*opendiscogsmodel.Genre {
@@ -515,6 +544,7 @@ func (r *XmlReleaseRelation) GetStyles() []*opendiscogsmodel.Style {
 }
 
 func (r *XmlReleaseRelation) GetRelease() *opendiscogsmodel.ReleaseItem {
+	observedAt := r.timestamp()
 	return releaseItem(
 		r.ID,
 		r.Title,
@@ -524,10 +554,12 @@ func (r *XmlReleaseRelation) GetRelease() *opendiscogsmodel.ReleaseItem {
 		r.Notes,
 		r.MasterInfo,
 		r.Status,
+		observedAt,
 	)
 }
 
 func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemWork, 0, len(r.Works))
 	for _, work := range r.Works {
 		value := strings.TrimSpace(work.Work)
@@ -537,20 +569,20 @@ func (r *XmlReleaseRelation) GetWorks() []*opendiscogsmodel.ReleaseItemWork {
 		if !cache.LabelIDs.Contains(work.LabelID) {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemWork{
 			ReleaseItemID:  r.ID,
 			LabelID:        work.LabelID,
 			Work:           &value,
 			Hash:           helper.JavaStringHash(value),
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemVideo, 0, len(r.Videos))
 	for _, video := range r.Videos {
 		title := helper.FilterStr(video.Title)
@@ -560,21 +592,21 @@ func (r *XmlReleaseRelation) GetVideos() []*opendiscogsmodel.ReleaseItemVideo {
 		if strings.TrimSpace(hashSource) == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemVideo{
 			ReleaseItemID:  r.ID,
 			Description:    description,
 			Title:          title,
 			URL:            url,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetIdentifiers() []*opendiscogsmodel.ReleaseItemIdentifier {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemIdentifier, 0, len(r.Identifiers))
 	for _, identifier := range r.Identifiers {
 		description := helper.FilterStr(&identifier.Description)
@@ -584,21 +616,21 @@ func (r *XmlReleaseRelation) GetIdentifiers() []*opendiscogsmodel.ReleaseItemIde
 		if strings.TrimSpace(hashSource) == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemIdentifier{
 			ReleaseItemID:  r.ID,
 			Description:    description,
 			Type:           identifierType,
 			Value:          value,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetTracks() []*opendiscogsmodel.ReleaseItemTrack {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemTrack, 0, len(r.Tracks))
 	for _, track := range r.Tracks {
 		duration := helper.FilterStr(&track.Duration)
@@ -608,21 +640,21 @@ func (r *XmlReleaseRelation) GetTracks() []*opendiscogsmodel.ReleaseItemTrack {
 		if strings.TrimSpace(hashSource) == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemTrack{
 			ReleaseItemID:  r.ID,
 			Duration:       duration,
 			Position:       position,
 			Title:          title,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemFormat, 0, len(r.Formats))
 	for _, format := range r.Formats {
 		description := reducedDescription(format.Descriptions)
@@ -634,7 +666,6 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 		quantity := format.Quantity.Integer()
 		quantityText := format.Quantity.Canonical()
 		hashSource := releaseFormatHashSource(name, description, quantityText, text)
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemFormat{
 			ReleaseItemID:  r.ID,
 			Description:    description,
@@ -643,8 +674,8 @@ func (r *XmlReleaseRelation) GetFormats() []*opendiscogsmodel.ReleaseItemFormat 
 			QuantityText:   quantityText,
 			Text:           text,
 			Hash:           helper.JavaStringHash(hashSource),
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
@@ -671,6 +702,7 @@ func releaseFormatHashString(value *string) string {
 }
 
 func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseItemCreditedArtist {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemCreditedArtist, 0, len(r.CreditedArtists))
 	for _, creditedArtist := range r.CreditedArtists {
 		if !cache.ArtistIDs.Contains(creditedArtist.ArtistID) {
@@ -680,37 +712,37 @@ func (r *XmlReleaseRelation) GetCreditedArtists() []*opendiscogsmodel.ReleaseIte
 		if role == "" {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemCreditedArtist{
 			ReleaseItemID:  r.ID,
 			ArtistID:       creditedArtist.ArtistID,
 			Role:           &role,
 			Hash:           helper.JavaStringHash(role),
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetReleaseArtists() []*opendiscogsmodel.ReleaseItemArtist {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemArtist, 0, len(r.Artists))
 	for _, artistID := range r.Artists {
 		if !cache.ArtistIDs.Contains(artistID) {
 			continue
 		}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemArtist{
 			ReleaseItemID:  r.ID,
 			ArtistID:       artistID,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.LabelReleaseItem, 0, len(r.Labels))
 	type identity struct {
 		labelID          int32
@@ -727,19 +759,19 @@ func (r *XmlReleaseRelation) GetLabels() []*opendiscogsmodel.LabelReleaseItem {
 			continue
 		}
 		seen[key] = struct{}{}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.LabelReleaseItem{
 			LabelID:          label.LabelID,
 			ReleaseItemID:    r.ID,
 			CategoryNotation: helper.FilterStr(&categoryNotation),
-			CreatedAt:        now,
-			LastModifiedAt:   now,
+			CreatedAt:        observedAt,
+			LastModifiedAt:   observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetReleaseStyles() []*opendiscogsmodel.ReleaseItemStyle {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemStyle, 0, len(r.Styles))
 	seen := make(map[string]struct{}, len(r.Styles))
 	for _, value := range r.Styles {
@@ -751,18 +783,18 @@ func (r *XmlReleaseRelation) GetReleaseStyles() []*opendiscogsmodel.ReleaseItemS
 			continue
 		}
 		seen[style] = struct{}{}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemStyle{
 			ReleaseItemID:  r.ID,
 			Style:          style,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
 }
 
 func (r *XmlReleaseRelation) GetReleaseGenres() []*opendiscogsmodel.ReleaseItemGenre {
+	observedAt := r.timestamp()
 	items := make([]*opendiscogsmodel.ReleaseItemGenre, 0, len(r.Genres))
 	seen := make(map[string]struct{}, len(r.Genres))
 	for _, value := range r.Genres {
@@ -774,12 +806,11 @@ func (r *XmlReleaseRelation) GetReleaseGenres() []*opendiscogsmodel.ReleaseItemG
 			continue
 		}
 		seen[genre] = struct{}{}
-		now := time.Now().UTC()
 		items = append(items, &opendiscogsmodel.ReleaseItemGenre{
 			ReleaseItemID:  r.ID,
 			Genre:          genre,
-			CreatedAt:      now,
-			LastModifiedAt: now,
+			CreatedAt:      observedAt,
+			LastModifiedAt: observedAt,
 		})
 	}
 	return items
@@ -794,6 +825,7 @@ func releaseItem(
 	notes *string,
 	masterInfo XmlReleaseMasterInfo,
 	status *string,
+	observedAt time.Time,
 ) *opendiscogsmodel.ReleaseItem {
 	var masterID *int32
 	if masterInfo.MasterID != nil {
@@ -802,11 +834,10 @@ func releaseItem(
 		}
 	}
 	releaseDate, validYear, validMonth, validDay := parsedReleaseDate(listedReleaseDate)
-	now := time.Now().UTC()
 	return &opendiscogsmodel.ReleaseItem{
 		ID:                id,
-		CreatedAt:         now,
-		LastModifiedAt:    now,
+		CreatedAt:         observedAt,
+		LastModifiedAt:    observedAt,
 		Title:             helper.FilterStr(title),
 		Country:           helper.FilterStr(country),
 		DataQuality:       helper.FilterStr(dataQuality),

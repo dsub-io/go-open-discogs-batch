@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/reader"
@@ -196,12 +197,14 @@ func TestReleaseRead(t *testing.T) {
 
 func TestMasterMainReleaseUpdateStatementUsesTypedArrays(t *testing.T) {
 	updates := map[int32]int32{10: 100, 20: 200, 30: 300}
+	observedAt := time.Unix(1, 0).UTC()
 
-	query, arguments := masterMainReleaseUpdateStatement([]int32{10, 20, 30}, updates)
+	query, arguments := masterMainReleaseUpdateStatement([]int32{10, 20, 30}, updates, observedAt)
 
 	require.Contains(t, query, "UPDATE master AS target")
 	require.Contains(t, query, "unnest(?::integer[], ?::integer[])")
 	require.Len(t, arguments, 3)
+	require.Equal(t, observedAt, arguments[0])
 	require.Equal(t, []int32{10, 20, 30}, arguments[1].(pgtype.Array[int32]).Elements)
 	require.Equal(t, []int32{100, 200, 300}, arguments[2].(pgtype.Array[int32]).Elements)
 }
