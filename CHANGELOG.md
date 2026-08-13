@@ -6,6 +6,33 @@
 ### Bug Fixes
 
 * preserve canonical dump data and bound full imports ([#71](https://github.com/dsub-io/go-open-discogs-batch/issues/71)) ([b274320](https://github.com/dsub-io/go-open-discogs-batch/commit/b274320e373b28a79c88460a7b2c3eea19f9e68a))
+* consume canonical model `v0.3.1`, preserving format quantity variants,
+  collision-safe relation identities, and exact duplicate collapse in parity
+  with the Java batch
+* resume failed or killed imports from durable committed chunks, skip completed
+  sources before reopening XML, and keep refresh, standalone entity imports,
+  stale reconciliation, and fallback backlink repair safe
+* bound Release master locking and relation work, remove the unsafe finalization
+  deadline, and seed canonical master backlinks from the Master dump during a
+  full bootstrap instead of rewriting them in a separate post-load pass
+* make CI Docker ownership deterministic: Testcontainers Ryuk is disabled in
+  CI while the exact run-labelled cleanup gate owns container, network, and
+  volume removal, including forced PostgreSQL restart resources
+
+### Measured Impact and Validation
+
+* a measured production resume skipped `34,489,698` already committed XML
+  roots without rewriting them
+* unchanged backlink reconciliation fell from `61.027 s` to `8.584 s`
+  (`85.9%` lower), updating `0` rows and generating `0` WAL
+* the former bootstrap backlink pass updated `2,579,769` rows in `289.960 s`
+  and generated `4,379,751,749` WAL bytes; the new path writes dump-provided
+  backlinks in the existing Master INSERT, but fresh production-scale
+  end-to-end measurement remains pending and is not inferred from fixtures
+* race-enabled tests, real PostgreSQL integration, dump E2E, process-kill and
+  PostgreSQL-kill recovery, Go/Java progress transfer, and exact `100.0%`
+  statement coverage passed; owned test residue was `0` containers,
+  `0` networks, and `0` volumes
 
 ## [2.3.7](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.6...v2.3.7) (2026-08-12)
 
