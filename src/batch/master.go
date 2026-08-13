@@ -1,9 +1,12 @@
 package batch
 
 import (
+	"errors"
+	"fmt"
+	"time"
+
 	"github.com/dsub-io/go-open-discogs-batch/src/cache"
 	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/go-open-discogs-batch/src/unique"
 	"github.com/dsub-io/open-discogs-model/model"
 )
 
@@ -17,8 +20,11 @@ var (
 	masterStyleRelation = textRelation{
 		table: "master_style", parentColumn: "master_id", keyColumn: "style",
 	}
-	masterVideoRelation = integerRelation{
-		table: "master_video", parentColumn: "master_id", keyColumn: "hash",
+	masterVideoRelation = digestIntegerRelation{
+		table:          "master_video",
+		parentColumn:   "master_id",
+		keyColumn:      "hash",
+		identityColumn: "identity_sha256",
 	}
 )
 
@@ -26,18 +32,15 @@ var (
 
 func GetMasterStep(order Order) Step {
 	return func() result.Result {
+		if completed, skip := completedEntityResult(order, "master relations"); skip {
+			return completed
+		}
 		return InsertMasterRelations(order)
 	}
 }
 
 func InsertMasterRelations(order Order) result.Result {
-	deleteStale, err := relationTablesContainRows(
-		order,
-		masterArtistRelation.table,
-		masterGenreRelation.table,
-		masterStyleRelation.table,
-		masterVideoRelation.table,
-	)
+	seedMainReleases, err := shouldSeedMasterMainReleases(order)
 	if err != nil {
 		return result.NewResult(0, err)
 	}
@@ -47,54 +50,129 @@ func InsertMasterRelations(order Order) result.Result {
 		"master",
 		"source-read master relations",
 		func(order Order, chunk ChunkMetadata, items []*XmlMasterRelation) result.Result {
-			return writeMasterRelationChunk(order, chunk, items, deleteStale)
+			return writeMasterRelationChunkWithMainReleasePolicy(
+				order, chunk, items, seedMainReleases,
+			)
 		},
 	)
+}
+
+func shouldSeedMasterMainReleases(order Order) (bool, error) {
+	if order.getRunID() == 0 {
+		return false, nil
+	}
+	type bootstrapState struct {
+		Seed bool
+	}
+	var state bootstrapState
+	query := order.getDB().WithContext(order.getContext()).Raw(
+		`select exists (
+		    select 1
+		      from discogs_catalog_entity_state
+		     where entity_type = 'release'
+		       and status = 'importing'
+		       and operation = 'bootstrap'
+		       and active_import_run_id = ?
+		) as seed`,
+		order.getRunID(),
+	).Scan(&state)
+	if query.Error != nil {
+		return false, fmt.Errorf("load master backlink import policy: %w", query.Error)
+	}
+	if query.RowsAffected != 1 {
+		return false, errors.New("load master backlink import policy: result is unavailable")
+	}
+	return state.Seed, nil
 }
 
 func writeMasterRelationChunk(
 	order Order,
 	chunk ChunkMetadata,
 	items []*XmlMasterRelation,
-	deleteStale bool,
 ) result.Result {
+	return writeMasterRelationChunkWithMainReleasePolicy(order, chunk, items, false)
+}
+
+func writeMasterRelationChunkWithMainReleasePolicy(
+	order Order,
+	chunk ChunkMetadata,
+	items []*XmlMasterRelation,
+	seedMainReleases bool,
+) result.Result {
+	observedAt := time.Now().UTC()
+	assignChunkObservedAt(items, observedAt)
+	styles := make([]*model.Style, 0)
+	genres := make([]*model.Genre, 0)
+	rootIDs := make([]int32, 0, len(items))
+	masters := make([]*model.Master, 0, len(items))
+	videos := make([]*model.MasterVideo, 0)
+	masterStyles := make([]*model.MasterStyle, 0)
+	masterGenres := make([]*model.MasterGenre, 0)
+	artists := make([]*model.MasterArtist, 0)
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
 		cache.MasterIDs.Add(item.ID)
-	}
-	return executeChunk(order, chunk, func(transactionOrder Order) result.Result {
-		styles := make([]*model.Style, 0)
-		genres := make([]*model.Genre, 0)
-		rootIDs := make([]int32, 0, len(items))
-		masters := make([]*model.Master, 0, len(items))
-		videos := make([]*model.MasterVideo, 0)
-		masterStyles := make([]*model.MasterStyle, 0)
-		masterGenres := make([]*model.MasterGenre, 0)
-		artists := make([]*model.MasterArtist, 0)
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			rootIDs = append(rootIDs, item.ID)
-			genres = append(genres, item.GetGenres()...)
-			styles = append(styles, item.GetStyles()...)
-			masters = append(masters, item.GetMaster())
-			masterStyles = append(masterStyles, item.GetMasterStyles()...)
-			masterGenres = append(masterGenres, item.GetMasterGenres()...)
-			videos = append(videos, item.GetMasterVideos()...)
-			artists = append(artists, item.GetMasterArtists()...)
+		rootIDs = append(rootIDs, item.ID)
+		genres = append(genres, item.GetGenres()...)
+		styles = append(styles, item.GetStyles()...)
+		master := item.GetMaster()
+		if !seedMainReleases {
+			master.MainReleaseID = nil
 		}
-		rootIDs = unique.Slice(rootIDs)
+		masters = append(masters, master)
+		masterStyles = append(masterStyles, item.GetMasterStyles()...)
+		masterGenres = append(masterGenres, item.GetMasterGenres()...)
+		videos = append(videos, item.GetMasterVideos()...)
+		artists = append(artists, item.GetMasterArtists()...)
+	}
+	var (
+		masterError error
+		artistError error
+		genreError  error
+		styleError  error
+		videoError  error
+	)
+	masters, masterError = deduplicateMasters(masters)
+	artists, artistError = deduplicateMasterArtists(artists)
+	masterGenres, genreError = deduplicateMasterGenres(masterGenres)
+	masterStyles, styleError = deduplicateMasterStyles(masterStyles)
+	videos, videoError = deduplicateMasterVideos(videos)
+	if deduplicateError := errors.Join(
+		masterError,
+		artistError,
+		genreError,
+		styleError,
+		videoError,
+	); deduplicateError != nil {
+		return result.NewResult(0, deduplicateError)
+	}
+	rootIDs = deduplicateComparable(rootIDs)
+	genres = filterGenres(genres)
+	styles = filterStyles(styles)
+	sortReferenceEntities(genres, styles)
+	genres, styles = filterConfirmedReferenceEntities(genres, styles)
+	written := executeChunk(order, chunk, func(transactionOrder Order) result.Result {
+		existingRoots, err := findExistingRelationRoots(
+			transactionOrder,
+			rootIDs,
+			relationRootTable{masterArtistRelation.table, masterArtistRelation.parentColumn},
+			relationRootTable{masterGenreRelation.table, masterGenreRelation.parentColumn},
+			relationRootTable{masterStyleRelation.table, masterStyleRelation.parentColumn},
+			relationRootTable{masterVideoRelation.table, masterVideoRelation.parentColumn},
+		)
+		if err != nil {
+			return result.NewResult(0, err)
+		}
 		if referenceResult := writeReferenceEntities(
 			transactionOrder,
-			filterGenres(genres),
-			filterStyles(styles),
+			genres,
+			styles,
 		); referenceResult.IsErr() {
 			return referenceResult
 		}
-		written := writeChunk(transactionOrder, masters)
+		written := doWrite(masters, transactionOrder.getChunkSize(), transactionOrder.getDB())
 		if written.IsErr() {
 			return written
 		}
@@ -103,8 +181,8 @@ func writeMasterRelationChunk(
 				return reconcileIntegerRelation(
 					transactionOrder,
 					masterArtistRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterArtistRelation.table)) > 0,
+					existingRoots.forTable(masterArtistRelation.table),
 					artists,
 					func(item *model.MasterArtist) int32 { return item.MasterID },
 					func(item *model.MasterArtist) int32 { return item.ArtistID },
@@ -114,8 +192,8 @@ func writeMasterRelationChunk(
 				return reconcileTextRelation(
 					transactionOrder,
 					masterGenreRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterGenreRelation.table)) > 0,
+					existingRoots.forTable(masterGenreRelation.table),
 					masterGenres,
 					func(item *model.MasterGenre) int32 { return item.MasterID },
 					func(item *model.MasterGenre) string { return item.Genre },
@@ -125,31 +203,30 @@ func writeMasterRelationChunk(
 				return reconcileTextRelation(
 					transactionOrder,
 					masterStyleRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterStyleRelation.table)) > 0,
+					existingRoots.forTable(masterStyleRelation.table),
 					masterStyles,
 					func(item *model.MasterStyle) int32 { return item.MasterID },
 					func(item *model.MasterStyle) string { return item.Style },
 				)
 			},
 			func() result.Result {
-				return reconcileIntegerRelation(
+				return reconcileDigestIntegerRelation(
 					transactionOrder,
 					masterVideoRelation,
-					deleteStale,
-					rootIDs,
+					len(existingRoots.forTable(masterVideoRelation.table)) > 0,
+					existingRoots.forTable(masterVideoRelation.table),
 					videos,
 					func(item *model.MasterVideo) int32 { return item.MasterID },
 					func(item *model.MasterVideo) int32 { return item.Hash },
+					func(item *model.MasterVideo) *model.SHA256Digest { return item.IdentitySHA256 },
 				)
 			},
 		}
-		for _, reconcileRelation := range reconcile {
-			written = written.Sum(reconcileRelation())
-			if written.IsErr() {
-				return written
-			}
-		}
-		return written
+		return written.Sum(reconcileRelations(reconcile))
 	})
+	if !written.IsErr() {
+		confirmReferenceEntities(genres, styles)
+	}
+	return written
 }

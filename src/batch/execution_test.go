@@ -37,6 +37,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 			    public.discogs_import_run,
 			    public.discogs_dump
 			restart identity cascade`).Error)
+		seedPendingCatalogStates(t, db)
 	}
 	complete := func(
 		t *testing.T,
@@ -76,10 +77,11 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, err)
 		complete(t, legacyPreparation, dumps)
 		require.NoError(t, legacy.Complete(ctx, nil))
-		setImportContractRevision(
+		setEntityImportContractRevision(
 			t,
 			db,
 			legacyPreparation.RunID,
+			releaseEntityType,
 			legacyImportContractRevision,
 		)
 
@@ -135,10 +137,11 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, err)
 		complete(t, legacyPreparation, dumps)
 		require.NoError(t, legacy.Complete(ctx, nil))
-		setImportContractRevision(
+		setEntityImportContractRevision(
 			t,
 			db,
 			legacyPreparation.RunID,
+			releaseEntityType,
 			legacyImportContractRevision,
 		)
 		checkpointRunIDs := importCheckpointRunIDs(t, db)
@@ -803,7 +806,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, retry.Complete(ctx, errors.New("fixture cleanup")))
 	})
 
-	t.Run("does not resume progress across processor versions", func(t *testing.T) {
+	t.Run("resumes current contract progress from Java", func(t *testing.T) {
 		reset(t)
 		dumps := []*opendiscogsmodel.DiscogsDump{
 			importDump("release", "2026-07-01", "4"),
@@ -817,13 +820,45 @@ func TestImportExecutionCoordinator(t *testing.T) {
 			false,
 		)
 		require.NoError(t, err)
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			if insertErr := tx.Exec(
+				`insert into public.discogs_import_run_chunk
+				    (import_run_id, entity_type, chunk_index, first_item_index, item_count)
+				 values (?, 'release', 0, 0, 1)`,
+				failedPreparation.RunID,
+			).Error; insertErr != nil {
+				return insertErr
+			}
+			return tx.Exec(
+				`update public.discogs_import_run_dump
+				    set processed_items = 1,
+				        last_progress_at = now()
+				  where import_run_id = ?
+				    and entity_type = 'release'`,
+				failedPreparation.RunID,
+			).Error
+		}))
 		require.NoError(t, failed.Complete(ctx, errors.New("fixture failure")))
+		require.NoError(t, db.Exec(
+			`update public.discogs_import_run
+			    set processor = ?, processor_version = ?
+			  where id = ?`,
+			"open-discogs-batch",
+			"java-version",
+			failedPreparation.RunID,
+		).Error)
 
-		retry := NewImportExecutionCoordinator(sqlDB, "new-version")
+		retry := NewImportExecutionCoordinator(sqlDB, "go-version")
 		prepared, err := retry.Prepare(ctx, dumps, testChunkSize, false, false)
 		require.NoError(t, err)
-		require.Zero(t, prepared.ResumedFromRunID)
+		require.Equal(t, failedPreparation.RunID, prepared.ResumedFromRunID)
 		require.NotEqual(t, failedPreparation.RunID, prepared.RunID)
+		require.Empty(t, completedChunkIndexes(t, db, failedPreparation.RunID, "release"))
+		require.ElementsMatch(
+			t,
+			[]int64{0},
+			completedChunkIndexes(t, db, prepared.RunID, "release"),
+		)
 		require.NoError(t, retry.Complete(ctx, errors.New("fixture cleanup")))
 	})
 
@@ -1069,7 +1104,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		))
 	})
 
-	t.Run("does not prune progress superseded by another processor version", func(t *testing.T) {
+	t.Run("prunes progress superseded by a compatible processor", func(t *testing.T) {
 		reset(t)
 		artistDump := importDump("artist", "2026-07-01", "a")
 		releaseDump := importDump("release", "2026-07-01", "b")
@@ -1134,7 +1169,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, master.Complete(ctx, nil))
 
 		for _, entityType := range []string{"artist", "release"} {
-			require.ElementsMatch(t, []int64{0}, completedChunkIndexes(
+			require.Empty(t, completedChunkIndexes(
 				t,
 				db,
 				failedPreparation.RunID,
@@ -1294,6 +1329,169 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, repeatedPreparation.Skipped)
 	})
+
+	t.Run("tracks bootstrap refresh failure and aggregate readiness", func(t *testing.T) {
+		reset(t)
+		assertCatalogReadiness(t, db, false, "bootstrap_pending", 0)
+
+		artistDump := []*opendiscogsmodel.DiscogsDump{
+			importDump(artistEntityType, "2026-07-01", "a"),
+		}
+		bootstrap := NewImportExecutionCoordinator(sqlDB, "test")
+		bootstrapPreparation, err := bootstrap.Prepare(
+			ctx, artistDump, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		assertBootstrapForeignKeys(t, db, artistEntityType, 0, 0)
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusImporting, "bootstrap",
+			bootstrapPreparation.RunID, 0,
+		)
+		complete(t, bootstrapPreparation, artistDump)
+		require.NoError(t, bootstrap.Complete(ctx, nil))
+		assertBootstrapForeignKeys(t, db, artistEntityType, 8, 8)
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusReady, "",
+			0, bootstrapPreparation.RunID,
+		)
+		assertCatalogReadiness(t, db, false, "bootstrap_pending", 1)
+
+		refreshDump := []*opendiscogsmodel.DiscogsDump{
+			importDump(artistEntityType, "2026-08-01", "b"),
+		}
+		failedRefresh := NewImportExecutionCoordinator(sqlDB, "test")
+		failedPreparation, err := failedRefresh.Prepare(
+			ctx, refreshDump, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		assertBootstrapForeignKeys(t, db, artistEntityType, 8, 8)
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusImporting, "refresh",
+			failedPreparation.RunID, bootstrapPreparation.RunID,
+		)
+		expected := errors.New("fixture refresh failure")
+		require.NoError(t, failedRefresh.Complete(ctx, expected))
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusFailed, "refresh",
+			0, bootstrapPreparation.RunID,
+		)
+
+		retry := NewImportExecutionCoordinator(sqlDB, "test")
+		retryPreparation, err := retry.Prepare(
+			ctx, refreshDump, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		complete(t, retryPreparation, refreshDump)
+		require.NoError(t, retry.Complete(ctx, nil))
+
+		remainingDumps := []*opendiscogsmodel.DiscogsDump{
+			importDump(labelEntityType, "2026-08-01", "c"),
+			importDump(masterEntityType, "2026-08-01", "d"),
+			importDump(releaseEntityType, "2026-08-01", "e"),
+		}
+		remaining := NewImportExecutionCoordinator(sqlDB, "test")
+		remainingPreparation, err := remaining.Prepare(
+			ctx, remainingDumps, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		complete(t, remainingPreparation, remainingDumps)
+		require.NoError(t, remaining.Complete(ctx, nil))
+		assertCatalogReadiness(t, db, true, catalogStatusReady, 4)
+	})
+}
+
+func assertCatalogEntityState(
+	t *testing.T,
+	db *gorm.DB,
+	entityType string,
+	status string,
+	operation string,
+	activeRunID int64,
+	lastSuccessfulRunID int64,
+) {
+	t.Helper()
+	var state struct {
+		Status                    string
+		Operation                 *string
+		ActiveImportRunID         *int64
+		LastSuccessfulImportRunID *int64
+	}
+	require.NoError(t, db.Raw(`
+		select status, operation, active_import_run_id, last_successful_import_run_id
+		from discogs_catalog_entity_state
+		where entity_type = ?`, entityType).Scan(&state).Error)
+	require.Equal(t, status, state.Status)
+	if operation == "" {
+		require.Nil(t, state.Operation)
+	} else {
+		require.Equal(t, operation, *state.Operation)
+	}
+	if activeRunID == 0 {
+		require.Nil(t, state.ActiveImportRunID)
+	} else {
+		require.Equal(t, activeRunID, *state.ActiveImportRunID)
+	}
+	if lastSuccessfulRunID == 0 {
+		require.Nil(t, state.LastSuccessfulImportRunID)
+	} else {
+		require.Equal(t, lastSuccessfulRunID, *state.LastSuccessfulImportRunID)
+	}
+}
+
+func assertCatalogReadiness(
+	t *testing.T,
+	db *gorm.DB,
+	ready bool,
+	status string,
+	readyEntities int64,
+) {
+	t.Helper()
+	var state struct {
+		Ready         bool
+		Status        string
+		ReadyEntities int64
+	}
+	require.NoError(t, db.Raw(`
+		select ready, status, ready_entities
+		from discogs_catalog_readiness`).Scan(&state).Error)
+	require.Equal(t, ready, state.Ready)
+	require.Equal(t, status, state.Status)
+	require.Equal(t, readyEntities, state.ReadyEntities)
+}
+
+func assertBootstrapForeignKeys(
+	t *testing.T,
+	db *gorm.DB,
+	entityType string,
+	expectedExisting int64,
+	expectedValidated int64,
+) {
+	t.Helper()
+	var state struct {
+		Existing  int64
+		Validated int64
+	}
+	require.NoError(t, db.Raw(`
+		select count(constraint_state.oid) as existing,
+		       count(constraint_state.oid) filter (where constraint_state.convalidated) as validated
+		from discogs_bootstrap_foreign_keys() foreign_key
+		left join pg_constraint constraint_state
+		  on constraint_state.conrelid = to_regclass(format('public.%I', foreign_key.table_name))
+		 and constraint_state.conname = foreign_key.constraint_name
+		where foreign_key.entity_type = ?`, entityType).Scan(&state).Error)
+	require.Equal(t, expectedExisting, state.Existing)
+	require.Equal(t, expectedValidated, state.Validated)
+}
+
+func seedPendingCatalogStates(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+		insert into discogs_catalog_entity_state (entity_type, status, operation)
+		values
+		    ('artist', 'bootstrap_pending', 'bootstrap'),
+		    ('label', 'bootstrap_pending', 'bootstrap'),
+		    ('master', 'bootstrap_pending', 'bootstrap'),
+		    ('release', 'bootstrap_pending', 'bootstrap')`).Error)
 }
 
 func importDump(entityType, date, checksumSeed string) *opendiscogsmodel.DiscogsDump {
@@ -1343,6 +1541,27 @@ func setImportContractRevision(
 	)
 	require.NoError(t, result.Error)
 	require.Positive(t, result.RowsAffected)
+}
+
+func setEntityImportContractRevision(
+	t *testing.T,
+	db *gorm.DB,
+	runID int64,
+	entityType string,
+	revision importContractRevision,
+) {
+	t.Helper()
+	result := db.Exec(
+		`update public.discogs_import_run_dump
+		    set import_contract_revision = ?
+		  where import_run_id = ?
+		    and entity_type = ?`,
+		revision,
+		runID,
+		entityType,
+	)
+	require.NoError(t, result.Error)
+	require.Equal(t, int64(1), result.RowsAffected)
 }
 
 func requireImportContractRevision(

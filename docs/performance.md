@@ -3,7 +3,7 @@
 These are bounded measurements of named changes, not forecasts for a full dump
 or different hardware. They also do not approve a production import: both
 batch implementations still require release and cross-language validation
-against canonical `open-discogs-model` v0.3.0.
+against canonical `open-discogs-model` v0.3.1.
 
 ## Results at a glance
 
@@ -12,12 +12,26 @@ against canonical `open-discogs-model` v0.3.0.
 | Reference ID cache | 25.4× lower median time; 99.88% fewer allocated bytes | 1,000,000 sequential IDs |
 | Durable import contract | Higher fixed latency and allocation | 12-record PostgreSQL fixture |
 | Successful-manifest preflight | 95.4% lower p50; avoided 64 MiB file I/O | Cached sparse file |
-| Release Master lock order | Prevented deadlock in 10/10 concurrent regression runs | 4 writers × 4 overlapping Masters |
+| Historical Release Master lock order | Prevented deadlock in 10/10 concurrent regression runs | Superseded per-chunk path; 4 writers × 4 overlapping Masters |
+| Historical Release Master lock candidates | 161 s observed maximum to 158.144 ms; about 1,018× faster | Superseded per-chunk path; one real 5,000-Release production chunk |
+| Format quantity parser | 89.3–95.0% lower median time; up to 100% fewer allocations | Typical and 52-digit values |
 
 Do not compare rows across these harnesses. Their inputs, paths, and units are
 different.
 
-## Release Master lock order
+## Current Release backlink finalization
+
+Release chunks no longer query or update `master.main_release_id`. One fixed
+set-based reconciliation runs after every Release chunk has committed, and
+entity completion follows only after that transaction succeeds. PostgreSQL
+contract tests cover assignment, movement, clearing, deterministic winner
+selection, rollback, idempotent retry, and skipping already committed chunks.
+
+The controlled full-dump before/after latency, throughput, memory, query-plan,
+lock, and WAL measurements belong to the final performance gate and are not yet
+reported here.
+
+## Historical Release Master lock order
 
 A production-like 2026-08 import with `chunk-size=5000` and `max-workers=4`
 exposed a PostgreSQL deadlock after one Release chunk had committed. The server
@@ -34,6 +48,39 @@ the small regression was not run against the old binary, so this is a
 correctness result rather than a latency or throughput improvement claim. A
 successful full-dump retry is required before reporting end-to-end throughput,
 latency distribution, or RSS.
+
+## Historical Release Master lock candidates
+
+The first production retry exposed a separate problem in the ordered lock
+query. A predicate combining target IDs, current main-release IDs, and an
+`EXISTS` branch with `OR` made PostgreSQL scan all 2,579,897 Master rows for
+each Release worker. Four concurrent backends reached 1.20--1.29 GiB PSS each;
+three waited in a transaction-lock chain while the running query reached 161
+seconds. PostgreSQL cgroup memory reached 12.7 GiB, including about 5.0 GiB
+anonymous memory and 7.6 GiB file cache.
+
+The production host had 8 vCPUs, 15.62 GiB RAM, rotational PostgreSQL storage,
+PostgreSQL 17.7, `chunk-size=5000`, and `max-workers=4`. The replacement first
+unions candidate Master IDs from the primary key,
+`master.main_release_id`, and `release_item.id`, then joins and locks only those
+Master rows in ascending order. On the same production database, a real
+5,000-Release chunk covering IDs 840001--845000 produced 2,275 candidate
+Masters and completed `EXPLAIN (ANALYZE, BUFFERS, WAL)` in 158.144 ms. The plan
+used indexed primary-key lookups, with 1.270 ms planning time, 6,832 shared
+buffer hits, 2,268 shared buffer reads, 7.558 ms read time, and no full Master
+scan. Compared with the observed 161-second query, execution latency fell about
+99.90%, or 1,018×.
+
+This is a bounded production diagnosis, not a controlled latency distribution:
+the old query was stopped to protect the shared database, so p50/p95/p99 and a
+same-run before/after RSS comparison are unavailable. The after measurement
+ran once inside a rolled-back transaction after refreshing planner statistics
+and applying production PostgreSQL limits. Full-import throughput and steady
+state RSS remain to be measured during the next import.
+
+Both historical sections describe the removed per-chunk backlink path. Their
+numbers remain as incident evidence and are not measurements of the current
+post-chunk finalizer.
 
 ## Reference ID cache
 
@@ -85,7 +132,33 @@ Peak RSS is not reported: the microbenchmark process includes test and
 container lifecycle overhead, while the fixture is too small to represent
 production memory.
 
+## Release format quantity parser
+
+The release dump contains 19,810,850 format rows, and release `6662697` has a
+quantity beyond signed 32-bit storage. Parsing each value with an
+arbitrary-precision integer was compared with the bounded-memory ASCII decimal
+normalizer now shared semantically by Go and Java. The Go microbenchmark ran on
+an Apple M2 Pro, five samples per path; the table reports medians.
+
+| Input | Metric | Big-integer baseline | Linear parser | Change |
+| --- | --- | ---: | ---: | ---: |
+| `0002` | time/op | 152.5 ns | 16.36 ns | 89.3% lower; 9.3× faster |
+| `0002` | bytes; allocations/op | 48 B; 4 | 4 B; 1 | 91.7%; 75.0% lower |
+| 52-digit dump value | time/op | 587.1 ns | 29.58 ns | 95.0% lower; 19.8× faster |
+| 52-digit dump value | bytes; allocations/op | 280 B; 6 | 0 B; 0 | eliminated |
+
+This isolates quantity parsing, not complete format transformation or database
+throughput. Java uses the same digit scan, zero trimming, and lexical int32
+boundary, but these Go timings are not presented as JVM measurements.
+
 ## Reproduce
+
+```shell
+go test ./src/batch -run '^$' \
+  -bench '^BenchmarkReleaseFormatQuantityParsing$' -benchmem -count=5
+```
+
+The quantity parser results above use the median of these five samples.
 
 ```shell
 go test ./src/batch -run '^$' \

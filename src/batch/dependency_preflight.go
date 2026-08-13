@@ -15,21 +15,38 @@ import (
 
 const (
 	dependencyCheckpointQuery = `
+with completed_checkpoint as (
+    select dump.dump_date,
+           dump.checksum_sha256
+      from discogs_import_run_dump run_dump
+      join discogs_dump dump
+        on dump.id = run_dump.dump_id
+       and dump.entity_type = run_dump.entity_type
+     where run_dump.entity_type = $1
+       and run_dump.import_contract_revision = $2
+       and run_dump.completed_at is not null
+       and run_dump.chunk_size is not null
+       and run_dump.total_items is not null
+       and run_dump.total_chunks is not null
+       and run_dump.processed_items = run_dump.total_items
+     order by run_dump.completed_at desc, run_dump.import_run_id desc
+     limit 1
+)
 select checkpoint.dump_date,
        checkpoint.checksum_sha256,
        expected.dump_date,
        expected.checksum_sha256
-  from discogs_import_checkpoint checkpoint
+  from completed_checkpoint checkpoint
   left join lateral (
         select dump.dump_date,
                dump.checksum_sha256
-          from discogs_dump dump
+         from discogs_dump dump
          where dump.entity_type = $1
-           and dump.dump_date < $2
+           and dump.dump_date < $3
          order by dump.dump_date desc, dump.id desc
          limit 1
        ) expected on true
- where checkpoint.entity_type = $1`
+`
 	dependencyDateFormat = "2006-01-02"
 )
 
@@ -157,6 +174,7 @@ func readDependencyCheckpoint(
 		ctx,
 		dependencyCheckpointQuery,
 		requirement.entityType,
+		currentImportContractRevisions[requirement.entityType],
 		requirement.horizonExclusive,
 	).Scan(
 		&checkpoint.dumpDate,
@@ -166,7 +184,7 @@ func readDependencyCheckpoint(
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return dependencyCheckpoint{}, nil, fmt.Errorf(
-			"partial import requires a successful %s checkpoint for %s",
+			"partial import requires a completed %s checkpoint for %s",
 			requirement.entityType,
 			strings.Join(requirement.requiredBy, ","),
 		)

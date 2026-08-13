@@ -5,34 +5,53 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestOrderLimitsConcurrentWorkers(t *testing.T) {
 	const maxWorkers = 2
+	const totalWorkers = 8
 	order := NewOrder(context.Background(), 1, maxWorkers, "unused", nil)
 	var active atomic.Int32
 	var peak atomic.Int32
+	started := make(chan struct{}, totalWorkers)
+	release := make(chan struct{})
+	results := make(chan bool, totalWorkers)
+	var submitters sync.WaitGroup
 	var workers sync.WaitGroup
 
-	for range 8 {
+	for range totalWorkers {
+		submitters.Add(1)
 		workers.Add(1)
-		order.submitWorker(context.Background(), func() {
-			defer workers.Done()
-			current := active.Add(1)
-			for {
-				previous := peak.Load()
-				if current <= previous || peak.CompareAndSwap(previous, current) {
-					break
+		go func() {
+			defer submitters.Done()
+			results <- order.submitWorker(context.Background(), func() {
+				defer workers.Done()
+				current := active.Add(1)
+				for {
+					previous := peak.Load()
+					if current <= previous || peak.CompareAndSwap(previous, current) {
+						break
+					}
 				}
-			}
-			time.Sleep(10 * time.Millisecond)
-			active.Add(-1)
-		})
+				started <- struct{}{}
+				<-release
+				active.Add(-1)
+			})
+		}()
 	}
+	for range maxWorkers {
+		<-started
+	}
+	require.Equal(t, int32(maxWorkers), peak.Load())
+	close(release)
+	submitters.Wait()
 	workers.Wait()
+	close(results)
+	for submitted := range results {
+		require.True(t, submitted)
+	}
 
 	require.Equal(t, int32(maxWorkers), peak.Load())
 	require.Equal(t, maxWorkers, order.getMaxWorkers())

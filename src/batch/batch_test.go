@@ -7,7 +7,6 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/dsub-io/go-open-discogs-batch/src/database"
 	"github.com/dsub-io/open-discogs-model/model"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"os"
@@ -16,7 +15,7 @@ import (
 	"time"
 )
 
-func TestBatch(t *testing.T) {
+func runBatchE2E(t *testing.T) {
 	pg := testutils.GetDatabase(t, testutils.Postgres)
 	dsn := testutils.GetDsn(testutils.Postgres, pg)
 	db, err := database.GetConnect(dsn)
@@ -110,7 +109,6 @@ func TestBatch(t *testing.T) {
 		ArtistID:       1,
 		Hash:           staleArtistURLHash,
 		URL:            "https://stale.invalid/artist",
-		CreatedAt:      now,
 		LastModifiedAt: now,
 	}).Error)
 	require.NoError(t, db.Model(&model.LabelReleaseItem{}).
@@ -140,7 +138,7 @@ func TestBatch(t *testing.T) {
 		preservedURL.ArtistID,
 		preservedURL.Hash,
 	).First(&retainedURL).Error)
-	require.Equal(t, preservedURL.ID, retainedURL.ID)
+	require.Equal(t, preservedURL.LastModifiedAt, retainedURL.LastModifiedAt)
 	require.Equal(t, canonical, normalizedBusinessState(t, db))
 
 	goldenPath := filepath.Join("testdata", "cross-language-state.json")
@@ -209,73 +207,4 @@ func normalizedBusinessState(
 		state[table] = json.RawMessage(rows)
 	}
 	return state
-}
-
-func Test_batch_UpdateLabel(t *testing.T) {
-	type fields struct {
-		db *gorm.DB
-	}
-	type args struct {
-		order Order
-	}
-	var tests []struct {
-		name   string
-		fields fields
-		args   args
-		want   Step
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &batch{
-				db: tt.fields.db,
-			}
-			assert.Equalf(t, tt.want, b.UpdateLabel(tt.args.order), "UpdateLabel(%v)", tt.args.order)
-		})
-	}
-}
-
-func Test_batch_UpdateMaster(t *testing.T) {
-	type fields struct {
-		db *gorm.DB
-	}
-	type args struct {
-		order Order
-	}
-	var tests []struct {
-		name   string
-		fields fields
-		args   args
-		want   Step
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &batch{
-				db: tt.fields.db,
-			}
-			assert.Equalf(t, tt.want, b.UpdateMaster(tt.args.order), "UpdateMaster(%v)", tt.args.order)
-		})
-	}
-}
-
-func Test_batch_UpdateRelease(t *testing.T) {
-	type fields struct {
-		db *gorm.DB
-	}
-	type args struct {
-		order Order
-	}
-	var tests []struct {
-		name   string
-		fields fields
-		args   args
-		want   Step
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &batch{
-				db: tt.fields.db,
-			}
-			assert.Equalf(t, tt.want, b.UpdateRelease(tt.args.order), "UpdateRelease(%v)", tt.args.order)
-		})
-	}
 }

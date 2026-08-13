@@ -12,6 +12,18 @@ import (
 )
 
 type relationChunkWriter[T any] func(Order, ChunkMetadata, []*T) result.Result
+type relationFinalizer func(Order, int64, int64) result.Result
+
+func reconcileRelations(reconcile []func() result.Result) result.Result {
+	written := result.NewResult(0, nil)
+	for _, reconcileRelation := range reconcile {
+		written = written.Sum(reconcileRelation())
+		if written.IsErr() {
+			return written
+		}
+	}
+	return written
+}
 
 type sourceErrorRecorder struct {
 	mu  sync.Mutex
@@ -44,8 +56,41 @@ func processRelationChunks[T any](
 	progressText string,
 	writeRelationChunk relationChunkWriter[T],
 ) result.Result {
+	return processRelationChunksWithFinalizer(
+		order,
+		topic,
+		localName,
+		progressText,
+		writeRelationChunk,
+		completeRelationImport,
+	)
+}
+
+func processRelationChunksWithFinalizer[T any](
+	order Order,
+	topic string,
+	localName string,
+	progressText string,
+	writeRelationChunk relationChunkWriter[T],
+	finalize relationFinalizer,
+) result.Result {
 	reporter := newEntityProgressReporter(order)
 	reporter.Start()
+	completed, completedItems, _, completedError := loadCompletedEntityProgress(order)
+	if completedError != nil {
+		reporter.Finish(false)
+		return result.NewResult(0, completedError)
+	}
+	if completed {
+		reporter.Finish(true)
+		fmt.Printf("\nUpdated 0 %s (%d items already complete)\n", topic, completedItems)
+		return result.NewResult(0, nil)
+	}
+	completedChunks, completedChunksError := loadCompletedChunkInventory(order)
+	if completedChunksError != nil {
+		reporter.Finish(false)
+		return result.NewResult(0, completedChunksError)
+	}
 	ctx, cancel := context.WithCancel(order.getContext())
 	defer cancel()
 	results := make(chan result.Result)
@@ -79,6 +124,15 @@ func processRelationChunks[T any](
 				}
 				totalChunks++
 				totalItems += int64(len(items))
+				completed, completedError := completedChunks.contains(chunk)
+				if completedError != nil {
+					sourceErrors.record(completedError)
+					cancel()
+					return
+				}
+				if completed {
+					return
+				}
 				workers.Add(1)
 				if order.submitWorker(ctx, func() {
 					defer workers.Done()
@@ -107,14 +161,16 @@ func processRelationChunks[T any](
 	}
 	sum = mergeSourceError(sum, sourceErrors.get())
 	if !sum.IsErr() {
-		if progressErr := completeEntityProgress(order, totalItems, totalChunks); progressErr != nil {
-			sum = sum.Sum(result.NewResult(0, progressErr))
-		}
+		sum = sum.Sum(finalize(order, totalItems, totalChunks))
 	}
 	reporter.Finish(!sum.IsErr())
 
 	fmt.Printf("\nUpdated %+v %s\n", sum.Count(), topic)
 	return sum
+}
+
+func completeRelationImport(order Order, totalItems, totalChunks int64) result.Result {
+	return result.NewResult(0, completeEntityProgress(order, totalItems, totalChunks))
 }
 
 func mergeSourceError(sum result.Result, sourceErr error) result.Result {

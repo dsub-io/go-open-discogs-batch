@@ -29,7 +29,7 @@ type postgresArrayValueConverter struct{}
 
 func (postgresArrayValueConverter) ConvertValue(value interface{}) (driver.Value, error) {
 	switch value.(type) {
-	case pgtype.Array[int32], pgtype.Array[string]:
+	case pgtype.Array[int32], pgtype.Array[string], pgtype.Array[[]byte]:
 		return "array", nil
 	default:
 		return driver.DefaultParameterConverter.ConvertValue(value)
@@ -1025,17 +1025,52 @@ func TestGormErrorPropagationBoundaries(t *testing.T) {
 		func(item *opendiscogsmodel.MasterGenre) int32 { return item.MasterID },
 		func(item *opendiscogsmodel.MasterGenre) string { return item.Genre },
 	).Err(), expected)
+	require.ErrorIs(t, reconcileDigestIntegerRelation(
+		order,
+		digestIntegerRelation{table: "fixture", parentColumn: "parent", keyColumn: "key", identityColumn: "identity"},
+		true,
+		[]int32{1},
+		[]*opendiscogsmodel.ReleaseItemIdentifier{{ReleaseItemID: 1, Hash: 2, IdentitySHA256: &opendiscogsmodel.SHA256Digest{}}},
+		func(item *opendiscogsmodel.ReleaseItemIdentifier) int32 { return item.ReleaseItemID },
+		func(item *opendiscogsmodel.ReleaseItemIdentifier) int32 { return item.Hash },
+		func(item *opendiscogsmodel.ReleaseItemIdentifier) *opendiscogsmodel.SHA256Digest {
+			return item.IdentitySHA256
+		},
+	).Err(), expected)
 	require.ErrorIs(t, reconcileTwoIntegerKeyRelation(
 		order,
 		twoIntegerKeyRelation{table: "fixture", parentColumn: "parent", firstKeyColumn: "first", secondKeyColumn: "second"},
 		true,
 		[]int32{1},
-		[]*opendiscogsmodel.ReleaseItemWork{},
+		[]*opendiscogsmodel.ReleaseItemWork{{ReleaseItemID: 1, LabelID: 2, Hash: 3}},
 		func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.ReleaseItemID },
 		func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.LabelID },
 		func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.Hash },
 	).Err(), expected)
-	_, err := relationTablesContainRows(order, "fixture")
+	require.ErrorIs(t, reconcileDigestTwoIntegerKeyRelation(
+		order,
+		digestTwoIntegerKeyRelation{
+			table: "fixture", parentColumn: "parent", firstKeyColumn: "first",
+			secondKeyColumn: "second", identityColumn: "identity",
+		},
+		true,
+		[]int32{1},
+		[]*opendiscogsmodel.ReleaseItemCreditedArtist{{
+			ReleaseItemID: 1, ArtistID: 2, Hash: 3,
+			IdentitySHA256: &opendiscogsmodel.SHA256Digest{},
+		}},
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.ReleaseItemID },
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.ArtistID },
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) int32 { return item.Hash },
+		func(item *opendiscogsmodel.ReleaseItemCreditedArtist) *opendiscogsmodel.SHA256Digest {
+			return item.IdentitySHA256
+		},
+	).Err(), expected)
+	_, err := findExistingRelationRoots(
+		order,
+		[]int32{1},
+		relationRootTable{table: "fixture", parentColumn: "root_id"},
+	)
 	require.ErrorIs(t, err, expected)
 	require.ErrorIs(t, recordCompletedChunk(db, NewTrackedOrder(
 		context.Background(), 1, 1, "unused", db, 1, "artist", false,
@@ -1043,6 +1078,32 @@ func TestGormErrorPropagationBoundaries(t *testing.T) {
 	require.ErrorIs(t, completeEntityProgress(NewTrackedOrder(
 		context.Background(), 1, 1, "unused", db, 1, "artist", false,
 	), 0, 0), expected)
+}
+
+func TestTwoIntegerReconciliationDeleteModes(t *testing.T) {
+	db, mock, _ := newMockGorm(t)
+	order := NewOrder(context.Background(), 1, 1, "unused", db)
+	relation := twoIntegerKeyRelation{
+		table: "fixture", parentColumn: "parent", firstKeyColumn: "first", secondKeyColumn: "second",
+	}
+	parentID := func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.ReleaseItemID }
+	firstKey := func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.LabelID }
+	secondKey := func(item *opendiscogsmodel.ReleaseItemWork) int32 { return item.Hash }
+
+	notDeleted := reconcileTwoIntegerKeyRelation(
+		order, relation, false, nil, nil, parentID, firstKey, secondKey,
+	)
+	require.NoError(t, notDeleted.Err())
+	require.Zero(t, notDeleted.Count())
+
+	mock.ExpectExec("delete from fixture current").
+		WithArgs("array", "array", "array", "array").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	deleted := reconcileTwoIntegerKeyRelation(
+		order, relation, true, []int32{1}, nil, parentID, firstKey, secondKey,
+	)
+	require.NoError(t, deleted.Err())
+	require.Equal(t, 2, deleted.Count())
 }
 
 func TestProgressTransactionErrorBoundaries(t *testing.T) {
@@ -1116,6 +1177,191 @@ func TestProgressTransactionErrorBoundaries(t *testing.T) {
 		require.False(t, completed)
 		require.ErrorContains(t, err, "does not match source range")
 	})
+
+	t.Run("resume completed chunk", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select first_item_index, item_count").
+			WillReturnRows(sqlmock.NewRows([]string{"first_item_index", "item_count"}).AddRow(1, 1))
+		order := NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true)
+		completed, err := chunkAlreadyCompleted(
+			db,
+			order,
+			ChunkMetadata{Index: 1, FirstItemIndex: 1, ItemCount: 1},
+		)
+		require.NoError(t, err)
+		require.True(t, completed)
+	})
+
+	t.Run("execute skips completed chunk", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery("select first_item_index, item_count").
+			WillReturnRows(sqlmock.NewRows([]string{"first_item_index", "item_count"}).AddRow(1, 1))
+		mock.ExpectCommit()
+		order := NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true)
+		actual := executeChunk(
+			order,
+			ChunkMetadata{Index: 1, FirstItemIndex: 1, ItemCount: 1},
+			func(Order) result.Result {
+				t.Fatal("completed chunk must not be written")
+				return nil
+			},
+		)
+		require.NoError(t, actual.Err())
+		require.Zero(t, actual.Count())
+	})
+}
+
+func TestCompletedChunkInventoryPreloadAndValidation(t *testing.T) {
+	t.Run("disabled", func(t *testing.T) {
+		inventory, err := loadCompletedChunkInventory(
+			NewOrder(context.Background(), 1, 1, "unused", nil),
+		)
+		require.NoError(t, err)
+		require.Empty(t, inventory)
+	})
+
+	t.Run("query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(1), "artist").
+			WillReturnError(expected)
+		inventory, err := loadCompletedChunkInventory(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true),
+		)
+		require.Nil(t, inventory)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("loaded ranges", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(1), "artist").
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"chunk_index", "first_item_index", "item_count"},
+			).AddRow(2, 10, 5))
+		inventory, err := loadCompletedChunkInventory(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.NoError(t, err)
+
+		completed, err := inventory.contains(ChunkMetadata{Index: 2, FirstItemIndex: 10, ItemCount: 5})
+		require.True(t, completed)
+		require.NoError(t, err)
+		completed, err = inventory.contains(ChunkMetadata{Index: 3, FirstItemIndex: 15, ItemCount: 5})
+		require.False(t, completed)
+		require.NoError(t, err)
+		completed, err = inventory.contains(ChunkMetadata{Index: 2, FirstItemIndex: 11, ItemCount: 5})
+		require.False(t, completed)
+		require.ErrorContains(t, err, "does not match source range")
+	})
+}
+
+func TestCompletedEntityProgressPreload(t *testing.T) {
+	t.Run("disabled", func(t *testing.T) {
+		completed, totalItems, totalChunks, err := loadCompletedEntityProgress(
+			NewOrder(context.Background(), 1, 1, "unused", nil),
+		)
+		require.NoError(t, err)
+		require.False(t, completed)
+		require.Zero(t, totalItems)
+		require.Zero(t, totalChunks)
+	})
+
+	t.Run("query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 5).
+			WillReturnError(expected)
+		completed, _, _, err := loadCompletedEntityProgress(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.False(t, completed)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("incomplete", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 5).
+			WillReturnRows(sqlmock.NewRows([]string{"total_items", "total_chunks"}))
+		completed, _, _, err := loadCompletedEntityProgress(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.NoError(t, err)
+		require.False(t, completed)
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 5).
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"total_items", "total_chunks"},
+			).AddRow(12, 3))
+		completed, totalItems, totalChunks, err := loadCompletedEntityProgress(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.NoError(t, err)
+		require.True(t, completed)
+		require.Equal(t, int64(12), totalItems)
+		require.Equal(t, int64(3), totalChunks)
+	})
+}
+
+func TestMasterMainReleaseImportPolicy(t *testing.T) {
+	t.Run("untracked", func(t *testing.T) {
+		seed, err := shouldSeedMasterMainReleases(
+			NewOrder(context.Background(), 1, 1, "unused", nil),
+		)
+		require.NoError(t, err)
+		require.False(t, seed)
+	})
+
+	t.Run("query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).WillReturnError(expected)
+		seed, err := shouldSeedMasterMainReleases(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.False(t, seed)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("insert propagates policy failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).WillReturnError(expected)
+		actual := InsertMasterRelations(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
+	t.Run("missing result", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).
+			WillReturnRows(sqlmock.NewRows([]string{"seed"}))
+		seed, err := shouldSeedMasterMainReleases(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.False(t, seed)
+		require.ErrorContains(t, err, "result is unavailable")
+	})
+
+	t.Run("bootstrap release", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select exists").WithArgs(int64(1)).
+			WillReturnRows(sqlmock.NewRows([]string{"seed"}).AddRow(true))
+		seed, err := shouldSeedMasterMainReleases(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "master", false),
+		)
+		require.NoError(t, err)
+		require.True(t, seed)
+	})
 }
 
 func newMockTransaction(t *testing.T) (sqlmock.Sqlmock, *sql.Tx) {
@@ -1157,8 +1403,8 @@ func TestExecutionQueryHelpersPropagateErrors(t *testing.T) {
 
 	t.Run("find resumable", func(t *testing.T) {
 		mock, tx := newMockTransaction(t)
-		mock.ExpectQuery("select import_run.id").WithArgs("fingerprint", processorName, "version", 1, 1).WillReturnError(expected)
-		_, err := findResumableRun(context.Background(), tx, "fingerprint", "version", 1, 1)
+		mock.ExpectQuery("select import_run.id").WithArgs("fingerprint", 1, 1).WillReturnError(expected)
+		_, err := findResumableRun(context.Background(), tx, "fingerprint", 1, 1)
 		require.ErrorContains(t, err, "find resumable")
 	})
 
@@ -1369,7 +1615,7 @@ func expectInsertedDump(mock sqlmock.Sqlmock, dump *opendiscogsmodel.DiscogsDump
 
 func expectNoResumableRun(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("select import_run.id").
-		WithArgs(sqlmock.AnyArg(), processorName, "version", 1, 5).
+		WithArgs(sqlmock.AnyArg(), 1, 5).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 }
 
@@ -1386,7 +1632,7 @@ func expectInsertedRun(mock sqlmock.Sqlmock, resumedFrom interface{}) {
 
 func expectInsertedRunDump(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("insert into discogs_import_run_dump").
-		WithArgs(int64(2), "artist", int64(1), 5, importContractRevision(1)).
+		WithArgs(int64(2), "artist", int64(1), 5, currentImportContractRevisions[artistEntityType]).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -1541,10 +1787,30 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 						"id", "compatible_entity_count", "selected_entity_count", "incompatible_entity_types",
 					}).AddRow(9, 1, 1, ""),
 				)
+				expectCatalogReady(mock, 9, 1)
 				mock.ExpectCommit().WillReturnError(expected)
 				expectEntityUnlock(mock)
 			},
 			want: "commit skipped import admission",
+		},
+		{
+			name: "skip catalog state",
+			setup: func(mock sqlmock.Sqlmock) {
+				expectEntityLock(mock)
+				mock.ExpectBegin()
+				expectMarkAbandoned(mock)
+				expectNoCheckpoint(mock)
+				expectInsertedDump(mock, dump)
+				mock.ExpectQuery("select candidate_run.id").WithArgs(sqlmock.AnyArg()).WillReturnRows(
+					sqlmock.NewRows([]string{
+						"id", "compatible_entity_count", "selected_entity_count", "incompatible_entity_types",
+					}).AddRow(9, 1, 1, ""),
+				)
+				mock.ExpectExec("update discogs_catalog_entity_state").WillReturnError(expected)
+				mock.ExpectRollback()
+				expectEntityUnlock(mock)
+			},
+			want: "finalize import run 9 catalog state",
 		},
 		{
 			name: "dump provenance",
@@ -1570,7 +1836,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoCheckpoint(mock)
 				expectInsertedDump(mock, dump)
 				expectNoSuccessfulRun(mock)
-				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), processorName, "version", 1, 5).WillReturnError(expected)
+				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), 1, 5).WillReturnError(expected)
 				mock.ExpectRollback()
 				expectEntityUnlock(mock)
 			},
@@ -1606,7 +1872,8 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoResumableRun(mock)
 				expectInsertedRun(mock, sqlmock.AnyArg())
 				mock.ExpectExec("insert into discogs_import_run_dump").WithArgs(
-					int64(2), "artist", int64(1), 5, importContractRevision(1),
+					int64(2), "artist", int64(1), 5,
+					currentImportContractRevisions[artistEntityType],
 				).WillReturnError(expected)
 				mock.ExpectRollback()
 				expectEntityUnlock(mock)
@@ -1622,7 +1889,7 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoCheckpoint(mock)
 				expectInsertedDump(mock, dump)
 				expectNoSuccessfulRun(mock)
-				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), processorName, "version", 1, 5).
+				mock.ExpectQuery("select import_run.id").WithArgs(sqlmock.AnyArg(), 1, 5).
 					WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 				expectInsertedRun(mock, sqlmock.AnyArg())
 				expectInsertedRunDump(mock)
@@ -1631,6 +1898,26 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectEntityUnlock(mock)
 			},
 			want: "copy import run 7 summaries",
+		},
+		{
+			name: "prepare bootstrap",
+			setup: func(mock sqlmock.Sqlmock) {
+				expectEntityLock(mock)
+				mock.ExpectBegin()
+				expectMarkAbandoned(mock)
+				expectNoCheckpoint(mock)
+				expectInsertedDump(mock, dump)
+				expectNoSuccessfulRun(mock)
+				expectNoResumableRun(mock)
+				expectInsertedRun(mock, sqlmock.AnyArg())
+				expectInsertedRunDump(mock)
+				expectCatalogImporting(mock, 2, 1)
+				mock.ExpectQuery("select prepare_discogs_bootstrap_foreign_keys").
+					WithArgs(int64(2)).WillReturnError(expected)
+				mock.ExpectRollback()
+				expectEntityUnlock(mock)
+			},
+			want: "prepare import run 2 bootstrap",
 		},
 		{
 			name: "commit",
@@ -1644,10 +1931,30 @@ func TestImportCoordinatorAdmissionFailures(t *testing.T) {
 				expectNoResumableRun(mock)
 				expectInsertedRun(mock, sqlmock.AnyArg())
 				expectInsertedRunDump(mock)
+				expectCatalogImporting(mock, 2, 1)
+				expectPreparedBootstrap(mock, 2)
 				mock.ExpectCommit().WillReturnError(expected)
 				expectEntityUnlock(mock)
 			},
 			want: "commit import admission",
+		},
+		{
+			name: "start catalog state",
+			setup: func(mock sqlmock.Sqlmock) {
+				expectEntityLock(mock)
+				mock.ExpectBegin()
+				expectMarkAbandoned(mock)
+				expectNoCheckpoint(mock)
+				expectInsertedDump(mock, dump)
+				expectNoSuccessfulRun(mock)
+				expectNoResumableRun(mock)
+				expectInsertedRun(mock, sqlmock.AnyArg())
+				expectInsertedRunDump(mock)
+				mock.ExpectExec("update discogs_catalog_entity_state").WillReturnError(expected)
+				mock.ExpectRollback()
+				expectEntityUnlock(mock)
+			},
+			want: "start import run 2 catalog state",
 		},
 	}
 	for _, test := range tests {
@@ -1676,7 +1983,32 @@ func preparedMockCoordinator(t *testing.T) (sqlmock.Sqlmock, *ImportExecutionCoo
 		processorVersion: "version",
 		conn:             conn,
 		runID:            1,
+		entities:         []string{artistEntityType},
 	}
+}
+
+func expectCatalogImporting(mock sqlmock.Sqlmock, runID int64, rows int64) {
+	mock.ExpectExec("update discogs_catalog_entity_state").
+		WithArgs(catalogStatusImporting, runID, "array").
+		WillReturnResult(sqlmock.NewResult(0, rows))
+}
+
+func expectCatalogReady(mock sqlmock.Sqlmock, runID int64, rows int64) {
+	mock.ExpectExec("update discogs_catalog_entity_state").
+		WithArgs(catalogStatusReady, runID, "array").
+		WillReturnResult(sqlmock.NewResult(0, rows))
+}
+
+func expectPreparedBootstrap(mock sqlmock.Sqlmock, runID int64) {
+	mock.ExpectQuery("select prepare_discogs_bootstrap_foreign_keys").
+		WithArgs(runID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+}
+
+func expectFinalizedBootstrap(mock sqlmock.Sqlmock, runID int64) {
+	mock.ExpectQuery("select finalize_discogs_bootstrap").
+		WithArgs(runID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 }
 
 func expectCompletionValidation(mock sqlmock.Sqlmock) {
@@ -1757,11 +2089,50 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 			want:   "was not running",
 		},
 		{
+			name: "finalize bootstrap",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectBegin()
+				expectCompletionValidation(mock)
+				expectCompletedRunUpdate(mock)
+				mock.ExpectQuery("select finalize_discogs_bootstrap").
+					WithArgs(int64(1)).WillReturnError(expected)
+				mock.ExpectRollback()
+			},
+			want: "finalize import run 1 bootstrap",
+		},
+		{
+			name: "ready catalog state",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectBegin()
+				expectCompletionValidation(mock)
+				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
+				mock.ExpectExec("update discogs_catalog_entity_state").WillReturnError(expected)
+				mock.ExpectRollback()
+			},
+			want: "finalize import run 1 catalog state",
+		},
+		{
+			name: "failed catalog state",
+			setup: func(mock sqlmock.Sqlmock) {
+				mock.ExpectBegin()
+				mock.ExpectExec("update discogs_import_run").
+					WithArgs(catalogStatusFailed, sqlmock.AnyArg(), int64(1)).
+					WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("update discogs_catalog_entity_state").WillReturnError(expected)
+				mock.ExpectRollback()
+			},
+			runErr: expected,
+			want:   "fail import run 1 catalog state",
+		},
+		{
 			name: "prune superseded",
 			setup: func(mock sqlmock.Sqlmock) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
+				expectCatalogReady(mock, 1, 1)
 				mock.ExpectExec("delete from discogs_import_run_chunk run_chunk").WillReturnError(expected)
 				mock.ExpectRollback()
 			},
@@ -1773,6 +2144,8 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
+				expectCatalogReady(mock, 1, 1)
 				expectPrunedSupersededProgress(mock)
 				mock.ExpectExec("delete from discogs_import_run_chunk where import_run_id").
 					WithArgs(int64(1)).
@@ -1787,6 +2160,8 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 				mock.ExpectBegin()
 				expectCompletionValidation(mock)
 				expectCompletedRunUpdate(mock)
+				expectFinalizedBootstrap(mock, 1)
+				expectCatalogReady(mock, 1, 1)
 				expectPrunedSupersededProgress(mock)
 				mock.ExpectExec("delete from discogs_import_run_chunk where import_run_id").
 					WithArgs(int64(1)).
@@ -1803,4 +2178,20 @@ func TestImportCoordinatorCompletionFailures(t *testing.T) {
 			require.ErrorContains(t, coordinator.Complete(context.Background(), test.runErr), test.want)
 		})
 	}
+}
+
+func TestCatalogStateTransitionResultBoundaries(t *testing.T) {
+	expected := errors.New("fixture")
+	require.ErrorIs(t, requireCatalogStateTransitions(nil, expected, 1, "test", 7), expected)
+	require.ErrorIs(
+		t,
+		requireCatalogStateTransitions(sqlmock.NewErrorResult(expected), nil, 1, "test", 7),
+		expected,
+	)
+	require.ErrorContains(
+		t,
+		requireCatalogStateTransitions(sqlmock.NewResult(0, 0), nil, 1, "test", 7),
+		"updated 0 of 1 entities",
+	)
+	require.NoError(t, requireCatalogStateTransitions(sqlmock.NewResult(0, 1), nil, 1, "test", 7))
 }

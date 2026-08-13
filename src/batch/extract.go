@@ -50,11 +50,7 @@ func ExtractClause(item any) clause.OnConflict {
 	case *model.LabelReleaseItem:
 		return doNothing("release_item_id", "label_id", "category_notation")
 	case *model.ReleaseItemFormat:
-		return updateWhenChanged(
-			"release_item_format",
-			[]string{"release_item_id", "hash"},
-			[]string{"quantity"},
-		)
+		return doNothing("release_item_id", "hash")
 	case *model.ArtistAlias:
 		return doNothing("artist_id", "alias_id")
 	case *model.ArtistGroup:

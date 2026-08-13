@@ -22,6 +22,34 @@ type IDSet struct {
 	segments sync.Map
 }
 
+// NameSet stores normalized canonical names confirmed by PostgreSQL in the current import.
+type NameSet struct {
+	mu    sync.RWMutex
+	names map[string]struct{}
+}
+
+func (s *NameSet) Add(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.names == nil {
+		s.names = make(map[string]struct{})
+	}
+	s.names[name] = struct{}{}
+}
+
+func (s *NameSet) Contains(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, exists := s.names[name]
+	return exists
+}
+
+func (s *NameSet) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.names = nil
+}
+
 func (s *IDSet) Add(id int32) {
 	if id < 1 {
 		return
@@ -66,10 +94,8 @@ func (s *IDSet) AllocatedWordBytes() int64 {
 }
 
 var (
-	// StyleCache stores names used by the current import.
-	StyleCache = &sync.Map{}
-	// GenreCache stores names used by the current import.
-	GenreCache = &sync.Map{}
+	StyleNames = &NameSet{}
+	GenreNames = &NameSet{}
 	ArtistIDs  = &IDSet{}
 	LabelIDs   = &IDSet{}
 	MasterIDs  = &IDSet{}
@@ -79,4 +105,6 @@ func ResetIDs() {
 	ArtistIDs.Reset()
 	LabelIDs.Reset()
 	MasterIDs.Reset()
+	StyleNames.Reset()
+	GenreNames.Reset()
 }

@@ -179,7 +179,7 @@ func TestPreflightImportDependencies(t *testing.T) {
 
 		err := preflightImportDependencies(ctx, db, []*opendiscogsmodel.DiscogsDump{releaseDump})
 
-		require.ErrorContains(t, err, "successful artist checkpoint")
+		require.ErrorContains(t, err, "completed artist checkpoint")
 	})
 
 	t.Run("incomplete checkpoint set rejects release-only import", func(t *testing.T) {
@@ -192,7 +192,7 @@ func TestPreflightImportDependencies(t *testing.T) {
 
 		err := preflightImportDependencies(ctx, db, []*opendiscogsmodel.DiscogsDump{releaseDump})
 
-		require.ErrorContains(t, err, "successful label checkpoint")
+		require.ErrorContains(t, err, "completed label checkpoint")
 	})
 
 	t.Run("mixed publication dates are compatible", func(t *testing.T) {
@@ -325,6 +325,9 @@ func TestDependencyPreflightUsesCanonicalPostgreSQLCheckpoints(t *testing.T) {
 	require.NoError(t, RunDDL(db))
 	db, err = database.GetConnect(dsn)
 	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+		truncate table discogs_import_run, discogs_dump
+		restart identity cascade`).Error)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 
@@ -334,12 +337,12 @@ func TestDependencyPreflightUsesCanonicalPostgreSQLCheckpoints(t *testing.T) {
 		ctx,
 		sqlDB,
 		[]*opendiscogsmodel.DiscogsDump{masterDump},
-	), "successful artist checkpoint")
+	), "completed artist checkpoint")
 	require.ErrorContains(t, preflightImportDependencies(
 		ctx,
 		sqlDB,
 		[]*opendiscogsmodel.DiscogsDump{releaseDump},
-	), "successful artist checkpoint")
+	), "completed artist checkpoint")
 
 	require.NoError(t, preflightImportDependencies(ctx, sqlDB, []*opendiscogsmodel.DiscogsDump{
 		importDump("artist", "2026-08-02", "1"),
@@ -357,10 +360,25 @@ func TestDependencyPreflightUsesCanonicalPostgreSQLCheckpoints(t *testing.T) {
 		ctx,
 		sqlDB,
 		[]*opendiscogsmodel.DiscogsDump{releaseDump},
-	), "successful label checkpoint")
+	), "label checkpoint")
 
 	recordSuccessfulDependencyCheckpoint(t, db, importDump("label", "2026-08-02", "b"))
 	recordSuccessfulDependencyCheckpoint(t, db, importDump("master", "2026-07-31", "c"))
+	require.NoError(t, preflightImportDependencies(
+		ctx,
+		sqlDB,
+		[]*opendiscogsmodel.DiscogsDump{releaseDump},
+	))
+
+	artistRunID := recordSuccessfulDependencyCheckpoint(
+		t,
+		db,
+		importDump("artist", "2026-08-03", "e"),
+	)
+	require.NoError(t, db.Exec(`
+		update discogs_import_run
+		   set status = 'running', completed_at = null
+		 where id = ?`, artistRunID).Error)
 	require.NoError(t, preflightImportDependencies(
 		ctx,
 		sqlDB,
@@ -373,14 +391,14 @@ func TestDependencyPreflightUsesCanonicalPostgreSQLCheckpoints(t *testing.T) {
 		ctx,
 		sqlDB,
 		[]*opendiscogsmodel.DiscogsDump{releaseDump},
-	), "artist checkpoint 2026-07-29 is stale")
+	), "artist checkpoint 2026-08-03 is stale")
 }
 
 func recordSuccessfulDependencyCheckpoint(
 	t *testing.T,
 	db *gorm.DB,
 	dump *opendiscogsmodel.DiscogsDump,
-) {
+) int64 {
 	t.Helper()
 	require.NoError(t, db.Omit("ID", "CreatedAt", "LastModifiedAt").Create(dump).Error)
 	var runID int64
@@ -400,6 +418,7 @@ func recordSuccessfulDependencyCheckpoint(
 		dump.ID,
 		currentImportContractRevisions[dump.EntityType],
 	).Error)
+	return runID
 }
 
 func dependencySQLMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
@@ -420,7 +439,7 @@ func expectDependencyCheckpoint(
 	horizon time.Time,
 ) *sqlmock.ExpectedQuery {
 	return mock.ExpectQuery(regexp.QuoteMeta(dependencyCheckpointQuery)).
-		WithArgs(entityType, horizon)
+		WithArgs(entityType, currentImportContractRevisions[entityType], horizon)
 }
 
 func dependencyRows() *sqlmock.Rows {

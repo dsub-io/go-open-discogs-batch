@@ -14,6 +14,7 @@ import (
 	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
 	"github.com/dsub-io/go-open-discogs-batch/src/data"
 	"github.com/dsub-io/go-open-discogs-batch/src/database"
+	"github.com/dsub-io/go-open-discogs-batch/src/result"
 	"github.com/knadh/koanf"
 	"github.com/stretchr/testify/require"
 )
@@ -23,6 +24,51 @@ type runnerFixture struct {
 	filename string
 	body     []byte
 	checksum string
+}
+
+type importStepRecorder struct {
+	built []string
+}
+
+func (r *importStepRecorder) step(entity string) Step {
+	r.built = append(r.built, entity)
+	return func() result.Result { return result.NewResult(0, nil) }
+}
+
+func (r *importStepRecorder) UpdateArtist(Order) Step  { return r.step("artist") }
+func (r *importStepRecorder) UpdateLabel(Order) Step   { return r.step("label") }
+func (r *importStepRecorder) UpdateMaster(Order) Step  { return r.step("master") }
+func (r *importStepRecorder) UpdateRelease(Order) Step { return r.step("release") }
+
+func TestBuildImportStepsSupportsEveryEntityCombination(t *testing.T) {
+	entities := []string{"artist", "label", "master", "release"}
+	resourceKeys := []string{"artists", "labels", "masters", "releases"}
+	for mask := 1; mask < 1<<len(entities); mask++ {
+		config := koanf.New(".")
+		expected := make([]string, 0, len(entities))
+		for index, entity := range entities {
+			enabled := mask&(1<<index) != 0
+			require.NoError(t, config.Set(resourceKeys[index], enabled))
+			if enabled {
+				expected = append(expected, entity)
+			}
+		}
+		recorder := new(importStepRecorder)
+		steps := buildImportSteps(
+			context.Background(),
+			config,
+			&data.ImportPlan{Resources: map[string]string{}},
+			recorder,
+			1,
+			1,
+			nil,
+			1,
+			false,
+		)
+
+		require.Equal(t, expected, recorder.built, "entity mask %04b", mask)
+		require.Len(t, steps, len(expected), "entity mask %04b", mask)
+	}
 }
 
 func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
@@ -109,6 +155,20 @@ func TestRunnerEndToEndAndSuccessfulSkip(t *testing.T) {
 		require.NoFileExists(t, filepath.Join(config.String("data-dir"), fixture.filename))
 	}
 
+	for _, selected := range []string{"artist", "label", "master", "release"} {
+		require.NoError(t, config.Set("entities", []string{selected}))
+		for _, entity := range []string{"artist", "label", "master", "release"} {
+			require.NoError(t, config.Set(entity+"s", entity == selected))
+		}
+		require.NoError(t, config.Set("force", true))
+		require.NoError(t, runner.Run(context.Background(), config), "standalone %s", selected)
+	}
+
+	require.NoError(t, config.Set("entities", []string{"artist", "label", "master", "release"}))
+	for _, entity := range []string{"artist", "label", "master", "release"} {
+		require.NoError(t, config.Set(entity+"s", true))
+	}
+	require.NoError(t, config.Set("force", false))
 	require.NoError(t, runner.Run(context.Background(), config))
 	require.NoError(t, config.Set("cleanup", false))
 	require.NoError(t, runner.Run(context.Background(), config))

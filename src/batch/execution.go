@@ -21,9 +21,14 @@ const (
 	labelEntityType                       = "label"
 	masterEntityType                      = "master"
 	releaseEntityType                     = "release"
+	catalogStatusFailed                   = "failed"
+	catalogStatusImporting                = "importing"
+	catalogStatusReady                    = "ready"
 	undefinedColumnSQLState               = "42703"
 	importContractRevisionMigration       = "V009"
 	importContractRevisionColumnReference = "discogs_import_run_dump.import_contract_revision"
+	prepareBootstrapForeignKeysSQL        = "select prepare_discogs_bootstrap_foreign_keys($1)"
+	finalizeBootstrapSQL                  = "select finalize_discogs_bootstrap($1)"
 )
 
 var fingerprintImportManifest = opendiscogsmanifest.Fingerprint
@@ -66,6 +71,7 @@ type ImportExecutionCoordinator struct {
 	conn     *sql.Conn
 	runID    int64
 	lockKeys []int32
+	entities []string
 }
 
 func NewImportExecutionCoordinator(
@@ -212,6 +218,16 @@ func (c *ImportExecutionCoordinator) Prepare(
 				return nil, err
 			}
 		}
+		if err := markCatalogStatesReady(
+			ctx,
+			tx,
+			successfulRunID,
+			orderedTypes,
+		); err != nil {
+			_ = tx.Rollback()
+			c.release(ctx)
+			return nil, err
+		}
 		if err := tx.Commit(); err != nil {
 			_ = tx.Rollback()
 			c.release(ctx)
@@ -232,7 +248,6 @@ func (c *ImportExecutionCoordinator) Prepare(
 			ctx,
 			tx,
 			fingerprint,
-			c.processorVersion,
 			chunkSize,
 			len(dumps),
 		)
@@ -285,6 +300,22 @@ func (c *ImportExecutionCoordinator) Prepare(
 			return nil, err
 		}
 	}
+	if err := markCatalogStatesImporting(ctx, tx, runID, orderedTypes); err != nil {
+		_ = tx.Rollback()
+		c.release(ctx)
+		return nil, err
+	}
+	if err := runBootstrapOperation(
+		ctx,
+		tx,
+		prepareBootstrapForeignKeysSQL,
+		runID,
+		"prepare",
+	); err != nil {
+		_ = tx.Rollback()
+		c.release(ctx)
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		_ = tx.Rollback()
 		c.release(ctx)
@@ -292,6 +323,7 @@ func (c *ImportExecutionCoordinator) Prepare(
 	}
 	committed = true
 	c.runID = runID
+	c.entities = append(c.entities[:0], orderedTypes...)
 	return &ImportPreparation{
 		ManifestSHA256:   fingerprint,
 		RunID:            runID,
@@ -339,7 +371,6 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 			statusReason = completionErr
 		}
 	}
-
 	status := "success"
 	failure := sql.NullString{}
 	if statusReason != nil {
@@ -372,6 +403,31 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 		return fmt.Errorf("import run %d was not running", c.runID)
 	}
 	if statusReason == nil {
+		if err := runBootstrapOperation(
+			ctx,
+			tx,
+			finalizeBootstrapSQL,
+			c.runID,
+			"finalize",
+		); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := markCatalogStatesReady(ctx, tx, c.runID, c.entities); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	} else if err := markCatalogStatesFailed(
+		ctx,
+		tx,
+		c.runID,
+		c.entities,
+		statusReason.Error(),
+	); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if statusReason == nil {
 		if err := pruneSupersededFailedProgress(ctx, tx); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -390,6 +446,20 @@ func (c *ImportExecutionCoordinator) Complete(ctx context.Context, runErr error)
 	}
 	c.runID = 0
 	return completionErr
+}
+
+func runBootstrapOperation(
+	ctx context.Context,
+	tx *sql.Tx,
+	query string,
+	runID int64,
+	action string,
+) error {
+	var affectedConstraints int
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&affectedConstraints); err != nil {
+		return fmt.Errorf("%s import run %d bootstrap: %w", action, runID, err)
+	}
+	return nil
 }
 
 func (c *ImportExecutionCoordinator) acquireEntityLocks(
@@ -431,9 +501,110 @@ func (c *ImportExecutionCoordinator) release(ctx context.Context) {
 		)
 	}
 	c.lockKeys = nil
+	c.entities = nil
 	_ = c.conn.Close()
 	c.conn = nil
 	c.runID = 0
+}
+
+func markCatalogStatesImporting(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID int64,
+	entityTypes []string,
+) error {
+	result, err := tx.ExecContext(
+		ctx,
+		`update discogs_catalog_entity_state
+		    set status = $1,
+		        operation = case
+		            when last_successful_import_run_id is null then 'bootstrap'
+		            else 'refresh'
+		        end,
+		        active_import_run_id = $2,
+		        updated_at = now(),
+		        failure_message = null
+		  where entity_type = any($3::text[])`,
+		catalogStatusImporting,
+		runID,
+		postgresArray(entityTypes),
+	)
+	return requireCatalogStateTransitions(result, err, len(entityTypes), "start", runID)
+}
+
+func markCatalogStatesReady(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID int64,
+	entityTypes []string,
+) error {
+	result, err := tx.ExecContext(
+		ctx,
+		`update discogs_catalog_entity_state
+		    set status = $1,
+		        operation = null,
+		        active_import_run_id = null,
+		        last_successful_import_run_id = $2,
+		        ready_at = now(),
+		        updated_at = now(),
+		        failure_message = null
+		  where entity_type = any($3::text[])
+		    and (active_import_run_id = $2 or active_import_run_id is null)`,
+		catalogStatusReady,
+		runID,
+		postgresArray(entityTypes),
+	)
+	return requireCatalogStateTransitions(result, err, len(entityTypes), "finalize", runID)
+}
+
+func markCatalogStatesFailed(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID int64,
+	entityTypes []string,
+	failure string,
+) error {
+	result, err := tx.ExecContext(
+		ctx,
+		`update discogs_catalog_entity_state
+		    set status = $1,
+		        active_import_run_id = null,
+		        updated_at = now(),
+		        failure_message = $2
+		  where entity_type = any($3::text[])
+		    and active_import_run_id = $4`,
+		catalogStatusFailed,
+		failure,
+		postgresArray(entityTypes),
+		runID,
+	)
+	return requireCatalogStateTransitions(result, err, len(entityTypes), "fail", runID)
+}
+
+func requireCatalogStateTransitions(
+	result sql.Result,
+	err error,
+	expected int,
+	action string,
+	runID int64,
+) error {
+	if err != nil {
+		return fmt.Errorf("%s import run %d catalog state: %w", action, runID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count %s import run %d catalog states: %w", action, runID, err)
+	}
+	if affected != int64(expected) {
+		return fmt.Errorf(
+			"%s import run %d catalog state: updated %d of %d entities",
+			action,
+			runID,
+			affected,
+			expected,
+		)
+	}
+	return nil
 }
 
 func markAbandonedRuns(
@@ -715,7 +886,6 @@ func findResumableRun(
 	ctx context.Context,
 	tx *sql.Tx,
 	fingerprint string,
-	processorVersion string,
 	chunkSize int,
 	entityCount int,
 ) (int64, error) {
@@ -725,12 +895,10 @@ func findResumableRun(
 		   from discogs_import_run import_run
 		  where import_run.manifest_sha256 = $1
 		    and import_run.status = 'failed'
-		    and import_run.processor = $2
-		    and import_run.processor_version = $3
 		    and not import_run.force_requested
 		    and (select count(*)
 		           from discogs_import_run_dump run_dump
-		          where run_dump.import_run_id = import_run.id) = $4
+		          where run_dump.import_run_id = import_run.id) = $2
 		    and not exists (
 		        select 1
 		          from discogs_import_run_dump run_dump
@@ -741,7 +909,7 @@ func findResumableRun(
 		        select 1
 		          from discogs_import_run_dump run_dump
 		         where run_dump.import_run_id = import_run.id
-		           and run_dump.chunk_size is distinct from $5
+		           and run_dump.chunk_size is distinct from $3
 		    )
 		    and not exists (
 		        select 1
@@ -772,12 +940,8 @@ func findResumableRun(
 		          join discogs_import_run_dump current_dump
 		            on current_dump.import_run_id = checkpoint.import_run_id
 		           and current_dump.entity_type = checkpoint.entity_type
-		          join discogs_import_run current_run
-		            on current_run.id = checkpoint.import_run_id
 		         where failed_dump.import_run_id = import_run.id
 		           and (current_dump.dump_id <> failed_dump.dump_id
-		                or current_run.processor <> import_run.processor
-		                or current_run.processor_version <> import_run.processor_version
 		                or current_dump.import_contract_revision <>
 		                   failed_dump.import_contract_revision)
 		           and (checkpoint.applied_at > import_run.completed_at
@@ -792,8 +956,6 @@ func findResumableRun(
 		ctx,
 		query,
 		fingerprint,
-		processorName,
-		processorVersion,
 		entityCount,
 		chunkSize,
 	).Scan(&runID)
@@ -902,15 +1064,11 @@ func pruneSupersededFailedProgress(ctx context.Context, tx *sql.Tx) error {
 		               from discogs_import_run_dump failed_dump
 		               left join discogs_import_checkpoint checkpoint
 		                 on checkpoint.entity_type = failed_dump.entity_type
-		               left join discogs_import_run current_run
-		                 on current_run.id = checkpoint.import_run_id
-		               left join discogs_import_run_dump current_dump
+			               left join discogs_import_run_dump current_dump
 		                 on current_dump.import_run_id = checkpoint.import_run_id
 		                and current_dump.entity_type = checkpoint.entity_type
 			              where failed_dump.import_run_id = failed_run.id
 			                and (current_dump.dump_id is distinct from failed_dump.dump_id
-			                     or current_run.processor is distinct from failed_run.processor
-			                     or current_run.processor_version is distinct from failed_run.processor_version
 			                     or current_dump.import_contract_revision is distinct from
 			                        failed_dump.import_contract_revision)
 		         )

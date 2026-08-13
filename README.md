@@ -4,13 +4,13 @@ Stream Discogs monthly public data dumps into PostgreSQL with bounded memory,
 durable progress, and idempotent recovery.
 
 This release consumes canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.3.0.
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.3.1.
 Go and Java therefore apply the same migration bytes and import contracts. This
 is an independent project and is not endorsed by Discogs.
 
 > [!CAUTION]
 > **Production import is not approved yet.** Publish both batch implementations
-> against model v0.3.0 and complete cross-language migration, recovery, and
+> against model v0.3.1 and complete cross-language migration, recovery, and
 > full-dump validation before starting or resuming a production import.
 
 - [Import safety and recovery](docs/import-safety.md)
@@ -42,8 +42,8 @@ otherwise discovery performs the bounded request sequence documented in
 | --- | --- |
 | Source | Monthly public dumps only; no Discogs API, live hydration, or user writes |
 | Memory | Dumps are decompressed and parsed as streams; the full dump is never held in memory |
-| Commit | A root, its supported relations, and durable chunk progress commit atomically |
-| Retry | Compatible interrupted runs resume verified chunks; `--force` restarts the same manifest from zero |
+| Commit | A root, its supported relations, and durable chunk progress commit atomically; Release backlinks reconcile once after all chunks |
+| Retry | Compatible interrupted runs resume verified chunks and rerun pending finalization; `--force` restarts the same manifest from zero |
 | Convergence | Supported missing relations are removed; roots absent from a newer dump are not deleted |
 | Visibility | Readers can observe committed chunks; a complete monthly import is not an atomic snapshot switch |
 | Files | Failed-run downloads remain; `--cleanup` removes only this run's selected files after success |
@@ -77,7 +77,7 @@ the importer never creates the database.
 | Existing schema | `USAGE` and `CREATE` on the schema, table writes, and migration DDL authority |
 | Restricted batch role | A DBA prepares the schema, extension, and grants first |
 
-Model v0.3.0 migrations are the only schema source of truth. Migration V007
+Model v0.3.1 migrations are the only schema source of truth. Migration V007
 uses `CREATE EXTENSION IF NOT EXISTS pg_trgm`; allow the migration role to
 install this trusted extension or have a DBA pre-install it in a stable schema
 visible to the migration role. Catalog tables are still created only in the
@@ -126,8 +126,9 @@ the database URI through a secret mechanism instead of command history.
 Byte progress describes transfer/read activity. Import progress reports
 durably committed roots, not merely parsed rows; its percentage appears only
 after an exact entity total is stored. Progress records are one JSON object per
-line, but ordinary lifecycle messages can also use stdout; do not treat the
-entire stream as a JSON-only document. Keep stderr separate from collectors.
+line. Floating-point progress metrics are numeric values rounded to at most two
+decimal places. Ordinary lifecycle messages can also use stdout; do not treat
+the entire stream as a JSON-only document. Keep stderr separate from collectors.
 
 ### Resources
 
@@ -163,7 +164,8 @@ Source builds require Go 1.26. Integration tests label every owned Docker
 resource with a per-run identity and use tmpfs for PostgreSQL. In-process
 cleanup and CI's always-run teardown remove only those containers, networks,
 and volumes, then verify that residue is zero. Persistent test volumes and bind
-mounts are not allowed.
+mounts are not allowed. Each test process shares one PostgreSQL container while
+every test gets an isolated database that is forcibly dropped during cleanup.
 
 ```shell
 gofmt -w .
@@ -174,6 +176,11 @@ go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
 CI checks formatting, module consistency, vet, race detection, PostgreSQL and
 dump E2E behavior, cleanup residue, and 100% statement coverage.
+
+On 2026-08-13, with warm tool/dependency caches on the development machine, the
+race/coverage lane took 15.76 seconds and started four PostgreSQL containers;
+the E2E lane took 4.75 seconds and started one. Both finished with zero owned
+container, network, or volume residue.
 
 ## License
 

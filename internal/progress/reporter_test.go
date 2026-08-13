@@ -62,6 +62,11 @@ func TestReporterLifecycle(t *testing.T) {
 	require.NotContains(t, output.String(), "\r")
 }
 
+func TestRoundMetricUsesTwoDecimalPlaces(t *testing.T) {
+	require.Equal(t, 1.23, RoundMetric(1.234))
+	require.Equal(t, 1.24, RoundMetric(1.235))
+}
+
 func TestReporterStartsImplicitlyAndFails(t *testing.T) {
 	var output bytes.Buffer
 	now := time.Date(2026, time.August, 12, 10, 0, 0, 0, time.UTC)

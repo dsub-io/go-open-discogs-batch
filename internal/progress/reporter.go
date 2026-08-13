@@ -3,10 +3,12 @@ package progress
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/schollz/progressbar/v3"
 	"io"
+	"math"
 	"sync"
 	"time"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 const (
@@ -20,6 +22,7 @@ const (
 	stateFailed    = "failed"
 
 	defaultReportInterval = 5 * time.Second
+	metricPrecisionScale  = 100.0
 )
 
 type Record struct {
@@ -233,13 +236,18 @@ func (r *Reporter) write(now time.Time, state string) {
 		Resource:       r.resource,
 		CompletedBytes: r.completedBytes,
 		TotalBytes:     r.totalBytes,
-		Percent:        percent,
-		BytesPerSecond: bytesPerSecond,
-		ElapsedSeconds: elapsed,
+		Percent:        RoundMetric(percent),
+		BytesPerSecond: RoundMetric(bytesPerSecond),
+		ElapsedSeconds: RoundMetric(elapsed),
 	}
 	payload, _ := json.Marshal(record)
 	payload = append(payload, '\n')
 	_, _ = r.output.Write(payload)
+}
+
+// RoundMetric bounds progress values without changing their numeric JSON type.
+func RoundMetric(value float64) float64 {
+	return math.Round(value*metricPrecisionScale) / metricPrecisionScale
 }
 
 func newBar(output io.Writer, stage, resource string, totalBytes int64) *progressbar.ProgressBar {

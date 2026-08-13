@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/dsub-io/go-open-discogs-batch/src/data"
 	"github.com/stretchr/testify/require"
@@ -108,4 +109,37 @@ func TestFinalizeImportUsesCompletionContextAfterCancellation(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.FileExists(t, resource)
+}
+
+func TestImportCompletionContextDoesNotDeadlineSuccessfulFinalization(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	completionCtx, completionCancel := importCompletionContext(ctx, nil)
+	defer completionCancel()
+	_, hasDeadline := completionCtx.Deadline()
+
+	require.NoError(t, completionCtx.Err())
+	require.False(t, hasDeadline)
+}
+
+func TestImportCompletionContextBoundsFailureRecording(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	completionCtx, completionCancel := importCompletionContext(
+		ctx,
+		errors.New("fixture import failure"),
+	)
+	defer completionCancel()
+	deadline, hasDeadline := completionCtx.Deadline()
+
+	require.NoError(t, completionCtx.Err())
+	require.True(t, hasDeadline)
+	require.WithinDuration(
+		t,
+		time.Now().Add(failedImportCompletionTimeout),
+		deadline,
+		time.Second,
+	)
 }

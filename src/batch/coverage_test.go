@@ -20,20 +20,42 @@ import (
 
 func testString(value string) *string { return &value }
 
+type existingRelationRootFixture struct {
+	table  string
+	rootID int32
+}
+
+func expectExistingRelationRoots(
+	mock sqlmock.Sqlmock,
+	firstTable string,
+	fixtures ...existingRelationRootFixture,
+) {
+	rows := sqlmock.NewRows([]string{"relation_table", "root_id"})
+	for _, fixture := range fixtures {
+		rows.AddRow(fixture.table, fixture.rootID)
+	}
+	mock.ExpectQuery("select '" + firstTable + "'").WithArgs(sqlmock.AnyArg()).WillReturnRows(rows)
+}
+
 func TestBatchConstructor(t *testing.T) {
 	require.NotNil(t, New())
 }
 
 func TestLegacyCoreTransforms(t *testing.T) {
-	master := &XmlMaster{ID: 1, Title: testString("master")}
-	masterResult := <-master.Transform().Observe()
-	require.NoError(t, masterResult.E)
-	require.Equal(t, int32(1), masterResult.V.(*opendiscogsmodel.Master).ID)
+	observedAt := time.Unix(1, 0).UTC()
+	mainReleaseID := int32(10)
+	master := &XmlMaster{
+		ID: 1, Title: testString("master"), MainReleaseID: &mainReleaseID,
+	}
+	masterResult := master.TransformAt(observedAt)
+	require.Equal(t, int32(1), masterResult.ID)
+	require.Equal(t, observedAt, masterResult.CreatedAt)
+	require.Equal(t, mainReleaseID, *masterResult.MainReleaseID)
 
 	release := &XmlRelease{ID: 2, Title: testString("release")}
-	releaseResult := <-release.Transform().Observe()
-	require.NoError(t, releaseResult.E)
-	require.Equal(t, int32(2), releaseResult.V.(*opendiscogsmodel.ReleaseItem).ID)
+	releaseResult := release.TransformAt(observedAt)
+	require.Equal(t, int32(2), releaseResult.ID)
+	require.Equal(t, observedAt, releaseResult.CreatedAt)
 }
 
 func TestXMLRelationFiltersInvalidValues(t *testing.T) {
@@ -63,13 +85,16 @@ func TestXMLRelationFiltersInvalidValues(t *testing.T) {
 	require.Len(t, label.GetUrls(), 1)
 	require.Len(t, label.GetSubLabels(), 1)
 
+	mainReleaseID := int32(10)
 	master := &XmlMasterRelation{
-		ID:      12,
-		Styles:  []string{" ", "Rock"},
-		Genres:  []string{" ", "Electronic"},
-		Artists: []int32{99, 1},
-		Videos:  []XmlVideo{{}, {URL: "https://example.test"}},
+		ID:            12,
+		MainReleaseID: &mainReleaseID,
+		Styles:        []string{" ", "Rock"},
+		Genres:        []string{" ", "Electronic"},
+		Artists:       []int32{99, 1},
+		Videos:        []XmlVideo{{}, {URL: "https://example.test"}},
 	}
+	require.Equal(t, int32(10), *master.GetMaster().MainReleaseID)
 	require.Len(t, master.GetMasterStyles(), 1)
 	require.Len(t, master.GetMasterGenres(), 1)
 	require.Len(t, master.GetMasterArtists(), 1)
@@ -105,7 +130,9 @@ func TestXMLRelationFiltersInvalidValues(t *testing.T) {
 }
 
 func TestXMLValueBoundaries(t *testing.T) {
-	require.Nil(t, releaseItem(1, nil, nil, nil, nil, nil, XmlReleaseMasterInfo{}, nil).MasterID)
+	require.Nil(t, releaseItem(
+		1, nil, nil, nil, nil, nil, XmlReleaseMasterInfo{}, nil, time.Time{},
+	).MasterID)
 	unknownMaster := int32(99)
 	require.Nil(t, releaseItem(
 		1,
@@ -116,6 +143,7 @@ func TestXMLValueBoundaries(t *testing.T) {
 		nil,
 		XmlReleaseMasterInfo{MasterID: &unknownMaster},
 		nil,
+		time.Time{},
 	).MasterID)
 
 	invalidDate := "invalid"
@@ -196,9 +224,7 @@ func TestRegisterCacheBoundaries(t *testing.T) {
 		&opendiscogsmodel.Master{ID: 3},
 		struct{}{},
 	} {
-		actual, err := registerCache(context.Background(), item)
-		require.NoError(t, err)
-		require.Equal(t, item, actual)
+		registerCache(item)
 	}
 	require.True(t, cache.ArtistIDs.Contains(1))
 	require.True(t, cache.LabelIDs.Contains(2))
@@ -259,11 +285,22 @@ type rejectingOrder struct {
 
 func (o rejectingOrder) submitWorker(context.Context, func()) bool { return false }
 
+type untrackedResumeOrder struct {
+	Order
+}
+
+func (o untrackedResumeOrder) shouldResumeProgress() bool { return true }
+
 func TestSimpleAndRelationPipelineErrorBoundaries(t *testing.T) {
 	missingOrder := NewOrder(context.Background(), 1, 1, filepath.Join(t.TempDir(), "missing.gz"), nil)
 	require.Error(t, GetArtistStep(missingOrder)().Err())
 	require.Error(t, GetLabelStep(missingOrder)().Err())
-	require.Error(t, InsertSimple[XmlArtist, opendiscogsmodel.Artist](missingOrder, "artist", "artist").Err())
+	require.Error(t, InsertSimple(
+		missingOrder,
+		"artist",
+		"artist",
+		(*XmlArtist).TransformAt,
+	).Err())
 	require.Error(t, processRelationChunks[XmlArtistRelation](
 		missingOrder,
 		"artist",
@@ -288,15 +325,15 @@ func TestEntityStepRelationFailures(t *testing.T) {
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(1, nil)} }
 
 	artistOrder := NewOrder(context.Background(), 2, 1, "testdata/artist.xml.gz", db)
-	require.ErrorIs(t, GetArtistStep(artistOrder)().Err(), expected)
+	require.ErrorContains(t, GetArtistStep(artistOrder)().Err(), expected.Error())
 	labelOrder := NewOrder(context.Background(), 2, 1, "testdata/label.xml.gz", db)
-	require.ErrorIs(t, GetLabelStep(labelOrder)().Err(), expected)
-	require.ErrorIs(t, InsertMasterRelations(NewOrder(
+	require.ErrorContains(t, GetLabelStep(labelOrder)().Err(), expected.Error())
+	require.ErrorContains(t, InsertMasterRelations(NewOrder(
 		context.Background(), 1, 1, "testdata/master.xml.gz", db,
-	)).Err(), expected)
-	require.ErrorIs(t, insertReleases(NewOrder(
+	)).Err(), expected.Error())
+	require.ErrorContains(t, insertReleases(NewOrder(
 		context.Background(), 1, 1, "testdata/release.xml.gz", db,
-	)).Err(), expected)
+	)).Err(), expected.Error())
 }
 
 func TestProcessRelationChunksWorkerAndProgressFailures(t *testing.T) {
@@ -330,25 +367,164 @@ func TestProcessRelationChunksWorkerAndProgressFailures(t *testing.T) {
 	require.ErrorIs(t, mergeSourceError(result.NewResult(1, nil), expected).Err(), expected)
 }
 
+func TestRelationPipelineReportsPreloadedProgressFailuresWithoutStartingWorkers(t *testing.T) {
+	t.Run("completed summary query", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnError(expected)
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, "testdata/artist.xml.gz", db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
+	t.Run("completed entity", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"total_items", "total_chunks"},
+			).AddRow(3, 3))
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, filepath.Join(t.TempDir(), "missing.gz"), db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.NoError(t, actual.Err())
+	})
+
+	t.Run("completed top-level entity steps", func(t *testing.T) {
+		steps := []struct {
+			entity string
+			step   func(Order) Step
+		}{
+			{entity: "label", step: GetLabelStep},
+			{entity: "master", step: GetMasterStep},
+			{entity: "release", step: GetReleaseStep},
+		}
+		for _, fixture := range steps {
+			t.Run(fixture.entity, func(t *testing.T) {
+				db, mock, _ := newMockGorm(t)
+				mock.ExpectQuery("select total_items, total_chunks").
+					WithArgs(int64(1), fixture.entity, 1).
+					WillReturnRows(sqlmock.NewRows(
+						[]string{"total_items", "total_chunks"},
+					).AddRow(3, 3))
+				order := NewTrackedOrder(
+					context.Background(), 1, 1,
+					filepath.Join(t.TempDir(), "missing.gz"),
+					db, 1, fixture.entity, true,
+				)
+				require.NoError(t, fixture.step(order)().Err())
+			})
+		}
+	})
+
+	t.Run("completed top-level query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 1).
+			WillReturnError(expected)
+		actual, skip := completedEntityResult(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true),
+			"artists",
+		)
+		require.True(t, skip)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
+	t.Run("inventory query", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnRows(sqlmock.NewRows([]string{"total_items", "total_chunks"}))
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(0), "").
+			WillReturnError(expected)
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, "testdata/artist.xml.gz", db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
+	t.Run("source range mismatch", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnRows(sqlmock.NewRows([]string{"total_items", "total_chunks"}))
+		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
+			WithArgs(int64(0), "").
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"chunk_index", "first_item_index", "item_count"},
+			).AddRow(0, 99, 1))
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, "testdata/artist.xml.gz", db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.ErrorContains(t, actual.Err(), "does not match source range")
+	})
+}
+
+func TestReconcileRelationsStopsAtFirstFailure(t *testing.T) {
+	expected := errors.New("fixture")
+	thirdCalled := false
+	actual := reconcileRelations([]func() result.Result{
+		func() result.Result { return result.NewResult(2, nil) },
+		func() result.Result { return result.NewResult(3, expected) },
+		func() result.Result {
+			thirdCalled = true
+			return result.NewResult(5, nil)
+		},
+	})
+	require.Equal(t, 5, actual.Count())
+	require.ErrorIs(t, actual.Err(), expected)
+	require.False(t, thirdCalled)
+}
+
 func TestWriteRelationChunkControlFlow(t *testing.T) {
 	originalWriter := NewWriter
 	t.Cleanup(func() { NewWriter = originalWriter })
 
-	run := func(t *testing.T, wantError bool, write func(Order) result.Result) {
+	run := func(
+		t *testing.T,
+		wantError bool,
+		prepare func(sqlmock.Sqlmock),
+		write func(Order) result.Result,
+	) {
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
-		if wantError {
-			mock.ExpectRollback()
-		} else {
-			mock.ExpectCommit()
+		if prepare != nil {
+			prepare(mock)
 		}
-		actual := write(NewOrder(context.Background(), 1, 1, "unused", db))
-		require.Equal(t, wantError, actual.IsErr())
-	}
-	runRelease := func(t *testing.T, wantError bool, write func(Order) result.Result) {
-		db, mock, _ := newMockGorm(t)
-		mock.ExpectBegin()
-		expectReleaseMasterLock(mock)
 		if wantError {
 			mock.ExpectRollback()
 		} else {
@@ -358,46 +534,56 @@ func TestWriteRelationChunkControlFlow(t *testing.T) {
 		require.Equal(t, wantError, actual.IsErr())
 	}
 
+	NewWriter = func(*gorm.DB) Writer {
+		t.Fatal("Artist and Label relation passes must not write root records")
+		return nil
+	}
+	run(t, false, nil, func(order Order) result.Result {
+		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{nil})
+	})
+	run(t, false, nil, func(order Order) result.Result {
+		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{nil})
+	})
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
-	run(t, false, func(order Order) result.Result {
-		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{nil}, false)
+	run(t, false, nil, func(order Order) result.Result {
+		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{nil})
 	})
-	run(t, false, func(order Order) result.Result {
-		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{nil}, false)
-	})
-	run(t, false, func(order Order) result.Result {
-		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{nil}, false)
-	})
-	run(t, true, func(order Order) result.Result {
-		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{nil}, false)
+	run(t, false, nil, func(order Order) result.Result {
+		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{nil})
 	})
 
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, errors.New("writer"))} }
-	run(t, true, func(order Order) result.Result {
-		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{{ID: 1}}, false)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		expectExistingRelationRoots(mock, masterArtistRelation.table)
+	}, func(order Order) result.Result {
+		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}})
 	})
-	run(t, true, func(order Order) result.Result {
-		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{{ID: 1}}, false)
-	})
-	run(t, true, func(order Order) result.Result {
-		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}}, false)
-	})
-	runRelease(t, true, func(order Order) result.Result {
-		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}}, false)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		expectExistingRelationRoots(mock, releaseArtistRelation.table)
+	}, func(order Order) result.Result {
+		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}})
 	})
 
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
-	run(t, true, func(order Order) result.Result {
-		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + artistAliasRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeArtistRelationChunk(order, ChunkMetadata{}, []*XmlArtistRelation{{ID: 1}})
 	})
-	run(t, true, func(order Order) result.Result {
-		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + labelURLRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeLabelRelationChunk(order, ChunkMetadata{}, []*XmlLabelRelation{{ID: 1}})
 	})
-	run(t, true, func(order Order) result.Result {
-		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + masterArtistRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{ID: 1}})
 	})
-	runRelease(t, true, func(order Order) result.Result {
-		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}}, true)
+	run(t, true, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery("select '" + releaseArtistRelation.table + "'").WillReturnError(errors.New("roots"))
+	}, func(order Order) result.Result {
+		return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{ID: 1}})
 	})
 }
 
@@ -428,98 +614,122 @@ func TestReferenceEntitiesUseDeterministicLockOrder(t *testing.T) {
 		WithArgs("Dub", "Techno").
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	order := NewOrder(context.Background(), 10, 1, "unused", db)
+	genres := []*opendiscogsmodel.Genre{{Name: "Electronic"}, {Name: "Ambient"}}
+	styles := []*opendiscogsmodel.Style{{Name: "Techno"}, {Name: "Dub"}}
+	sortReferenceEntities(genres, styles)
 
 	actual := writeReferenceEntities(
 		order,
-		[]*opendiscogsmodel.Genre{{Name: "Electronic"}, {Name: "Ambient"}},
-		[]*opendiscogsmodel.Style{{Name: "Techno"}, {Name: "Dub"}},
+		genres,
+		styles,
 	)
 
 	require.NoError(t, actual.Err())
 }
 
+func TestConfirmedReferenceEntitiesAreNotSentToPostgreSQLAgain(t *testing.T) {
+	cache.ResetIDs()
+	t.Cleanup(cache.ResetIDs)
+	confirmReferenceEntities(
+		[]*opendiscogsmodel.Genre{{Name: "Electronic"}},
+		[]*opendiscogsmodel.Style{{Name: "Techno"}},
+	)
+
+	genres, styles := filterConfirmedReferenceEntities(
+		[]*opendiscogsmodel.Genre{{Name: "Ambient"}, {Name: "Electronic"}},
+		[]*opendiscogsmodel.Style{{Name: "Dub"}, {Name: "Techno"}},
+	)
+
+	require.Equal(t, []string{"Ambient"}, []string{genres[0].Name})
+	require.Equal(t, []string{"Dub"}, []string{styles[0].Name})
+}
+
 func TestReleaseUpdateAndReferenceFilters(t *testing.T) {
 	expected := errors.New("fixture")
-	poisonedDB := poisonedGorm(t, expected)
-	releaseID := int32(1)
-	require.ErrorIs(t, lockReleaseMasterRows(
-		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
-		[]int32{releaseID},
-		[]*XmlReleaseRelation{{ID: releaseID}, nil},
-	), expected)
-	mockDB, mock, _ := newMockGorm(t)
+	db, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
-	mock.ExpectQuery("select target.id").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+	mock.ExpectExec("WITH stale").WillReturnError(expected)
+	mock.ExpectRollback()
+	actual := reconcileMasterMainReleases(
+		NewOrder(context.Background(), 1, 1, "unused", db),
+	)
+	require.ErrorIs(t, actual.Err(), expected)
+	require.Empty(t, filterGenres([]*opendiscogsmodel.Genre{nil, {Name: " "}}))
+	require.Empty(t, filterStyles([]*opendiscogsmodel.Style{nil, {Name: " "}}))
+
+	db, mock, _ = newMockGorm(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("WITH stale").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("WITH desired").
 		WillReturnError(expected)
 	mock.ExpectRollback()
-	require.ErrorIs(t, writeReleaseRelationChunk(
-		NewOrder(context.Background(), 1, 1, "unused", mockDB),
-		ChunkMetadata{},
-		[]*XmlReleaseRelation{{ID: releaseID}},
-		false,
-	).Err(), expected)
-	actual := updateMasterMainReleases(
-		NewOrder(context.Background(), 1, 1, "unused", poisonedDB),
-		[]*XmlReleaseRelation{nil},
-	)
-	require.ErrorIs(t, actual.Err(), expected)
-	require.Empty(t, filterGenres([]*opendiscogsmodel.Genre{{Name: " "}}))
-	require.Empty(t, filterStyles([]*opendiscogsmodel.Style{{Name: " "}}))
-
-	db, mock, _ := newMockGorm(t)
-	mock.ExpectExec("update master").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE master AS target").
-		WillReturnError(expected)
-	masterID := int32(1)
-	actual = updateMasterMainReleases(
+	actual = reconcileMasterMainReleases(
 		NewOrder(context.Background(), 1, 1, "unused", db),
-		[]*XmlReleaseRelation{{
-			ID:         2,
-			MasterInfo: XmlReleaseMasterInfo{MasterID: &masterID, IsMaster: true},
-		}},
 	)
 	require.ErrorIs(t, actual.Err(), expected)
+
+	db, mock, _ = newMockGorm(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("WITH stale").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec("WITH desired").
+		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectCommit()
+	actual = finalizeReleaseImport(
+		NewOrder(context.Background(), 1, 1, "unused", db),
+		5,
+		2,
+	)
+	require.NoError(t, actual.Err())
+	require.Equal(t, 5, actual.Count())
+}
+
+func TestReleaseMasterReconciliationUsesFixedSetStatements(t *testing.T) {
+	require.Contains(t, releaseMainReleaseClearSQL, "FOR UPDATE OF target")
+	require.Contains(t, releaseMainReleaseSetSQL, "FOR UPDATE OF target")
+	require.Contains(t, releaseMainReleaseClearSQL, "main_release_id = NULL")
+	require.Contains(t, releaseMainReleaseSetSQL, "main_release_id = pending.release_id")
+	require.Contains(t, releaseMainReleaseClearSQL, "NOT EXISTS")
+	require.Contains(t, releaseMainReleaseClearSQL, "current_release.master_id = target.id")
+	require.NotContains(t, releaseMainReleaseClearSQL, "last_modified_at =")
+	require.NotContains(t, releaseMainReleaseSetSQL, "last_modified_at =")
+	require.NotContains(t, releaseMainReleaseClearSQL, "VALUES")
+	require.NotContains(t, releaseMainReleaseSetSQL, "VALUES")
 }
 
 func TestReferenceWriteFailuresInRelationChunks(t *testing.T) {
+	cache.ResetIDs()
+	t.Cleanup(cache.ResetIDs)
 	originalWriter := NewWriter
 	t.Cleanup(func() { NewWriter = originalWriter })
 	NewWriter = func(*gorm.DB) Writer { return writerStub{result: result.NewResult(0, nil)} }
 	expected := errors.New("fixture")
 
 	writes := []struct {
-		prepare func(sqlmock.Sqlmock)
-		write   func(Order) result.Result
+		table string
+		write func(Order) result.Result
 	}{
-		{write: func(order Order) result.Result {
+		{table: masterArtistRelation.table, write: func(order Order) result.Result {
 			return writeMasterRelationChunk(order, ChunkMetadata{}, []*XmlMasterRelation{{
 				ID: 1, Genres: []string{"genre"},
-			}}, false)
+			}})
 		}},
-		{prepare: expectReleaseMasterLock, write: func(order Order) result.Result {
+		{table: releaseArtistRelation.table, write: func(order Order) result.Result {
 			return writeReleaseRelationChunk(order, ChunkMetadata{}, []*XmlReleaseRelation{{
 				ID: 1, Genres: []string{"genre"},
-			}}, false)
+			}})
 		}},
 	}
 	for _, fixture := range writes {
 		db, mock, _ := newMockGorm(t)
 		mock.ExpectBegin()
-		if fixture.prepare != nil {
-			fixture.prepare(mock)
-		}
+		expectExistingRelationRoots(mock, fixture.table)
 		mock.ExpectExec(`INSERT INTO .*genre`).WithArgs("genre").WillReturnError(expected)
 		mock.ExpectRollback()
 		require.ErrorIs(t, fixture.write(NewOrder(context.Background(), 1, 1, "unused", db)).Err(), expected)
+		require.False(t, cache.GenreNames.Contains("genre"))
 	}
-}
-
-func expectReleaseMasterLock(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery("select target.id").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 }
 
 func TestLabelSubLabelReconcileAccessors(t *testing.T) {
@@ -546,8 +756,14 @@ func TestLabelChunkUsesSubLabelKeys(t *testing.T) {
 	t.Cleanup(cache.ResetIDs)
 	db, mock, _ := newMockGorm(t)
 	mock.ExpectBegin()
+	expectExistingRelationRoots(
+		mock,
+		labelURLRelation.table,
+		existingRelationRootFixture{table: labelURLRelation.table, rootID: 1},
+		existingRelationRootFixture{table: labelSubLabelRelation.table, rootID: 1},
+	)
 	mock.ExpectExec("delete from label_url").
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("delete from label_sub_label").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -558,9 +774,17 @@ func TestLabelChunkUsesSubLabelKeys(t *testing.T) {
 		NewOrder(context.Background(), 1, 1, "unused", db),
 		ChunkMetadata{},
 		[]*XmlLabelRelation{{ID: 1, SubLabels: []XmlRef{{ID: 2}}}},
-		true,
 	)
 	require.Error(t, actual.Err())
+}
+
+func TestLabelRelationBuildsCanonicalRoot(t *testing.T) {
+	name := "Label"
+	label := (&XmlLabelRelation{ID: 7, Name: &name}).GetLabel()
+	require.Equal(t, int32(7), label.ID)
+	require.Equal(t, name, *label.Name)
+	require.False(t, label.CreatedAt.IsZero())
+	require.Equal(t, label.CreatedAt, label.LastModifiedAt)
 }
 
 func createGzipFixture(t *testing.T, body string) string {

@@ -23,6 +23,7 @@ jobs:
     timeout-minutes: 15
     env:
       OPEN_DISCOGS_TEST_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+      TESTCONTAINERS_RYUK_DISABLED: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -34,7 +35,7 @@ jobs:
       - name: Run dump-to-PostgreSQL end-to-end tests
         run: >-
           go test -tags=e2e
-          -run '^(TestBatchE2E|TestImportExecutionCoordinator)$'
+          -run '^TestBatchE2E$'
           -count=1
           ./src/batch
 

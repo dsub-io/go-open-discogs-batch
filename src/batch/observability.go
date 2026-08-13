@@ -156,6 +156,7 @@ func (r *jsonProgressReporter) writeRecord(
 	var committedPercent *float64
 	if summary.TotalItems.Valid && summary.TotalItems.Int64 > 0 {
 		percent := float64(summary.ProcessedItems) * 100 / float64(summary.TotalItems.Int64)
+		percent = progress.RoundMetric(percent)
 		committedPercent = &percent
 	} else if summary.TotalItems.Valid && summary.TotalItems.Int64 == 0 {
 		percent := float64(100)
@@ -171,8 +172,8 @@ func (r *jsonProgressReporter) writeRecord(
 		Entity:                r.entity,
 		CommittedItems:        summary.ProcessedItems,
 		CommittedPercent:      committedPercent,
-		RowsPerSecond:         rate,
-		ElapsedSeconds:        elapsed,
+		RowsPerSecond:         progress.RoundMetric(rate),
+		ElapsedSeconds:        progress.RoundMetric(elapsed),
 		Resumed:               r.resumed,
 		InitialCommittedItems: r.initialItems,
 		LastCommittedProgress: lastProgress,
@@ -184,7 +185,7 @@ func (r *jsonProgressReporter) writeObservationError(now time.Time, err error) {
 		Event:            importProgressEvent,
 		State:            progressStateObservationErr,
 		Entity:           r.entity,
-		ElapsedSeconds:   now.Sub(r.startedAt).Seconds(),
+		ElapsedSeconds:   progress.RoundMetric(now.Sub(r.startedAt).Seconds()),
 		Resumed:          r.resumed,
 		ObservationError: err.Error(),
 	})
