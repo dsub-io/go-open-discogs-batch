@@ -76,6 +76,16 @@ func processRelationChunksWithFinalizer[T any](
 ) result.Result {
 	reporter := newEntityProgressReporter(order)
 	reporter.Start()
+	completed, completedItems, _, completedError := loadCompletedEntityProgress(order)
+	if completedError != nil {
+		reporter.Finish(false)
+		return result.NewResult(0, completedError)
+	}
+	if completed {
+		reporter.Finish(true)
+		fmt.Printf("\nUpdated 0 %s (%d items already complete)\n", topic, completedItems)
+		return result.NewResult(0, nil)
+	}
 	completedChunks, completedChunksError := loadCompletedChunkInventory(order)
 	if completedChunksError != nil {
 		reporter.Finish(false)

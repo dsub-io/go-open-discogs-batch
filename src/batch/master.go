@@ -31,6 +31,9 @@ var (
 
 func GetMasterStep(order Order) Step {
 	return func() result.Result {
+		if completed, skip := completedEntityResult(order, "master relations"); skip {
+			return completed
+		}
 		return InsertMasterRelations(order)
 	}
 }

@@ -24,6 +24,9 @@ var (
 
 func GetLabelStep(order Order) Step {
 	return func() result.Result {
+		if completed, skip := completedEntityResult(order, "labels"); skip {
+			return completed
+		}
 		updated := 0
 		res := insertLabels(order)
 		updated += res.Count()

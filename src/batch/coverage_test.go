@@ -361,9 +361,92 @@ func TestProcessRelationChunksWorkerAndProgressFailures(t *testing.T) {
 }
 
 func TestRelationPipelineReportsPreloadedProgressFailuresWithoutStartingWorkers(t *testing.T) {
+	t.Run("completed summary query", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnError(expected)
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, "testdata/artist.xml.gz", db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
+	t.Run("completed entity", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"total_items", "total_chunks"},
+			).AddRow(3, 3))
+		order := untrackedResumeOrder{Order: NewOrder(
+			context.Background(), 1, 1, filepath.Join(t.TempDir(), "missing.gz"), db,
+		)}
+		actual := processRelationChunks[XmlArtistRelation](
+			order, "artist", "artist", "fixture",
+			func(Order, ChunkMetadata, []*XmlArtistRelation) result.Result {
+				t.Fatal("writer must not start")
+				return nil
+			},
+		)
+		require.NoError(t, actual.Err())
+	})
+
+	t.Run("completed top-level entity steps", func(t *testing.T) {
+		steps := []struct {
+			entity string
+			step   func(Order) Step
+		}{
+			{entity: "label", step: GetLabelStep},
+			{entity: "master", step: GetMasterStep},
+			{entity: "release", step: GetReleaseStep},
+		}
+		for _, fixture := range steps {
+			t.Run(fixture.entity, func(t *testing.T) {
+				db, mock, _ := newMockGorm(t)
+				mock.ExpectQuery("select total_items, total_chunks").
+					WithArgs(int64(1), fixture.entity, 1).
+					WillReturnRows(sqlmock.NewRows(
+						[]string{"total_items", "total_chunks"},
+					).AddRow(3, 3))
+				order := NewTrackedOrder(
+					context.Background(), 1, 1,
+					filepath.Join(t.TempDir(), "missing.gz"),
+					db, 1, fixture.entity, true,
+				)
+				require.NoError(t, fixture.step(order)().Err())
+			})
+		}
+	})
+
+	t.Run("completed top-level query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 1).
+			WillReturnError(expected)
+		actual, skip := completedEntityResult(
+			NewTrackedOrder(context.Background(), 1, 1, "unused", db, 1, "artist", true),
+			"artists",
+		)
+		require.True(t, skip)
+		require.ErrorIs(t, actual.Err(), expected)
+	})
+
 	t.Run("inventory query", func(t *testing.T) {
 		expected := errors.New("fixture")
 		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnRows(sqlmock.NewRows([]string{"total_items", "total_chunks"}))
 		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
 			WithArgs(int64(0), "").
 			WillReturnError(expected)
@@ -382,6 +465,9 @@ func TestRelationPipelineReportsPreloadedProgressFailuresWithoutStartingWorkers(
 
 	t.Run("source range mismatch", func(t *testing.T) {
 		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(0), "", 1).
+			WillReturnRows(sqlmock.NewRows([]string{"total_items", "total_chunks"}))
 		mock.ExpectQuery("select chunk_index, first_item_index, item_count").
 			WithArgs(int64(0), "").
 			WillReturnRows(sqlmock.NewRows(

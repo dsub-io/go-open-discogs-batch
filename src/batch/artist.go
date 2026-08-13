@@ -34,6 +34,9 @@ var (
 
 func GetArtistStep(order Order) Step {
 	return func() result.Result {
+		if completed, skip := completedEntityResult(order, "artists"); skip {
+			return completed
+		}
 		updated := 0
 		res := insertArtists(order)
 		updated += res.Count()

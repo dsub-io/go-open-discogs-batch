@@ -1258,6 +1258,59 @@ func TestCompletedChunkInventoryPreloadAndValidation(t *testing.T) {
 	})
 }
 
+func TestCompletedEntityProgressPreload(t *testing.T) {
+	t.Run("disabled", func(t *testing.T) {
+		completed, totalItems, totalChunks, err := loadCompletedEntityProgress(
+			NewOrder(context.Background(), 1, 1, "unused", nil),
+		)
+		require.NoError(t, err)
+		require.False(t, completed)
+		require.Zero(t, totalItems)
+		require.Zero(t, totalChunks)
+	})
+
+	t.Run("query failure", func(t *testing.T) {
+		expected := errors.New("fixture")
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 5).
+			WillReturnError(expected)
+		completed, _, _, err := loadCompletedEntityProgress(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.False(t, completed)
+		require.ErrorIs(t, err, expected)
+	})
+
+	t.Run("incomplete", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 5).
+			WillReturnRows(sqlmock.NewRows([]string{"total_items", "total_chunks"}))
+		completed, _, _, err := loadCompletedEntityProgress(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.NoError(t, err)
+		require.False(t, completed)
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		db, mock, _ := newMockGorm(t)
+		mock.ExpectQuery("select total_items, total_chunks").
+			WithArgs(int64(1), "artist", 5).
+			WillReturnRows(sqlmock.NewRows(
+				[]string{"total_items", "total_chunks"},
+			).AddRow(12, 3))
+		completed, totalItems, totalChunks, err := loadCompletedEntityProgress(
+			NewTrackedOrder(context.Background(), 5, 1, "unused", db, 1, "artist", true),
+		)
+		require.NoError(t, err)
+		require.True(t, completed)
+		require.Equal(t, int64(12), totalItems)
+		require.Equal(t, int64(3), totalChunks)
+	})
+}
+
 func newMockTransaction(t *testing.T) (sqlmock.Sqlmock, *sql.Tx) {
 	t.Helper()
 	_, mock, sqlDB := newMockGorm(t)

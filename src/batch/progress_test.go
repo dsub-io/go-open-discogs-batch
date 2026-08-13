@@ -3,6 +3,7 @@ package batch
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -534,7 +535,7 @@ func runMultiEntityResumeSkipsCompletedEntity(t *testing.T, dsn string) {
 		ctx,
 		chunkSize,
 		maxWorkers,
-		"testdata/artist.xml.gz",
+		filepath.Join(t.TempDir(), "completed-entity-must-not-be-read.xml.gz"),
 		db,
 		retryPreparation.RunID,
 		"artist",

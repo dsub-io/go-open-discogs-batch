@@ -15,6 +15,54 @@ type ChunkMetadata struct {
 
 type completedChunkInventory map[int64]ChunkMetadata
 
+func loadCompletedEntityProgress(order Order) (bool, int64, int64, error) {
+	if !order.shouldResumeProgress() {
+		return false, 0, 0, nil
+	}
+	type completedEntityRow struct {
+		TotalItems  int64
+		TotalChunks int64
+	}
+	var completed completedEntityRow
+	query := order.getDB().WithContext(order.getContext()).Raw(
+		`select total_items, total_chunks
+		   from discogs_import_run_dump
+		  where import_run_id = ?
+		    and entity_type = ?
+		    and chunk_size = ?
+		    and completed_at is not null
+		    and total_items is not null
+		    and total_chunks is not null
+		    and processed_items = total_items`,
+		order.getRunID(),
+		order.getEntityType(),
+		order.getChunkSize(),
+	).Scan(&completed)
+	if query.Error != nil {
+		return false, 0, 0, fmt.Errorf(
+			"load %s completed progress: %w",
+			order.getEntityType(),
+			query.Error,
+		)
+	}
+	if query.RowsAffected == 0 {
+		return false, 0, 0, nil
+	}
+	return true, completed.TotalItems, completed.TotalChunks, nil
+}
+
+func completedEntityResult(order Order, topic string) (result.Result, bool) {
+	completed, totalItems, _, err := loadCompletedEntityProgress(order)
+	if err != nil {
+		return result.NewResult(0, err), true
+	}
+	if !completed {
+		return result.NewResult(0, nil), false
+	}
+	fmt.Printf("Updated 0 %s (%d items already complete)\n", topic, totalItems)
+	return result.NewResult(0, nil), true
+}
+
 func loadCompletedChunkInventory(order Order) (completedChunkInventory, error) {
 	completed := make(completedChunkInventory)
 	if !order.shouldResumeProgress() {

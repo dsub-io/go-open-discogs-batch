@@ -111,6 +111,9 @@ var (
 // This is a convenient func such that reduces code and adds syntactic sugar, but nothing more.
 func GetReleaseStep(order Order) Step {
 	return func() result.Result {
+		if completed, skip := completedEntityResult(order, "release relations"); skip {
+			return completed
+		}
 		return insertReleases(order)
 	}
 }
