@@ -37,6 +37,7 @@ func TestImportExecutionCoordinator(t *testing.T) {
 			    public.discogs_import_run,
 			    public.discogs_dump
 			restart identity cascade`).Error)
+		seedPendingCatalogStates(t, db)
 	}
 	complete := func(
 		t *testing.T,
@@ -1326,6 +1327,142 @@ func TestImportExecutionCoordinator(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, repeatedPreparation.Skipped)
 	})
+
+	t.Run("tracks bootstrap refresh failure and aggregate readiness", func(t *testing.T) {
+		reset(t)
+		assertCatalogReadiness(t, db, false, "bootstrap_pending", 0)
+
+		artistDump := []*opendiscogsmodel.DiscogsDump{
+			importDump(artistEntityType, "2026-07-01", "a"),
+		}
+		bootstrap := NewImportExecutionCoordinator(sqlDB, "test")
+		bootstrapPreparation, err := bootstrap.Prepare(
+			ctx, artistDump, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusImporting, "bootstrap",
+			bootstrapPreparation.RunID, 0,
+		)
+		complete(t, bootstrapPreparation, artistDump)
+		require.NoError(t, bootstrap.Complete(ctx, nil))
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusReady, "",
+			0, bootstrapPreparation.RunID,
+		)
+		assertCatalogReadiness(t, db, false, "bootstrap_pending", 1)
+
+		refreshDump := []*opendiscogsmodel.DiscogsDump{
+			importDump(artistEntityType, "2026-08-01", "b"),
+		}
+		failedRefresh := NewImportExecutionCoordinator(sqlDB, "test")
+		failedPreparation, err := failedRefresh.Prepare(
+			ctx, refreshDump, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusImporting, "refresh",
+			failedPreparation.RunID, bootstrapPreparation.RunID,
+		)
+		expected := errors.New("fixture refresh failure")
+		require.NoError(t, failedRefresh.Complete(ctx, expected))
+		assertCatalogEntityState(
+			t, db, artistEntityType, catalogStatusFailed, "refresh",
+			0, bootstrapPreparation.RunID,
+		)
+
+		retry := NewImportExecutionCoordinator(sqlDB, "test")
+		retryPreparation, err := retry.Prepare(
+			ctx, refreshDump, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		complete(t, retryPreparation, refreshDump)
+		require.NoError(t, retry.Complete(ctx, nil))
+
+		remainingDumps := []*opendiscogsmodel.DiscogsDump{
+			importDump(labelEntityType, "2026-08-01", "c"),
+			importDump(masterEntityType, "2026-08-01", "d"),
+			importDump(releaseEntityType, "2026-08-01", "e"),
+		}
+		remaining := NewImportExecutionCoordinator(sqlDB, "test")
+		remainingPreparation, err := remaining.Prepare(
+			ctx, remainingDumps, testChunkSize, false, false,
+		)
+		require.NoError(t, err)
+		complete(t, remainingPreparation, remainingDumps)
+		require.NoError(t, remaining.Complete(ctx, nil))
+		assertCatalogReadiness(t, db, true, catalogStatusReady, 4)
+	})
+}
+
+func assertCatalogEntityState(
+	t *testing.T,
+	db *gorm.DB,
+	entityType string,
+	status string,
+	operation string,
+	activeRunID int64,
+	lastSuccessfulRunID int64,
+) {
+	t.Helper()
+	var state struct {
+		Status                    string
+		Operation                 *string
+		ActiveImportRunID         *int64
+		LastSuccessfulImportRunID *int64
+	}
+	require.NoError(t, db.Raw(`
+		select status, operation, active_import_run_id, last_successful_import_run_id
+		from discogs_catalog_entity_state
+		where entity_type = ?`, entityType).Scan(&state).Error)
+	require.Equal(t, status, state.Status)
+	if operation == "" {
+		require.Nil(t, state.Operation)
+	} else {
+		require.Equal(t, operation, *state.Operation)
+	}
+	if activeRunID == 0 {
+		require.Nil(t, state.ActiveImportRunID)
+	} else {
+		require.Equal(t, activeRunID, *state.ActiveImportRunID)
+	}
+	if lastSuccessfulRunID == 0 {
+		require.Nil(t, state.LastSuccessfulImportRunID)
+	} else {
+		require.Equal(t, lastSuccessfulRunID, *state.LastSuccessfulImportRunID)
+	}
+}
+
+func assertCatalogReadiness(
+	t *testing.T,
+	db *gorm.DB,
+	ready bool,
+	status string,
+	readyEntities int64,
+) {
+	t.Helper()
+	var state struct {
+		Ready         bool
+		Status        string
+		ReadyEntities int64
+	}
+	require.NoError(t, db.Raw(`
+		select ready, status, ready_entities
+		from discogs_catalog_readiness`).Scan(&state).Error)
+	require.Equal(t, ready, state.Ready)
+	require.Equal(t, status, state.Status)
+	require.Equal(t, readyEntities, state.ReadyEntities)
+}
+
+func seedPendingCatalogStates(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+		insert into discogs_catalog_entity_state (entity_type, status, operation)
+		values
+		    ('artist', 'bootstrap_pending', 'bootstrap'),
+		    ('label', 'bootstrap_pending', 'bootstrap'),
+		    ('master', 'bootstrap_pending', 'bootstrap'),
+		    ('release', 'bootstrap_pending', 'bootstrap')`).Error)
 }
 
 func importDump(entityType, date, checksumSeed string) *opendiscogsmodel.DiscogsDump {
