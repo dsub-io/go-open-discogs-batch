@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.10](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.9...v2.3.10) (2026-08-14)
+
+
+### Performance Improvements
+
+* consume model 0.4.0 exact lookup indexes ([#75](https://github.com/dsub-io/go-open-discogs-batch/issues/75)) ([f580e52](https://github.com/dsub-io/go-open-discogs-batch/commit/f580e52e70fc5dfad96292182e183f9bf12c2267))
+
 ## [2.3.9](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.8...v2.3.9) (2026-08-13)
 
 
