@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.11](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.10...v2.3.11) (2026-08-14)
+
+
+### Bug Fixes
+
+* use patched Go 1.26.6 toolchain ([#77](https://github.com/dsub-io/go-open-discogs-batch/issues/77)) ([3210dee](https://github.com/dsub-io/go-open-discogs-batch/commit/3210dee0899603fa3ceb220f58e2d8e6451b272b))
+
 ## [2.3.10](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.9...v2.3.10) (2026-08-14)
 
 
