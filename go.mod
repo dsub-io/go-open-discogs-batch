@@ -1,6 +1,6 @@
 module github.com/dsub-io/go-open-discogs-batch
 
-go 1.26
+go 1.26.6
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
