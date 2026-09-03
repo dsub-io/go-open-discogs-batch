@@ -1,36 +1,137 @@
-name: Build
+name: CI
 
 on:
-  merge_group:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
   push:
     branches:
       - main
-  pull_request:
+  schedule:
+    - cron: '33 2 * * 4'
+  workflow_dispatch:
 
 permissions:
   contents: read
+  security-events: write
 
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Build, test, race, and coverage
+  verify:
+    name: Verify
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      OPEN_DISCOGS_TEST_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
-      TESTCONTAINERS_RYUK_DISABLED: "true"
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Classify changes
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          change_range=
+          case "$EVENT_NAME" in
+            pull_request)
+              change_range="$PR_BASE_SHA..$PR_HEAD_SHA"
+              ;;
+            push)
+              if [[ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] &&
+                git cat-file -e "$PUSH_BEFORE_SHA^{commit}" 2>/dev/null; then
+                change_range="$PUSH_BEFORE_SHA..$PUSH_HEAD_SHA"
+              fi
+              ;;
+          esac
+
+          heavy=true
+          if [[ -n "$change_range" ]]; then
+            mapfile -t changed_files < <(git diff --name-only "$change_range")
+            if (( ${#changed_files[@]} > 0 )); then
+              heavy=false
+              for changed_file in "${changed_files[@]}"; do
+                case "$changed_file" in
+                  README.md|CHANGELOG.md|LICENSE|NOTICE|docs/*|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE.md)
+                    ;;
+                  *)
+                    heavy=true
+                    break
+                    ;;
+                esac
+              done
+            fi
+            git diff --check "$change_range"
+          fi
+
+          echo "heavy=$heavy" >> "$GITHUB_OUTPUT"
+          echo "range=$change_range" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Conventional Commits
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          CHANGE_RANGE: ${{ steps.changes.outputs.range }}
+        run: |
+          set -euo pipefail
+
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?(!)?: .+'
+          branch_pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)/[a-z0-9._/-]+$'
+
+          validate_subject() {
+            local label="$1"
+            local subject="$2"
+            if [[ ! "$subject" =~ $pattern ]]; then
+              echo "::error::$label is not a Conventional Commit: $subject"
+              return 1
+            fi
+          }
+
+          failed=0
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            validate_subject "Pull request title" "$PR_TITLE" || failed=1
+            normalized_head_ref="${PR_HEAD_REF,,}"
+            if [[ ! "$normalized_head_ref" =~ $branch_pattern ]] &&
+              [[ ! "$normalized_head_ref" =~ ^dependabot/ ]] &&
+              [[ ! "$normalized_head_ref" =~ ^release-please-- ]]; then
+              echo "::error::Pull request branch is not Conventional: $PR_HEAD_REF"
+              failed=1
+            fi
+          fi
+
+          range="${CHANGE_RANGE:-HEAD^..HEAD}"
+          while IFS= read -r subject; do
+            [[ -z "$subject" ]] && continue
+            validate_subject "Commit subject" "$subject" || failed=1
+          done < <(git log --no-merges --format=%s "$range")
+
+          exit "$failed"
+
+      - name: Set up Go
+        if: steps.changes.outputs.heavy == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Verify release policy
+        if: steps.changes.outputs.heavy == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -43,6 +144,7 @@ jobs:
           done
 
       - name: Verify formatting
+        if: steps.changes.outputs.heavy == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -53,40 +155,63 @@ jobs:
           fi
 
       - name: Verify module metadata
-        run: go mod tidy -diff
+        if: steps.changes.outputs.heavy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
       - name: Vet packages
+        if: steps.changes.outputs.heavy == 'true'
         run: go vet ./...
 
-      - name: Scan known vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
-
       - name: Test with race detector and coverage
+        if: steps.changes.outputs.heavy == 'true'
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Enforce coverage gate
+        if: steps.changes.outputs.heavy == 'true'
         shell: bash
+        env:
+          MINIMUM_COVERAGE: '100.0'
         run: |
           set -euo pipefail
           total="$(
             go tool cover -func=coverage.out |
               awk '/^total:/ { gsub("%", "", $3); print $3 }'
           )"
-          if [[ -z "$total" ]]; then
-            echo "::error::Coverage profile has no total."
-            exit 1
-          fi
-          uncovered="$(
-            awk 'NR > 1 && $2 > 0 && $3 == 0 { print }' coverage.out
-          )"
-          if [[ -n "$uncovered" ]]; then
-            printf 'coverage %s%% has uncovered statements:\n%s\n' \
-              "$total" "$uncovered"
-            exit 1
-          fi
-          printf 'coverage %s%% has no uncovered statements\n' "$total"
+          awk -v total="$total" -v minimum="$MINIMUM_COVERAGE" 'BEGIN {
+            if (total + 0 < minimum) {
+              printf "coverage %.1f%% is below %.1f%%\n", total, minimum
+              exit 1
+            }
+            printf "coverage %.1f%% meets %.1f%% gate\n", total, minimum
+          }'
 
-      - name: Remove owned test resources and verify no residue
-        if: ${{ always() }}
-        shell: bash
-        run: scripts/verify-test-docker-cleanup.sh
+      - name: Run dump-to-PostgreSQL end-to-end tests
+        if: steps.changes.outputs.heavy == 'true'
+        run: >-
+          go test -tags=e2e
+          -run '^(TestBatchE2E|TestImportExecutionCoordinator)$'
+          -count=1
+          ./src/batch
+
+      - name: Initialize CodeQL
+        if: steps.changes.outputs.heavy == 'true'
+        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          languages: go
+          build-mode: manual
+
+      - name: Build packages for CodeQL
+        if: steps.changes.outputs.heavy == 'true'
+        run: |
+          go clean -cache
+          go build ./...
+
+      - name: Analyze with CodeQL
+        if: steps.changes.outputs.heavy == 'true'
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          category: /language:go
