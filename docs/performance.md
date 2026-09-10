@@ -1,9 +1,9 @@
 # Performance measurements
 
 These are bounded measurements of named changes, not forecasts for a full dump
-or different hardware. They also do not approve a production import: both
-batch implementations still require release and cross-language validation
-against canonical `open-discogs-model` v0.3.2.
+or different hardware. The current release consumes canonical
+`open-discogs-model` v0.4.0. Deployment owners must verify schema compatibility
+and the actual import outcome; these measurements are not rollout evidence.
 
 ## Results at a glance
 

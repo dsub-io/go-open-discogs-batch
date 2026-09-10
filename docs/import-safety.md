@@ -2,13 +2,13 @@
 
 This is the operational contract for dump discovery, admission, commits,
 recovery, and reader visibility. The schema contract is canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.3.2,
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.4.0,
 shared with the Java importer.
 
 > [!CAUTION]
-> Production import is not approved yet. Release both importers against model
-> v0.3.1 and finish cross-language migration, recovery, and full-dump validation
-> before starting or resuming one.
+> Stop all importers before a canonical schema upgrade. Verify the complete
+> applied migration ledger against the bundled model before starting or resuming
+> an import. Runtime scheduling and rollout approval belong to the deployment.
 
 ## Decision table
 
