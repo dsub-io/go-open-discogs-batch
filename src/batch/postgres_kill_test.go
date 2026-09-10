@@ -15,6 +15,7 @@ import (
 	"github.com/dsub-io/open-discogs-model/model"
 	"github.com/knadh/koanf"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
 	dockerclient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 	testcontainers "github.com/testcontainers/testcontainers-go"
@@ -27,7 +28,7 @@ const (
 	restartPostgresDataDirectory = "/var/lib/postgresql"
 	restartPostgresDatabase      = "test_db"
 	restartPostgresPort          = "5432/tcp"
-	restartPostgresReadyLog      = "database system is ready to accept connections"
+	restartPostgresDriver        = "pgx"
 	restartPostgresResourceLabel = "io.dsub.test-resource"
 	restartPostgresResourceValue = "postgres-forced-restart"
 	restartPostgresOwnerLabel    = "io.dsub.test-owner"
@@ -117,10 +118,7 @@ func TestReleaseResumesAfterPostgresIsKilledAndRestarted(t *testing.T) {
 	restartedPort, err := container.MappedPort(ctx, restartPostgresPort)
 	require.NoError(t, err)
 	connection.Port = restartedPort.Port()
-	restarted, err := connectAfterPostgresRestart(
-		ctx,
-		testutils.GetDsn(testutils.Postgres, connection),
-	)
+	restarted, err := database.GetConnect(testutils.GetDsn(testutils.Postgres, connection))
 	require.NoError(t, err)
 	restartedSQL, err := restarted.DB()
 	require.NoError(t, err)
@@ -192,26 +190,6 @@ func waitForContainerStopped(ctx context.Context, container testcontainers.Conta
 		select {
 		case <-deadline.Done():
 			return errors.New("timed out waiting for killed PostgreSQL container to stop")
-		case <-ticker.C:
-		}
-	}
-}
-
-func connectAfterPostgresRestart(ctx context.Context, dsn string) (*gorm.DB, error) {
-	deadline, cancel := context.WithTimeout(ctx, chunkSynchronizationTimeout)
-	defer cancel()
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	var lastErr error
-	for {
-		db, err := database.GetConnect(dsn)
-		if err == nil {
-			return db, nil
-		}
-		lastErr = err
-		select {
-		case <-deadline.Done():
-			return nil, fmt.Errorf("connect after PostgreSQL restart: %w", lastErr)
 		case <-ticker.C:
 		}
 	}
@@ -306,10 +284,20 @@ func startRestartablePostgres(
 				Mounts: testcontainers.Mounts(
 					testcontainers.VolumeMount(volumeName, restartPostgresDataDirectory),
 				),
-				WaitingFor: wait.ForAll(
-					wait.ForLog(restartPostgresReadyLog),
-					wait.ForListeningPort(restartPostgresPort),
-				).WithDeadline(120 * time.Second),
+				WaitingFor: wait.ForSQL(
+					restartPostgresPort,
+					restartPostgresDriver,
+					func(host string, port network.Port) string {
+						return testutils.GetDsn(testutils.Postgres, testutils.Database{
+							Username: restartPostgresDatabase,
+							Password: restartPostgresDatabase,
+							Hostname: host,
+							DBName:   restartPostgresDatabase,
+							Type:     testutils.Postgres,
+							Port:     port.Port(),
+						})
+					},
+				).WithStartupTimeout(120 * time.Second),
 			},
 			Started: true,
 		},

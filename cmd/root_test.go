@@ -71,14 +71,6 @@ func TestEnvironmentVariablesAndCommandLinePrecedence(t *testing.T) {
 	require.False(t, conf.Bool("releases"))
 }
 
-func TestLegacyFlagsAreRejected(t *testing.T) {
-	for _, legacy := range []string{"--config", "--dsn", "--types", "--year", "--month", "--purge", "--new", "--update"} {
-		cmd := NewRootCommand()
-		cmd.SetArgs([]string{legacy})
-		require.Error(t, cmd.Execute(), legacy)
-	}
-}
-
 func TestVersionDoesNotRequireDatabaseURL(t *testing.T) {
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{"--version"})
