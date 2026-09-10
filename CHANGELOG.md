@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.12](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.11...v2.3.12) (2026-09-10)
+
+
+### Documentation
+
+* align operational guidance with the current import contract ([4d31cb7](https://github.com/dsub-io/go-open-discogs-batch/commit/4d31cb7be6dbbc42fe0568f9b04f57eb4b977eac))
+
 ## [2.3.11](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.10...v2.3.11) (2026-08-14)
 
 
