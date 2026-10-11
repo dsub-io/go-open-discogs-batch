@@ -24,6 +24,13 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn(condition + " && 'metadata' || 'verification'", self.ci)
         self.assertIn(condition + " && 'PR metadata'", self.ci)
 
+    def test_metadata_edits_do_not_start_the_required_ci_workflow(self):
+        self.assertNotIn("      - edited\n", self.ci)
+        contribution = (WORKFLOWS / "contributions.yml").read_text()
+        self.assertIn("github.event.changes.base", contribution)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", contribution)
+        self.assertIn('gh workflow run ci.yml --repo "$GH_REPO" --ref "$PR_HEAD_REF"', contribution)
+
     def test_every_application_step_is_gated(self):
         lightweight = {"Classify changes", "Test CI routing",
                        "Validate workflows and release metadata"}

@@ -14,16 +14,17 @@ the full project.
 | Canonical schema, including Markdown under `schema/contracts/` | Full application verification |
 | Mixed documentation and application changes | Full application verification |
 | PR title or body edit | Separate contribution workflow, where configured; no application suite |
-| PR retargeted to a different base | Classify the new diff and verify affected files |
+| PR retargeted to a different base | Full CI is dispatched for the current branch in the same repository |
 
 Classification uses changed paths, not commit prefixes. A `docs:` or `ci:`
 commit that changes application code still runs application checks. Files not
 recognized as prose or CI metadata also run application checks.
 
-Title and body edits use a separate concurrency group and a `PR metadata`
-check name. They cannot cancel or replace the required application check. The separate
-contribution workflow rechecks Conventional Commits without cancelling or
-replacing the application check.
+Title and body edits run only the contribution workflow. They do not create a
+new CI check suite that hides the required `Verify` check. Retargeting a PR
+within this repository dispatches full CI on its current branch. Retargeted
+fork PRs must update their branch against the new base before merging so a
+fresh source event runs verification.
 
 The workflow starts even for documentation-only PRs, so its check can finish
 successfully without leaving a required check pending. Renames and deletions

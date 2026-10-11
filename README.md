@@ -7,13 +7,19 @@ Use this importer with [Go OpenDiscogs API](https://github.com/dsub-io/go-open-d
 for new deployments.
 
 This release consumes canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.4.0.
-Go and Java therefore apply the same migration bytes and import contracts. This
-is an independent project and is not endorsed by Discogs.
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v1.0.0.
+The model now maintains Go packages, SQL migrations, and import contracts. Its
+[v1 migration guide](https://github.com/dsub-io/open-discogs-model/blob/v1.0.0/docs/migration-to-v1.md)
+describes the Java publication retirement; the SQL bytes and Go APIs are unchanged.
+This is an independent project and is not endorsed by Discogs.
+
+The [Java Batch repository](https://github.com/dsub-io/open-discogs-batch) is
+deprecated and archived. Existing deployments should follow its
+[Go migration guide](https://github.com/dsub-io/open-discogs-batch/blob/main/docs/migration-to-go.md).
 
 > [!CAUTION]
-> Stop all importers before applying model v0.4.0. Upgrade each importer you
-> intend to keep using before resuming imports; an older artifact rejects a
+> Stop all importers before applying missing canonical migrations. Upgrade each
+> importer you intend to keep using before resuming imports; an older artifact rejects a
 > database whose canonical migration ledger is newer than its bundled model.
 
 - [Import safety and recovery](docs/import-safety.md)
@@ -79,7 +85,7 @@ the importer never creates the database.
 | Existing schema | `USAGE` and `CREATE` on the schema, table writes, and migration DDL authority |
 | Restricted batch role | A DBA prepares the schema, extension, and grants first |
 
-Model v0.4.0 migrations are the only schema source of truth. Migration V007
+Model v1.0.0 migrations are the only schema source of truth. Migration V007
 uses `CREATE EXTENSION IF NOT EXISTS pg_trgm`; allow the migration role to
 install this trusted extension or have a DBA pre-install it in a stable schema
 visible to the migration role. Catalog tables are still created only in the
@@ -162,7 +168,7 @@ Mount writable storage only when downloads must survive container replacement.
 
 ## Development
 
-Source builds require Go 1.26. Integration tests label every owned Docker
+Source builds require Go 1.27.2. Integration tests label every owned Docker
 resource with a per-run identity and use tmpfs for PostgreSQL. In-process
 cleanup and CI's always-run teardown remove only those containers, networks,
 and volumes, then verify that residue is zero. Persistent test volumes and bind

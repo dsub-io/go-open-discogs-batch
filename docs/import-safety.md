@@ -2,8 +2,7 @@
 
 This is the operational contract for dump discovery, admission, commits,
 recovery, and reader visibility. The schema contract is canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v0.4.0,
-shared with the Java importer.
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v1.0.0. It retains the compatibility contracts used by historical Java imports.
 
 > [!CAUTION]
 > Stop all importers before a canonical schema upgrade. Verify the complete
@@ -97,7 +96,7 @@ Its clear and assign statements commit together. If it fails, committed chunks
 and their ledger remain resumable, the Release entity stays incomplete, and a
 retry skips those chunks and reruns finalization.
 
-The model v0.3.1 import contract is part of resume and success compatibility.
+The import contract introduced in model v0.3.1 is part of resume and success compatibility.
 An older successful Release contract cannot suppress the corrected Release
 import semantics published by that model.
 
