@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.13](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.12...v2.3.13) (2026-10-11)
+
+
+### Bug Fixes
+
+* **deps:** adopt Go model v1 and refresh maintained dependencies ([31168bd](https://github.com/dsub-io/go-open-discogs-batch/commit/31168bdc9069e1d4ad206dc54830e4d593137047))
+
 ## [2.3.12](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.11...v2.3.12) (2026-09-10)
 
 
