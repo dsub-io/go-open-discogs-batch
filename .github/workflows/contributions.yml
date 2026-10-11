@@ -66,3 +66,19 @@ jobs:
           done < <(git log --no-merges --format=%s "$range")
 
           exit "$failed"
+
+  recheck-base:
+    name: Recheck changed base
+    if: github.event.action == 'edited' && github.event.changes.base && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch CI for the current PR branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: gh workflow run ci.yml --repo "$GH_REPO" --ref "$PR_HEAD_REF"
