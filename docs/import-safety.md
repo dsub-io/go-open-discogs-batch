@@ -2,7 +2,8 @@
 
 This is the operational contract for dump discovery, admission, commits,
 recovery, and reader visibility. The schema contract is canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v1.0.0. It retains the compatibility contracts used by historical Java imports.
+[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v1.0.0. It retains the compatibility
+contracts used by historical Java imports.
 
 > [!CAUTION]
 > Stop all importers before a canonical schema upgrade. Verify the complete
@@ -101,7 +102,7 @@ An older successful Release contract cannot suppress the corrected Release
 import semantics published by that model.
 
 Missing supported relations are deleted, mutable values are updated, and
-unchanged rows retain their surrogate IDs. Exact relation duplicates collapse
+root resource IDs remain unchanged. Relation rows use canonical natural keys. Exact relation duplicates collapse
 by canonical PostgreSQL conflict keys; conflicting payloads for one key fail
 before SQL instead of applying first- or last-write-wins. Root rows are
 upserted, but roots absent from the complete dump are not deleted.
