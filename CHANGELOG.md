@@ -2,10 +2,15 @@
 
 ## [2.3.13](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.12...v2.3.13) (2026-10-11)
 
+### Changes
 
-### Bug Fixes
+- Adopt [OpenDiscogs model v1.0.0](https://github.com/dsub-io/open-discogs-model/releases/tag/v1.0.0). Canonical SQL, Go model APIs, and import contract revisions are unchanged; no new migration is added.
+- Use Go 1.27.2 for source and container builds, including its standard-library security fixes.
+- Update pgx to 5.11.0, Moby API/client to 1.56.1/0.6.2, Testcontainers to 0.44.0, Logrus to 1.10.2, the PostgreSQL GORM driver to 1.6.3, and OpenTelemetry to 1.47.0. Refresh the remaining module and workflow dependencies.
+- Keep title and body edits outside the required CI check suite and rerun full CI when a same-repository PR changes base.
 
-* **deps:** adopt Go model v1 and refresh maintained dependencies ([31168bd](https://github.com/dsub-io/go-open-discogs-batch/commit/31168bdc9069e1d4ad206dc54830e4d593137047))
+The Java Batch is deprecated and archived. Existing Java deployments should use
+its [Go migration guide](https://github.com/dsub-io/open-discogs-batch/blob/main/docs/migration-to-go.md).
 
 ## [2.3.12](https://github.com/dsub-io/go-open-discogs-batch/compare/v2.3.11...v2.3.12) (2026-09-10)
 
