@@ -2,7 +2,7 @@ package batch
 
 import (
 	"context"
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/echovisionlab/go-open-discogs-batch/src/reader"
 	"github.com/stretchr/testify/require"
 	"os"
 	"testing"

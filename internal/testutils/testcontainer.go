@@ -32,10 +32,10 @@ const (
 	postgresPort          = "5432/tcp"
 	postgresUsername      = "postgres"
 	postgresWaitLog       = `database system is ready to accept connections`
-	testOwnerLabelKey     = "io.dsub.test-owner"
+	testOwnerLabelKey     = "io.echovisionlab.test-owner"
 	testOwnerLabelValue   = "go-open-discogs-batch"
 	testRunIDEnv          = "OPEN_DISCOGS_TEST_RUN_ID"
-	testRunIDLabelKey     = "io.dsub.test-run"
+	testRunIDLabelKey     = "io.echovisionlab.test-run"
 	testRunIDLocalPrefix  = "local"
 	testRunIDMaxLength    = 128
 	postgresDataDirectory = "/var/lib/postgresql"

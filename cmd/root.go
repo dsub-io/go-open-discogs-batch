@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/batch"
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
+	"github.com/echovisionlab/go-open-discogs-batch/src/batch"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/posflag"

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/dsub-io/go-open-discogs-batch/internal/progress"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/progress"
 	"io"
 	"os"
 	"sync"

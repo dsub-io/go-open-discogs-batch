@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/client"
-	"github.com/dsub-io/go-open-discogs-batch/src/file"
-	"github.com/dsub-io/go-open-discogs-batch/src/helper"
-	"github.com/dsub-io/go-open-discogs-batch/src/xmlparser"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/src/client"
+	"github.com/echovisionlab/go-open-discogs-batch/src/file"
+	"github.com/echovisionlab/go-open-discogs-batch/src/helper"
+	"github.com/echovisionlab/go-open-discogs-batch/src/xmlparser"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 	"github.com/knadh/koanf"
 	"github.com/reactivex/rxgo/v2"
 )

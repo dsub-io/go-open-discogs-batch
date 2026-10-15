@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/echovisionlab/go-open-discogs-batch/src/reader"
 )
 
 func newReadCloser(filepath string, progressBarText string) (io.ReadCloser, error) {

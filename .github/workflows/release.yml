@@ -112,7 +112,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      IMAGE_REPOSITORY: ghcr.io/dsub-io/go-open-discogs-batch
+      IMAGE_REPOSITORY: ghcr.io/echovisionlab/go-open-discogs-batch
       OPEN_DISCOGS_TEST_RUN_ID: gh-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
       TESTCONTAINERS_RYUK_DISABLED: "true"
     permissions:
@@ -252,9 +252,9 @@ jobs:
           build-args: |
             VERSION=${{ needs.release-please.outputs.version }}
           tags: |
-            ghcr.io/dsub-io/go-open-discogs-batch:${{ needs.release-please.outputs.version }}
+            ghcr.io/echovisionlab/go-open-discogs-batch:${{ needs.release-please.outputs.version }}
           labels: |
-            org.opencontainers.image.source=https://github.com/dsub-io/go-open-discogs-batch
+            org.opencontainers.image.source=https://github.com/echovisionlab/go-open-discogs-batch
             org.opencontainers.image.revision=${{ needs.release-please.outputs.sha }}
             org.opencontainers.image.version=${{ needs.release-please.outputs.version }}
             org.opencontainers.image.licenses=MIT
@@ -263,12 +263,12 @@ jobs:
         shell: bash
         env:
           EXPECTED_IMAGE_LICENSES: MIT
-          EXPECTED_IMAGE_SOURCE: https://github.com/dsub-io/go-open-discogs-batch
+          EXPECTED_IMAGE_SOURCE: https://github.com/echovisionlab/go-open-discogs-batch
           EXPECTED_IMAGE_USER: 65532:65532
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
           RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
-          VERSIONED_IMAGE: ghcr.io/dsub-io/go-open-discogs-batch:${{ needs.release-please.outputs.version }}
+          VERSIONED_IMAGE: ghcr.io/echovisionlab/go-open-discogs-batch:${{ needs.release-please.outputs.version }}
         run: |
           set -euo pipefail
           if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then

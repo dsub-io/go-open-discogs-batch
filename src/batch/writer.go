@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/src/cache"
+	"github.com/echovisionlab/go-open-discogs-batch/src/result"
+	"github.com/echovisionlab/open-discogs-model/model"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

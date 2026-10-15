@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"strings"

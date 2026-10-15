@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/open-discogs-model/model"
 	"github.com/stretchr/testify/require"
 )
 

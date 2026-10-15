@@ -3,7 +3,7 @@ package reader
 import (
 	"compress/gzip"
 	"errors"
-	"github.com/dsub-io/go-open-discogs-batch/internal/progress"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/progress"
 	"golang.org/x/term"
 	"io"
 	"os"

@@ -1,11 +1,11 @@
-module github.com/dsub-io/go-open-discogs-batch
+module github.com/echovisionlab/go-open-discogs-batch
 
 go 1.27.2
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/cavaliergopher/grab/v3 v3.0.1
-	github.com/dsub-io/open-discogs-model v1.0.0
+	github.com/echovisionlab/open-discogs-model v1.0.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf v1.5.0
 	github.com/moby/moby/api v1.56.1

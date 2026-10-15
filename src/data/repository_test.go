@@ -2,9 +2,9 @@ package data
 
 import (
 	"errors"
-	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/testutils"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"

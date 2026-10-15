@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dsub-io/go-open-discogs-batch/internal/testserver"
-	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
-	"github.com/dsub-io/go-open-discogs-batch/src/data"
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/testserver"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/testutils"
+	"github.com/echovisionlab/go-open-discogs-batch/src/data"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
+	"github.com/echovisionlab/go-open-discogs-batch/src/result"
 	"github.com/knadh/koanf"
 	"github.com/stretchr/testify/require"
 )

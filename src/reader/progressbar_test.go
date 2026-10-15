@@ -3,7 +3,7 @@ package reader
 import (
 	"bytes"
 	"errors"
-	"github.com/dsub-io/go-open-discogs-batch/internal/progress"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/progress"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"io"

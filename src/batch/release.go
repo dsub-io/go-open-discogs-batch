@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/src/result"
+	"github.com/echovisionlab/open-discogs-model/model"
 	"gorm.io/gorm"
 )
 

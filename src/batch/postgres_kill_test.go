@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/testutils"
+	"github.com/echovisionlab/go-open-discogs-batch/src/cache"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
+	"github.com/echovisionlab/go-open-discogs-batch/src/result"
+	"github.com/echovisionlab/open-discogs-model/model"
 	"github.com/knadh/koanf"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
@@ -29,11 +29,11 @@ const (
 	restartPostgresDatabase      = "test_db"
 	restartPostgresPort          = "5432/tcp"
 	restartPostgresDriver        = "pgx"
-	restartPostgresResourceLabel = "io.dsub.test-resource"
+	restartPostgresResourceLabel = "io.echovisionlab.test-resource"
 	restartPostgresResourceValue = "postgres-forced-restart"
-	restartPostgresOwnerLabel    = "io.dsub.test-owner"
+	restartPostgresOwnerLabel    = "io.echovisionlab.test-owner"
 	restartPostgresOwnerValue    = "go-open-discogs-batch"
-	restartPostgresRunLabel      = "io.dsub.test-run"
+	restartPostgresRunLabel      = "io.echovisionlab.test-run"
 )
 
 func TestReleaseResumesAfterPostgresIsKilledAndRestarted(t *testing.T) {

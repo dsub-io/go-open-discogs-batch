@@ -5,7 +5,7 @@ import (
 	"io/fs"
 	"sort"
 
-	opendiscogsschema "github.com/dsub-io/open-discogs-model/schema"
+	opendiscogsschema "github.com/echovisionlab/open-discogs-model/schema"
 	"gorm.io/gorm"
 )
 

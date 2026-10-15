@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
 	containerapi "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"

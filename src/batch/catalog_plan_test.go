@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/data"
+	"github.com/echovisionlab/go-open-discogs-batch/src/data"
 	"github.com/knadh/koanf"
 	"github.com/stretchr/testify/require"
 )

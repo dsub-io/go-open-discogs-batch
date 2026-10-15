@@ -23,7 +23,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/dsub-io/go-open-discogs-batch/cmd"
+	"github.com/echovisionlab/go-open-discogs-batch/cmd"
 	"os"
 )
 

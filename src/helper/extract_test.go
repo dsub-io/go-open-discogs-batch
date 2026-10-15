@@ -1,7 +1,7 @@
 package helper
 
 import (
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/open-discogs-model/model"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

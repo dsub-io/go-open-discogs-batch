@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/open-discogs-model/model"
 	"gorm.io/gorm/clause"
 )
 

@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/echovisionlab/go-open-discogs-batch/src/cache"
+	"github.com/echovisionlab/go-open-discogs-batch/src/reader"
 	"github.com/stretchr/testify/require"
 )
 

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	opendiscogsmanifest "github.com/dsub-io/open-discogs-model/manifest"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	opendiscogsmanifest "github.com/echovisionlab/open-discogs-model/manifest"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 )
 
 const (

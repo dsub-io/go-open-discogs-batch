@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 )
 
 type Data struct {

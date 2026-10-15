@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	opendiscogsmanifest "github.com/dsub-io/open-discogs-model/manifest"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	opendiscogsmanifest "github.com/echovisionlab/open-discogs-model/manifest"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
