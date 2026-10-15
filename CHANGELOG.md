@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.14](https://github.com/echovisionlab/go-open-discogs-batch/compare/v2.3.13...v2.3.14) (2026-10-15)
+
+
+### Bug Fixes
+
+* publish as github.com/echovisionlab/go-open-discogs-batch ([#97](https://github.com/echovisionlab/go-open-discogs-batch/issues/97)) ([2e4cc88](https://github.com/echovisionlab/go-open-discogs-batch/commit/2e4cc88b34caffc65960429208599e2d2d7aa12b))
+
 ## [2.3.13](https://github.com/echovisionlab/go-open-discogs-batch/compare/v2.3.12...v2.3.13) (2026-10-11)
 
 ### Changes
