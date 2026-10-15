@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/helper"
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/echovisionlab/go-open-discogs-batch/src/helper"
+	"github.com/echovisionlab/go-open-discogs-batch/src/reader"
+	"github.com/echovisionlab/go-open-discogs-batch/src/result"
 )
 
 type relationChunkWriter[T any] func(Order, ChunkMetadata, []*T) result.Result

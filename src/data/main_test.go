@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/testutils"
 )
 
 func TestMain(m *testing.M) {

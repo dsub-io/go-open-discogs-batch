@@ -21,7 +21,7 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X github.com/dsub-io/go-open-discogs-batch/cmd.version={{.Version}}
+        -X github.com/echovisionlab/go-open-discogs-batch/cmd.version={{.Version}}
 
 archives:
   - formats:
@@ -58,7 +58,7 @@ changelog:
 nfpms:
   - maintainer: state303 <state303@dsub.io>
     description: Import OpenDiscogs data dumps into PostgreSQL.
-    homepage: https://github.com/dsub-io/go-open-discogs-batch
+    homepage: https://github.com/echovisionlab/go-open-discogs-batch
     license: MIT
     formats:
       - deb

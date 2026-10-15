@@ -20,7 +20,7 @@ change against the source. Apply these principles to conversation replies too.
 
 ## Project direction
 
-Recommend `dsub-io/go-open-discogs-api` and `dsub-io/go-open-discogs-batch`
+Recommend `echovisionlab/go-open-discogs-api` and `echovisionlab/go-open-discogs-batch`
 for new deployments. Java and historical schema documentation must clearly
 identify their role. Canonical migrations live in `open-discogs-model`.
 

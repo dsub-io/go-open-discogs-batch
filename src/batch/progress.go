@@ -3,7 +3,7 @@ package batch
 import (
 	"fmt"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
+	"github.com/echovisionlab/go-open-discogs-batch/src/result"
 	"gorm.io/gorm"
 )
 

@@ -9,11 +9,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/data"
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
-	fileutil "github.com/dsub-io/go-open-discogs-batch/src/file"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/src/cache"
+	"github.com/echovisionlab/go-open-discogs-batch/src/data"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
+	fileutil "github.com/echovisionlab/go-open-discogs-batch/src/file"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 	"github.com/knadh/koanf"
 	"gorm.io/gorm"
 )

@@ -2,7 +2,7 @@
 
 This is the operational contract for dump discovery, admission, commits,
 recovery, and reader visibility. The schema contract is canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v1.0.0. It retains the compatibility
+[`open-discogs-model`](https://github.com/echovisionlab/open-discogs-model) v1.0.0. It retains the compatibility
 contracts used by historical Java imports.
 
 > [!CAUTION]

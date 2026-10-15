@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/reader"
+	"github.com/echovisionlab/go-open-discogs-batch/src/reader"
 )
 
 const releaseAuditPathEnvironment = "OPEN_DISCOGS_RELEASE_DUMP"

@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
-	"github.com/dsub-io/go-open-discogs-batch/internal/test/resource"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/test/resource"
 	"github.com/reactivex/rxgo/v2"
 	"github.com/stretchr/testify/assert"
 	"io"

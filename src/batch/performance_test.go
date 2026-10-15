@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
-	fileutil "github.com/dsub-io/go-open-discogs-batch/src/file"
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/testutils"
+	"github.com/echovisionlab/go-open-discogs-batch/src/cache"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
+	fileutil "github.com/echovisionlab/go-open-discogs-batch/src/file"
+	"github.com/echovisionlab/open-discogs-model/model"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )

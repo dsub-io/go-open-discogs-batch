@@ -2,7 +2,7 @@ package reader
 
 import (
 	"context"
-	"github.com/dsub-io/go-open-discogs-batch/src/xmlparser"
+	"github.com/echovisionlab/go-open-discogs-batch/src/xmlparser"
 	"github.com/reactivex/rxgo/v2"
 	"io"
 )

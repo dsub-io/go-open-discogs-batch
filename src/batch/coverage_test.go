@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/result"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/src/cache"
+	"github.com/echovisionlab/go-open-discogs-batch/src/result"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 	"github.com/reactivex/rxgo/v2"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"

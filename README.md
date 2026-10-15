@@ -3,19 +3,19 @@
 Stream Discogs monthly public data dumps into PostgreSQL with bounded memory,
 durable progress, and idempotent recovery.
 
-Use this importer with [Go OpenDiscogs API](https://github.com/dsub-io/go-open-discogs-api)
+Use this importer with [Go OpenDiscogs API](https://github.com/echovisionlab/go-open-discogs-api)
 for new deployments.
 
 This release consumes canonical
-[`open-discogs-model`](https://github.com/dsub-io/open-discogs-model) v1.0.0.
+[`open-discogs-model`](https://github.com/echovisionlab/open-discogs-model) v1.0.0.
 The model now maintains Go packages, SQL migrations, and import contracts. Its
-[v1 migration guide](https://github.com/dsub-io/open-discogs-model/blob/v1.0.0/docs/migration-to-v1.md)
+[v1 migration guide](https://github.com/echovisionlab/open-discogs-model/blob/v1.0.0/docs/migration-to-v1.md)
 describes the Java publication retirement; the SQL bytes and Go APIs are unchanged.
 This is an independent project and is not endorsed by Discogs.
 
-The [Java Batch repository](https://github.com/dsub-io/open-discogs-batch) is
+The [Java Batch repository](https://github.com/echovisionlab/open-discogs-batch) is
 deprecated and archived. Existing deployments should follow its
-[Go migration guide](https://github.com/dsub-io/open-discogs-batch/blob/main/docs/migration-to-go.md).
+[Go migration guide](https://github.com/echovisionlab/open-discogs-batch/blob/main/docs/migration-to-go.md).
 
 > [!CAUTION]
 > Stop all importers before applying missing canonical migrations. Upgrade each
@@ -24,7 +24,7 @@ deprecated and archived. Existing deployments should follow its
 
 - [Import safety and recovery](docs/import-safety.md)
 - [Performance measurements](docs/performance.md)
-- [Releases](https://github.com/dsub-io/go-open-discogs-batch/releases)
+- [Releases](https://github.com/echovisionlab/go-open-discogs-batch/releases)
 
 ## Quick start
 
@@ -161,7 +161,7 @@ docker run --rm --cpus=4 \
   -e OPEN_DISCOGS_BATCH_DATA_DIR=/data \
   -e OPEN_DISCOGS_BATCH_MAX_WORKERS=4 \
   -v open-discogs-data:/data \
-  ghcr.io/dsub-io/go-open-discogs-batch:latest
+  ghcr.io/echovisionlab/go-open-discogs-batch:latest
 ```
 
 Mount writable storage only when downloads must survive container replacement.

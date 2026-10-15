@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly owner_label_key='io.dsub.test-owner'
+readonly owner_label_key='io.echovisionlab.test-owner'
 readonly owner_label_value='go-open-discogs-batch'
-readonly run_label_key='io.dsub.test-run'
+readonly run_label_key='io.echovisionlab.test-run'
 readonly run_id_env='OPEN_DISCOGS_TEST_RUN_ID'
 readonly run_id_max_length=128
 
@@ -47,17 +47,17 @@ inspect_labels() {
   case "$resource_type" in
     container)
       docker container inspect --format \
-        '{{ index .Config.Labels "io.dsub.test-owner" }}|{{ index .Config.Labels "io.dsub.test-run" }}' \
+        '{{ index .Config.Labels "io.echovisionlab.test-owner" }}|{{ index .Config.Labels "io.echovisionlab.test-run" }}' \
         "$resource_id"
       ;;
     network)
       docker network inspect --format \
-        '{{ index .Labels "io.dsub.test-owner" }}|{{ index .Labels "io.dsub.test-run" }}' \
+        '{{ index .Labels "io.echovisionlab.test-owner" }}|{{ index .Labels "io.echovisionlab.test-run" }}' \
         "$resource_id"
       ;;
     volume)
       docker volume inspect --format \
-        '{{ index .Labels "io.dsub.test-owner" }}|{{ index .Labels "io.dsub.test-run" }}' \
+        '{{ index .Labels "io.echovisionlab.test-owner" }}|{{ index .Labels "io.echovisionlab.test-run" }}' \
         "$resource_id"
       ;;
     *)

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/relationidentity"
-	"github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/src/relationidentity"
+	"github.com/echovisionlab/open-discogs-model/model"
 )
 
 const (

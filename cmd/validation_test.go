@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
 	"github.com/knadh/koanf"
 	"github.com/stretchr/testify/require"
 )

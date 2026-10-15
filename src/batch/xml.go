@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsub-io/go-open-discogs-batch/src/cache"
-	"github.com/dsub-io/go-open-discogs-batch/src/dateparser"
-	"github.com/dsub-io/go-open-discogs-batch/src/helper"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
+	"github.com/echovisionlab/go-open-discogs-batch/src/cache"
+	"github.com/echovisionlab/go-open-discogs-batch/src/dateparser"
+	"github.com/echovisionlab/go-open-discogs-batch/src/helper"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
 )
 
 const (

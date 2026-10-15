@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/dsub-io/go-open-discogs-batch/src/database"
-	opendiscogsmodel "github.com/dsub-io/open-discogs-model/model"
-	opendiscogsschema "github.com/dsub-io/open-discogs-model/schema"
+	"github.com/echovisionlab/go-open-discogs-batch/src/database"
+	opendiscogsmodel "github.com/echovisionlab/open-discogs-model/model"
+	opendiscogsschema "github.com/echovisionlab/open-discogs-model/schema"
 	"github.com/stretchr/testify/require"
 )
 

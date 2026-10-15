@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dsub-io/go-open-discogs-batch/internal/testutils"
+	"github.com/echovisionlab/go-open-discogs-batch/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
 )
